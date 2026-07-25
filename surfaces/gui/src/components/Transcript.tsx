@@ -176,7 +176,7 @@ function StepRow({ tool, approval }: { tool: ToolItem; approval?: ApprovalItem }
           <span
             className="text-[10.5px] px-1.5 rounded-full bg-tealSoft text-tealInk shrink-0"
             data-testid="tool-standing-rule"
-            title={t("transcript.step.auto_allowed_tip", { rule: tool.standingRule })}
+            title={t("transcript.step.auto_allowed_tip", { name: tool.standingRule })}
           >
             {t("transcript.step.auto_allowed")}
           </span>

@@ -232,9 +232,11 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
             <div key={c.id} className={CARD + " p-3.5"}>
               <div className="text-[13.5px] font-medium">{c.name}</div>
               <div className="text-[12px] text-muted mt-0.5 mb-2">{c.description}</div>
-              <div className="text-[12px] text-ink">{t("personas.tools_label")} {c.tools.join(", ") || "—"}</div>
               <div className="text-[12px] text-ink">
-                {t("personas.risk_label")} {c.risk.join(", ") || "read"}
+                {t("personas.tools_label", { tools: c.tools.join(", ") || "—" })}
+              </div>
+              <div className="text-[12px] text-ink">
+                {t("personas.risk_label", { risk: c.risk.join(", ") || "read" })}
                 {c.connectors ? ` · ${t("personas.connectors_tag")}` : ""}
                 {c.messaging ? ` · ${t("personas.messaging_tag")}` : ""}
                 {c.mcp.length ? ` · ${t("personas.mcp_tag")}: ${c.mcp.join(", ")}` : ""}

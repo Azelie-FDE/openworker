@@ -758,7 +758,7 @@ export function ConnectorTools({ c, onChanged }: { c: Connector; onChanged: () =
             <span className="min-w-0">
               <span className="block text-[13px]">{tool.label}</span>
               <span className="block text-[11.5px] text-faint">
-                {tool.name} · {tool.kind} · {t("manage.tool_asks_approval")}
+                {t("manage.tool_asks_approval", { name: tool.name, kind: tool.kind })}
               </span>
               <span className="block text-[11.5px] text-faint">{tool.description}</span>
             </span>

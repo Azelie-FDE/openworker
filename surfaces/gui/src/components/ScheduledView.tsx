@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import {
   createAutomation,
   deleteAutomation,
@@ -155,7 +155,10 @@ export function ScheduledView({ onOpenRun, onRunNow, initialOpenId }: Props) {
       {empty ? (
         !showForm && (
           <div className={CARD + " p-4 text-[12.5px] text-muted"}>
-            {t("automations.empty_state")}
+            <Trans
+              i18nKey="automations.empty_state"
+              components={{ strong: <strong /> }}
+            />
           </div>
         )
       ) : (
