@@ -132,6 +132,20 @@ def _poll_output(reg, task_id, *, until_status=None, deadline=10.0):
             if until_status is None and not acc:
                 time.sleep(0.1)
                 continue
+            if until_status is not None:
+                # Output reads are incremental and the status can flip to its
+                # terminal value on the same tick that the final output chunk is
+                # still being drained into the task buffer. Keep reading until a
+                # read yields nothing new (bounded), so the tail is captured
+                # deterministically instead of racing the status update.
+                drain_end = time.monotonic() + 2.0
+                while time.monotonic() < drain_end:
+                    extra = reg.execute("shell_task_output", {"task_id": task_id})
+                    if not extra["output"]:
+                        break
+                    acc += extra["output"]
+                    res = extra
+                    time.sleep(0.02)
             return acc, res
         time.sleep(0.1)
     return acc, res
