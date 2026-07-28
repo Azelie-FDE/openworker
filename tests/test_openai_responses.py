@@ -556,3 +556,29 @@ def test_ensure_client_without_key_raises(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="No model API key"):
         OpenAIResponsesProvider()._ensure_client()
+
+
+# -- registry routing ----------------------------------------------------------------
+
+
+def test_registry_routes_blank_endpoint_to_responses():
+    from coworker.providers import OpenAIProvider
+    from coworker.providers.registry import build_provider_client
+
+    assert isinstance(
+        build_provider_client("openai", {}, None), OpenAIResponsesProvider
+    )
+    assert isinstance(
+        build_provider_client("openai", {"base_url": "   "}, None),
+        OpenAIResponsesProvider,
+    )
+    # A custom endpoint (Azure, vLLM, any compat gateway) keeps Chat Completions…
+    custom = build_provider_client(
+        "openai", {"base_url": "https://my.azure.example/openai/v1"}, None
+    )
+    assert isinstance(custom, OpenAIProvider)
+    # …and so do Ollama and every compat vendor (their own descriptors).
+    assert isinstance(build_provider_client("ollama", {}, None), OpenAIProvider)
+    assert isinstance(
+        build_provider_client("deepseek", {"api_key": "sk-x"}, None), OpenAIProvider
+    )
