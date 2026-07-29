@@ -723,27 +723,26 @@ class SessionManager:
         async def ask(
             args: dict[str, Any], tool_call_id: Optional[str] = None
         ) -> dict[str, Any]:
-            question = str(args.get("question", "")).strip()
-            if not question:
+            from ..tools.ask import answer_result, question_item_fields
+
+            fields = question_item_fields(args)
+            if fields is None:
                 return {"answer": "", "error": "no question"}
             inbox_name = self.inbox_routing.route_for(session_id, agent)
             item = self.inbox.add_question(
                 session_id,
-                title=question,
                 inbox=inbox_name,
-                options=list(args.get("options") or []),
-                allow_text=bool(args.get("allow_text", True)),
-                multi=bool(args.get("multi", False)),
                 tool_call_id=tool_call_id,
+                **fields,
             )
             if (
                 item.state != "pending"
             ):  # durable resume re-raised an already-answered prompt
-                return {"answer": item.resolution or ""}
+                return answer_result(item.questions, item.resolution)
             self.persist_session(session_id)  # the pending tool call is now on disk
             await self.mirror_inbox_item(item)
             answer = await self.inbox.wait(item.id)
-            return {"answer": answer}
+            return answer_result(item.questions, answer)
 
         return ask
 
