@@ -20,7 +20,7 @@ function ClampedUserText({ text }: { text: string }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="block mt-1.5 text-[12.5px] font-medium underline underline-offset-2 opacity-75 hover:opacity-100"
+        className="block ml-auto mt-1.5 text-[12.5px] font-medium opacity-75 hover:opacity-100"
       >
         {open ? "less…" : "more…"}
       </button>
