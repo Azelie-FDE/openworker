@@ -165,6 +165,9 @@ export function App() {
   // {full model id → context window in tokens} from the curated matrix (verified only);
   // drives the composer usage chip's context-fill meter.
   const [modelContextWindows, setModelContextWindows] = useState<Record<string, number>>({});
+  // Settings: show the composer's context-window fill bar. OFF by default (owner ask),
+  // so an older backend without the field also shows the session total.
+  const [contextBar, setContextBar] = useState(false);
   // Per-session token usage (OPE-42): rebuilt from the transcript on session load,
   // accumulated live from assistant_message events, reset with the transcript.
   const [usage, setUsage] = useState<SessionUsage>(emptyUsage());
@@ -506,6 +509,7 @@ export function App() {
         setModels(s.models || []);
         setModelLabels(s.model_labels || {});
         setModelContextWindows(s.model_context_windows || {});
+        setContextBar(s.context_bar === true);
         setModelReady(s.model_ready);
         if (s.surfaces) setSurfaces(s.surfaces);
       })
@@ -1587,6 +1591,7 @@ export function App() {
               resetKey={sessionId}
               usage={usage}
               contextWindow={modelContextWindows[model]}
+              contextBar={contextBar}
               placeholder={
                 agent === "code"
                   ? "Ask the coder to build, fix, or explain…  (drop or paste files)"

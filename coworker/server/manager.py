@@ -1250,32 +1250,40 @@ class SessionManager:
             ".doc",
             ".docm",
         }
-        for path in root.rglob("*"):
-            try:
-                rel = path.relative_to(root)
-                if any(
-                    part.startswith(".")
-                    or part in {"node_modules", "target", "dist", "__pycache__"}
-                    for part in rel.parts
-                ):
+        # os.walk with in-place pruning, NOT rglob: rglob descends first and filters after,
+        # so a home-directory workspace walked into ~/Library and tripped the macOS App Data
+        # TCC prompt ("OpenWorker would like to access data from other apps") on every turn.
+        # Pruning here means those directories are never entered at all.
+        from ..tools.search import OS_DATA_DIRS
+
+        skip = {"node_modules", "target", "dist", "__pycache__"} | OS_DATA_DIRS
+        for dirpath, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in skip]
+            for name in files:
+                if name.startswith("."):
                     continue
-                if not path.is_file() or path.suffix.lower() not in suffixes:
+                path = Path(dirpath) / name
+                if path.suffix.lower() not in suffixes:
                     continue
-                st = path.stat()
-                out.append(
-                    {
-                        "path": str(rel),
-                        # Absolute path for "Copy path" — the relative one is useless outside
-                        # the app (tester catch 2026-07-12: it copied just the filename).
-                        "abs_path": str(path),
-                        "name": path.name,
-                        "kind": _artifact_kind(path),
-                        "size": st.st_size,
-                        "modified_at": st.st_mtime,
-                    }
-                )
-            except OSError:
-                continue
+                try:
+                    st = path.stat()
+                    if not path.is_file():
+                        continue
+                    out.append(
+                        {
+                            "path": str(path.relative_to(root)),
+                            # Absolute path for "Copy path" — the relative one is useless
+                            # outside the app (tester catch 2026-07-12: it copied just the
+                            # filename).
+                            "abs_path": str(path),
+                            "name": path.name,
+                            "kind": _artifact_kind(path),
+                            "size": st.st_size,
+                            "modified_at": st.st_mtime,
+                        }
+                    )
+                except OSError:
+                    continue
         out.sort(key=lambda a: a["modified_at"], reverse=True)
         return out[:80]
 
@@ -1805,6 +1813,7 @@ class SessionManager:
             "surfaces": self._surfaces(),
             "nav_layout": self._nav_layout(),
             "sessions_peek": self.sessions_peek(),
+            "context_bar": self.context_bar(),
             "scratch_base": self._prefs.get("scratch_base")
             or self.DEFAULT_SCRATCH_BASE,
             # Real on-disk secrets location, so the UI shows the OS-native path instead of a
@@ -1863,6 +1872,16 @@ class SessionManager:
             return {"ok": False, "error": "sessions_peek must be a number"}
         self._save_prefs()
         return {"ok": True, "sessions_peek": self.sessions_peek()}
+
+    def context_bar(self) -> bool:
+        """Whether the composer shows the context-window fill bar. OFF by default (owner
+        ask): the chip then states the session total, and the popover keeps both numbers."""
+        return bool(self._prefs.get("context_bar", False))
+
+    def set_context_bar(self, shown: Any) -> dict[str, Any]:
+        self._prefs["context_bar"] = bool(shown)
+        self._save_prefs()
+        return {"ok": True, "context_bar": self.context_bar()}
 
     # -- PDF attachments / token savings (owner ask, 2026-07-17) ----------------
     DEFAULT_PDF_MAX_PAGES = 20
