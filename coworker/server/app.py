@@ -1603,15 +1603,17 @@ def create_app(manager: SessionManager) -> FastAPI:
 
         async def question_asker(args: dict, tool_call_id=None) -> dict:
             # ask_user (engine does NOT emit the event — we do, only when attended).
+            from ..tools.ask import answer_result, question_item_fields
+
+            fields = question_item_fields(args)
+            if fields is None:  # engine guards too; belt-and-braces
+                return {"answer": "", "error": "no question"}
             item = manager.inbox.add_question(
                 session_id,
-                str(args.get("question", "")),
                 inbox=_route(),
                 visibility=_visibility(),
-                options=list(args.get("options") or []),
-                allow_text=bool(args.get("allow_text", True)),
-                multi=bool(args.get("multi", False)),
                 tool_call_id=tool_call_id,
+                **fields,
             )
             if item.state == "pending":
                 manager.persist_session(session_id)
@@ -1626,11 +1628,12 @@ def create_app(manager: SessionManager) -> FastAPI:
                                 "options": item.options,
                                 "allow_text": item.allow_text,
                                 "multi": item.multi,
-                                "header": str(args.get("header", "")),
+                                "header": item.header,
+                                "questions": item.questions,
                             },
                         }
                     )
-            return {"answer": await manager.inbox.wait(item.id)}
+            return answer_result(item.questions, await manager.inbox.wait(item.id))
 
         async def directory_requester(args: dict, tool_call_id=None) -> dict:
             # The engine has already emitted DIRECTORY_REQUESTED. Park, await, then apply the grant.

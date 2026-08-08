@@ -695,6 +695,8 @@ export function App() {
               options: d.options || [],
               allow_text: d.allow_text !== false,
               multi: !!d.multi,
+              header: d.header || "",
+              questions: d.questions || [],
             },
           ]);
           break;
@@ -1645,6 +1647,8 @@ export function App() {
                       options: pendingQuestion.options,
                       allow_text: pendingQuestion.allow_text,
                       multi: pendingQuestion.multi,
+                      header: pendingQuestion.header,
+                      questions: pendingQuestion.questions,
                     }}
                     onResolve={(_id, answer) => answerQuestion(answer)}
                     compact
