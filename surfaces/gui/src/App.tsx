@@ -168,6 +168,9 @@ export function App() {
   // {full model id → context window in tokens} from the curated matrix (verified only);
   // drives the composer usage chip's context-fill meter.
   const [modelContextWindows, setModelContextWindows] = useState<Record<string, number>>({});
+  // Settings: show the composer's context-window fill bar. OFF by default (owner ask),
+  // so an older backend without the field also shows the session total.
+  const [contextBar, setContextBar] = useState(false);
   // Per-session token usage (OPE-42): rebuilt from the transcript on session load,
   // accumulated live from assistant_message events, reset with the transcript.
   const [usage, setUsage] = useState<SessionUsage>(emptyUsage());
@@ -175,6 +178,10 @@ export function App() {
   const [mode, setMode] = useState("interactive");
   const [connected, setConnected] = useState(false);
   const [running, setRunning] = useState(false);
+  // Transient "Compacting context…" indicator (OPE-27): set by the `compacting` event,
+  // cleared by whatever the engine emits next — the summarizer call is otherwise a
+  // multi-second silent stall mid-turn.
+  const [compacting, setCompacting] = useState(false);
   const [items, setItems] = useState<Item[]>([]);
   const [streaming, setStreamingState] = useState("");
   // Ref mirror of `streaming`: the WS handler closure is built once per socket and can't read
@@ -207,10 +214,12 @@ export function App() {
   const [scheduledOpenId, setScheduledOpenId] = useState<string | null>(null);
   const [gateCreate, setGateCreate] = useState(false);
   // Which Settings section the full-page Settings surface opens on (§ Settings-as-page).
-  const [settingsTab, setSettingsTab] = useState<"appearance" | "models" | "voice" | "memory" | "personas">(
-    "appearance",
-  );
-  const openSettings = (tab: "appearance" | "models" | "voice" | "memory" | "personas" = "appearance") => {
+  const [settingsTab, setSettingsTab] = useState<
+    "appearance" | "models" | "skills" | "voice" | "memory" | "personas"
+  >("appearance");
+  const openSettings = (
+    tab: "appearance" | "models" | "skills" | "voice" | "memory" | "personas" = "appearance",
+  ) => {
     setSettingsTab(tab);
     setSurface("settings");
   };
@@ -505,6 +514,7 @@ export function App() {
         setModels(s.models || []);
         setModelLabels(s.model_labels || {});
         setModelContextWindows(s.model_context_windows || {});
+        setContextBar(s.context_bar === true);
         setModelReady(s.model_ready);
         if (s.surfaces) setSurfaces(s.surfaces);
       })
@@ -579,6 +589,9 @@ export function App() {
           },
         ]);
       };
+      // Any engine event after `compacting` means the summarizer finished (compacted /
+      // silent no-op / failure prompt) — the transient must never outlive it.
+      if (ev.type !== "compacting") setCompacting(false);
       switch (ev.type) {
         case "ready":
           setConnected(true);
@@ -605,11 +618,14 @@ export function App() {
                 : [...p, { kind: "connector", source: src }];
             });
           } else if (typeof d.input === "string" && d.input) {
+            // `display` (force-run) is the user's literal "/name …" line; the framed
+            // `input` is model-facing. Surface/dedupe on what the user actually sees.
+            const shown = (typeof d.display === "string" && d.display) || (d.input as string);
             setItems((p) => {
               const last = p[p.length - 1];
-              return last && last.kind === "user" && last.text === d.input
+              return last && last.kind === "user" && last.text === shown
                 ? p
-                : [...p, { kind: "user", text: d.input as string, ts: Date.now() / 1000 }];
+                : [...p, { kind: "user", text: shown, ts: Date.now() / 1000 }];
             });
           }
           break;
@@ -682,6 +698,8 @@ export function App() {
               options: d.options || [],
               allow_text: d.allow_text !== false,
               multi: !!d.multi,
+              header: d.header || "",
+              questions: d.questions || [],
             },
           ]);
           break;
@@ -729,6 +747,14 @@ export function App() {
             },
           ]);
           announceMemoryChanged(); // Settings ▸ Memory, if open, is now stale
+          break;
+        case "compacting":
+          setCompacting(true);
+          break;
+        case "compacted":
+          // Auto-compaction marker (OPE-27): outbound-only — the transcript stays intact,
+          // this divider just shows where the model's memory was summarized.
+          setItems((p) => [...p, { kind: "notice", tone: "info", text: d.text || "Context compacted" }]);
           break;
         case "interrupted":
           flushPartialStream();
@@ -863,10 +889,13 @@ export function App() {
     return () => clearInterval(t);
   }, [surface, sessionId, browserRefreshKey, markUnattended]);
 
-  const send = (text: string, attachments?: Attachment[]) => {
-    setItems((p) => [...p, { kind: "user", text, attachments, ts: Date.now() / 1000 }]);
+  const send = (text: string, attachments?: Attachment[], skill?: string) => {
+    // Force-run shows exactly what the user typed: "/name rest". Must match the server's
+    // `display` sidecar formula so the turn_start dedupe recognizes the local echo.
+    const shown = skill ? `/${skill}${text ? ` ${text}` : ""}` : text;
+    setItems((p) => [...p, { kind: "user", text: shown, attachments, ts: Date.now() / 1000 }]);
     // The visible model rides along with the message (single source of truth per turn).
-    sessionRef.current?.userMessage(text, attachments, model);
+    sessionRef.current?.userMessage(text, attachments, model, skill);
     followLatest(); // sending always re-engages stream-following, wherever the user had scrolled
   };
   // Resolving a LIVE prompt also resolves its parked Inbox mirror server-side, but the polled
@@ -1363,6 +1392,17 @@ export function App() {
           key={settingsTab}
           initialTab={settingsTab}
           onOpenPersona={(id) => openPersona(id, "settings")}
+          onCreateSkill={(description) => {
+            // The Skills doorway (SKILLS-SPEC §5.2): creation is a conversation. Fresh
+            // session, description in the composer — the user reads and hits send. With
+            // no description, the prefill invites them to finish the sentence there.
+            startNewSession();
+            prefillComposer(
+              description
+                ? `Build a new skill for me: ${description}`
+                : "Build a new skill for me: (describe what the skill should do)",
+            );
+          }}
         />
       ) : surface === "audit" ? (
         <AuditView />
@@ -1548,7 +1588,11 @@ export function App() {
                       <ThinkingBlock text={reasoningStream} live />
                     </div>
                   )}
+                  {/* Compaction runs between provider turns (nothing streams during it), so
+                      the transient takes over the waiting slot with a specific label. */}
+                  {running && compacting && <WaitingForAgent label="Compacting context…" />}
                   {running &&
+                    !compacting &&
                     !reasoningStream &&
                     (!streaming || streamMode(streaming, items, running) === "hold") &&
                     !lastItemIsAssistant(items) && <WaitingForAgent />}
@@ -1595,6 +1639,7 @@ export function App() {
               onInterrupt={interrupt}
               onModeChange={changeMode}
               onModelChange={changeModel}
+              sessionId={sessionId}
               workspace={needsWorkspace(agent) ? workspace || "" : undefined}
               unattended={unattended}
               onUnattendedChange={agent !== "chat" ? toggleUnattended : undefined}
@@ -1602,6 +1647,7 @@ export function App() {
               resetKey={sessionId}
               usage={usage}
               contextWindow={modelContextWindows[model]}
+              contextBar={contextBar}
               placeholder={
                 agent === "code"
                   ? "Ask the coder to build, fix, or explain…  (drop or paste files)"
@@ -1635,6 +1681,8 @@ export function App() {
                       options: pendingQuestion.options,
                       allow_text: pendingQuestion.allow_text,
                       multi: pendingQuestion.multi,
+                      header: pendingQuestion.header,
+                      questions: pendingQuestion.questions,
                     }}
                     onResolve={(_id, answer) => answerQuestion(answer)}
                     compact
@@ -1714,12 +1762,12 @@ function lastItemIsAssistant(items: Item[]): boolean {
   return false;
 }
 
-function WaitingForAgent() {
+function WaitingForAgent({ label }: { label?: string }) {
   return (
     <div className="waiting-transcript">
       <div className="waiting-row" aria-live="polite">
         <span className="waiting-spinner" />
-        <span>Waiting for agent...</span>
+        <span>{label || "Waiting for agent..."}</span>
       </div>
     </div>
   );
