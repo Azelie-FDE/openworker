@@ -31,6 +31,7 @@ class ApprovalOutcome(str, Enum):
     ONCE = "once"
     ALWAYS_TOOL = "always_tool"
     ALWAYS_COMMAND = "always_command"
+    ALWAYS_DOMAIN = "always_domain"
     DENY = "deny"
 
 
@@ -744,6 +745,10 @@ class TurnEngine:
                 elif outcome is ApprovalOutcome.ALWAYS_COMMAND:
                     self.permissions.allow_command_for_session(
                         str(tool_call.arguments.get("command", ""))
+                    )
+                elif outcome is ApprovalOutcome.ALWAYS_DOMAIN:
+                    self.permissions.allow_domain_for_session(
+                        str(tool_call.arguments.get("url", ""))
                     )
                 allowed, reason = True, "approved by user"
                 self._audit(

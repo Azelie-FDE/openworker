@@ -38,6 +38,10 @@ class Config:
     # In "custom" permission mode, these tools are auto-approved (e.g. file edits)
     # while everything else still asks.
     auto_allow: list[str] = field(default_factory=list)
+    # Egress destinations `web_fetch` may reach WITHOUT an approval prompt (exact host or
+    # subdomain). Empty by default — the first fetch to any host asks. A power-user opt-in,
+    # like `allowed_commands`; user-global only, so a repo can't widen the agent's network reach.
+    allowed_domains: list[str] = field(default_factory=list)
     host: str = "127.0.0.1"
     port: int = 8765
     # Web search provider: "duckduckgo" (keyless default) | "tavily" | "brave" (need a key).
@@ -67,6 +71,7 @@ _FIELDS = {
     "max_iterations",
     "allowed_commands",
     "auto_allow",
+    "allowed_domains",
     "host",
     "port",
     "web_search_provider",
@@ -79,8 +84,9 @@ _FIELDS = {
 
 # These fields change what consequential actions can run without a prompt, so the normal
 # workspace override pass never applies them. `allowed_commands` is added separately only
-# for a canonically trusted workspace; `auto_allow` remains user-global only.
-_GLOBAL_ONLY_FIELDS = {"allowed_commands", "auto_allow"}
+# for a canonically trusted workspace; `auto_allow` and `allowed_domains` remain user-global
+# only (a repo must not be able to widen the agent's command or network reach).
+_GLOBAL_ONLY_FIELDS = {"allowed_commands", "auto_allow", "allowed_domains"}
 _WORKSPACE_FIELDS = _FIELDS - _GLOBAL_ONLY_FIELDS
 
 

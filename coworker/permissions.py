@@ -8,11 +8,13 @@ prefixes) and a session allowlist. The engine only *decides*; the turn engine ro
 
 from __future__ import annotations
 
+import re
 import shlex
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 # Shell metacharacters that turn one "allowlisted" command into several. Any of these in a
 # command disqualifies it from allowlist auto-run — approval is required instead. Covers
@@ -23,6 +25,53 @@ _SHELL_OPERATORS = (";", "&", "|", ">", "<", "`", "$(", "(", "\n", "\r")
 
 def _has_shell_operators(command: str) -> bool:
     return any(op in command for op in _SHELL_OPERATORS)
+
+
+def _host_of(url_or_domain: str) -> str:
+    """The lowercased host of a URL, or a bare domain as-is. `''` when there's nothing
+    usable. Accepts both `https://docs.python.org/x` and `docs.python.org`."""
+    s = (url_or_domain or "").strip().lower()
+    if not s:
+        return ""
+    if "://" in s:
+        return urlsplit(s).hostname or ""
+    return urlsplit("//" + s).hostname or s
+
+
+# The argument that names a write tool's target path, when it's a single top-level field.
+# Patch/diff tools carry their paths inside the blob instead — extracted in `write_paths`.
+_PATH_ARG: dict[str, str] = {"write_file": "path", "replace_in_file": "path"}
+# apply_patch (Codex format) file headers, and unified-diff `+++ b/<path>` headers.
+_APPLY_PATCH_FILE = re.compile(
+    r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE
+)
+_APPLY_PATCH_MOVE = re.compile(r"^\*\*\* Move to: (.+)$", re.MULTILINE)
+_UNIFIED_DIFF_FILE = re.compile(r"^\+\+\+ (?:b/)?(.+?)\s*$", re.MULTILINE)
+
+
+def write_paths(tool_name: str, arguments: dict[str, Any]) -> tuple[list[str], bool]:
+    """Every filesystem path a write tool would touch, for root scoping.
+
+    Returns ``(paths, located)``. ``located`` is False when the path can't be determined
+    (an unknown write tool, or a patch/diff blob with no parseable file header) — the caller
+    must then fail closed rather than skip scoping, so an unscoped write can't slip through
+    auto/custom mode.
+    """
+    arg = _PATH_ARG.get(tool_name)
+    if arg is not None:
+        value = arguments.get(arg)
+        return ([str(value)], True) if value else ([], False)
+    if tool_name == "apply_patch":
+        blob = str(arguments.get("patch", ""))
+        paths = _APPLY_PATCH_FILE.findall(blob) + _APPLY_PATCH_MOVE.findall(blob)
+        return ([p.strip() for p in paths], bool(paths))
+    if tool_name == "apply_unified_diff":
+        blob = str(arguments.get("diff", ""))
+        paths = [p for p in _UNIFIED_DIFF_FILE.findall(blob) if p and p != "/dev/null"]
+        return (paths, bool(paths))
+    # Unknown write tool (e.g. one promoted to write via a user override): we cannot locate
+    # its path, so it cannot be auto-scoped.
+    return ([], False)
 
 from .risk import (  # re-exported for back-compat (manager.py imports WRITE_TOOLS)
     SHELL_TOOL,
@@ -88,6 +137,11 @@ class PermissionEngine:
     auto_allow_tools: set[str] = field(default_factory=set)
     session_allow_tools: set[str] = field(default_factory=set)
     session_allow_commands: set[str] = field(default_factory=set)
+    # Egress domains that auto-run without a prompt: `allowed_domains` from user config, plus
+    # `session_allow_domains` minted by "Always allow this domain". Matched by exact host or
+    # subdomain suffix (see `_domain_allowed`).
+    allowed_domains: list[str] = field(default_factory=list)
+    session_allow_domains: set[str] = field(default_factory=set)
     # Task-scoped standing rules (§25): {tool: {allowed targets}}, seeded from the owning
     # ScheduledTask's target-shaped entries. Kept by reference and re-read every check, so a
     # rule minted mid-run ("Allow every time") applies to the run's next call too.
@@ -125,6 +179,7 @@ class PermissionEngine:
         risk = classify(tool_name, metadata, self.risk_overrides)
         is_write = risk is RiskClass.WRITE_LOCAL
         is_shell = risk is RiskClass.EXEC
+        is_egress = risk is RiskClass.EGRESS
         consequential = is_consequential(risk)
 
         # Discuss / plan modes: read-only.
@@ -133,11 +188,22 @@ class PermissionEngine:
                 False, f"{self.mode.value} mode is read-only", needs_user=False
             )
 
-        # Path scoping for writes that name a path (all modes): must land in a writable root.
+        # Path scoping for writes (all modes): every path the write touches must land in a
+        # writable root. A write whose path can't be located is not scoped-able, so it fails
+        # closed to approval rather than slipping through auto/custom unscoped.
         if is_write:
-            path = arguments.get("path")
-            if path is not None and not self._under_writable_root(path):
-                return Decision(False, f"path is not in a writable directory: {path}")
+            paths, located = write_paths(tool_name, arguments)
+            if not located:
+                return Decision(
+                    False,
+                    "cannot determine the write path to scope",
+                    needs_user=True,
+                )
+            for path in paths:
+                if not self._under_writable_root(path):
+                    return Decision(
+                        False, f"path is not in a writable directory: {path}"
+                    )
 
         # Non-consequential tools always run.
         if not consequential:
@@ -154,6 +220,10 @@ class PermissionEngine:
                 return Decision(True, "command on allowlist")
             if command and command in self.session_allow_commands:
                 return Decision(True, "command allowed for session")
+        if is_egress:
+            url = str(arguments.get("url", ""))
+            if self._domain_allowed(url):
+                return Decision(True, "domain on allowlist")
         if tool_name in self.session_allow_tools and not is_connector:
             return Decision(True, "tool allowed for session")
 
@@ -185,6 +255,12 @@ class PermissionEngine:
         if command:
             self.session_allow_commands.add(command)
 
+    def allow_domain_for_session(self, url_or_domain: str) -> None:
+        """Remember an egress destination for this session ("Always allow this domain")."""
+        host = _host_of(url_or_domain)
+        if host:
+            self.session_allow_domains.add(host)
+
     # -- helpers ----------------------------------------------------------------
     def _candidate(self, path: str) -> Path:
         # Relative paths resolve against the primary (workspace_root); absolute/`~` taken as-is.
@@ -211,6 +287,20 @@ class PermissionEngine:
                 return True
             except ValueError:
                 continue
+        return False
+
+    def _domain_allowed(self, url: str) -> bool:
+        """True when the URL's host is an allowed egress destination — an exact match or a
+        subdomain of an allowed domain (so `docs.python.org` matches `python.org`, but
+        `evil-python.org` never matches `python.org`)."""
+        host = _host_of(url)
+        if not host:
+            return False
+        allowed = {d for d in (_host_of(x) for x in self.allowed_domains) if d}
+        allowed |= self.session_allow_domains
+        for dom in allowed:
+            if host == dom or host.endswith("." + dom):
+                return True
         return False
 
     def _command_allowed(self, command: str) -> bool:
