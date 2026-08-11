@@ -50,6 +50,10 @@ class PersonaEntry:
     default_surfaced: bool = (
         True  # whether it shows in the picker before any user choice
     )
+    # Whether it ships enabled before any user choice. Builtins default on (UX-029: the
+    # composer picker is their front door) — except retired ones (Chat: Coworker covers
+    # quick Q&A). Installed third-party personas always start disabled pending consent.
+    default_enabled: bool = True
     _builder: Optional[Callable[[], Agent]] = None
     manifest: Optional[PersonaManifest] = None
 
@@ -101,6 +105,7 @@ class PersonaRegistry:
         tools,
         workspace="deliverable",
         default_surfaced=True,
+        default_enabled=True,
     ) -> None:
         self._entries[id] = PersonaEntry(
             id=id,
@@ -113,13 +118,14 @@ class PersonaRegistry:
             workspace=workspace,
             tools=list(tools),
             default_surfaced=default_surfaced,
+            default_enabled=default_enabled,
             _builder=builder,
         )
 
     def _load_builtin(self, builtin_dir: Optional[str | Path]) -> None:
         # Core surfaces keep their exact prompts via the existing builders. Cowork (the default)
-        # leads; Chat is hidden from the picker by default (Cowork covers quick Q&A) — recoverable
-        # from the Personas tab.
+        # leads; Chat is RETIRED (owner call 2026-08-11: Coworker covers quick Q&A) — it ships
+        # disabled and unsurfaced, recoverable from Settings ▸ Coworkers.
         self._register_builder(
             "cowork",
             "OpenWorker",
@@ -153,6 +159,7 @@ class PersonaRegistry:
             [],
             workspace="none",
             default_surfaced=False,
+            default_enabled=False,
         )
         # Markdown-backed built-ins (Ops, …) — dogfood the manifest path.
         d = Path(builtin_dir) if builtin_dir else Path(__file__).parent / "builtin"
@@ -219,15 +226,16 @@ class PersonaRegistry:
         return self._entries.get(persona_id)
 
     def is_enabled(self, persona_id: str) -> bool:
-        # Explicit state (either way) always wins. Absent a user choice, BUILT-IN personas
-        # ship enabled — the composer picker is their front door (UX-029, supersedes the
-        # 2026-07-09 Coworker-only default that fit the old hidden ▾ menu). Installed
-        # third-party personas stay disabled until the user consents from the risk screen.
+        # Explicit state (either way) always wins. Absent a user choice, the entry's
+        # default applies: builtins ship enabled — the composer picker is their front door
+        # (UX-029, supersedes the 2026-07-09 Coworker-only default that fit the old hidden
+        # ▾ menu) — except retired ones (Chat). Installed third-party personas stay
+        # disabled until the user consents from the risk screen.
         if persona_id in self._enabled:
             return bool(self._enabled[persona_id])
         entry = self._entries.get(persona_id)
         if entry is not None and entry.builtin:
-            return True
+            return entry.default_enabled
         return persona_id == self._default or persona_id == DEFAULT_PERSONA_ID
 
     def is_surfaced(self, persona_id: str) -> bool:

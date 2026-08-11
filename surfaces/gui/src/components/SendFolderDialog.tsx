@@ -90,7 +90,7 @@ export function SendFolderDialog({ coworkerName, onPick, onTemp, onCancel }: Pro
             }}
             disabled={busy}
           >
-            Start in a temporary folder
+            Use temporary folder
           </button>
         </div>
         {error && <div className="mt-2 text-[11.5px] text-warnInk">{error}</div>}

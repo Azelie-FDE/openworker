@@ -34,13 +34,15 @@ def test_sidebar_defaults_to_surfaced_builtins(tmp_path):
     assert "code" not in [e["name"] for e in reg.sidebar()]
 
 
-def test_chat_hidden_by_default_but_resolvable(tmp_path):
+def test_chat_retired_by_default_but_resolvable(tmp_path):
     reg = _reg(tmp_path)
-    assert reg.is_surfaced("chat") is False  # default-hidden from the grouped nav
-    assert reg.is_enabled("chat") is True  # builtins ship enabled (UX-029)
+    # Chat is retired (owner call 2026-08-11): disabled + unsurfaced out of the box,
+    # unlike the other builtins — Coworker covers quick Q&A.
+    assert reg.is_enabled("chat") is False
+    assert reg.is_surfaced("chat") is False
     assert reg.agent("chat").name == "chat"  # live sessions keep resolving
-    # Surfacing it adds it to the sidebar picker too.
-    reg.set_surfaced("chat", True)
+    # Still recoverable from Settings ▸ Coworkers (enable implies surface).
+    reg.set_enabled("chat", True)
     assert "chat" in [e["name"] for e in reg.sidebar()]
 
 
