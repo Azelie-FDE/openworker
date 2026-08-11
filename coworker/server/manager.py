@@ -549,7 +549,14 @@ class SessionManager:
             connector_filter=self.effective_connectors(session_id, agent_name),
             # Per-session skill menu, LIVE (SKILLS-SPEC §3): a callable so load_skill sees
             # disables/new skills immediately; the catalog snapshot is taken at build.
-            skill_filter=lambda sid=session_id, w=ws: self.effective_skill_names(sid, w),
+            skill_filter=lambda sid=session_id, w=ws, a=agent_name: (
+                self.effective_skill_names(sid, w, agent=a)
+            ),
+            # Persona-carried skills (OPE-58): the bundle's skills/ dir joins the loader
+            # so its skills are readable, not just listed.
+            extra_skill_dirs=(
+                [d] if (d := self.persona_skill_scope(agent_name)[0]) is not None else None
+            ),
         )
         # An automation run rebuilt here (manual "Run now" over WS, durable resume) still
         # carries its task's standing allowances — the rules live on the task record.
@@ -617,6 +624,12 @@ class SessionManager:
     def _persona_of(self, session_id: str, persona_id: Optional[str] = None) -> str:
         if persona_id:
             return persona_id
+        # The live engine is the freshest truth — a brand-new session has no record row
+        # until its first send, but its socket already knows the persona.
+        engine = self._engines.get(session_id)
+        live = getattr(engine, "agent_name", None) if engine is not None else None
+        if live:
+            return live
         record = self.session_store.load(session_id)
         return (record.agent if record else None) or self.personas.default_id()
 
@@ -991,6 +1004,13 @@ class SessionManager:
         loop = asyncio.get_running_loop()
         effective: Optional[set[str]] = None  # computed lazily, once
         out: list[Any] = []
+        # Persona `mcp:` wiring (OPE-58 sibling stub): a persona that declares an `mcp:`
+        # list SCOPES its sessions to those servers — the consent screen already presents
+        # that list as what the persona uses, so honoring it keeps consent truthful. It
+        # only ever shrinks: the user's enabled/configured/authed gates all still apply,
+        # and a persona with no list changes nothing. Connector-backed servers keep their
+        # own per-persona connector gating instead.
+        persona_mcp = self.persona_mcp_scope(agent)
         for server in load_mcp_servers(
             ws,
             secrets=self.secrets,
@@ -1024,6 +1044,9 @@ class SessionManager:
                     for t in mcp_tool_defs(server.name)
                     if tool_enabled(self.secrets, server.name, t.name)
                 ]
+            elif persona_mcp is not None and server.name not in persona_mcp:
+                # Raw servers outside the persona's declared scope stay off its sessions.
+                continue
             try:
                 conn = await self.mcp.ensure(server)
             except Exception as exc:
@@ -2825,8 +2848,11 @@ class SessionManager:
             # Scheduled runs respect the same per-session connection hierarchy as live sessions:
             # expose only the persona's effective-enabled connectors' tools (§4.3).
             connector_filter=self.effective_connectors(session_id, task.agent),
-            skill_filter=lambda sid=session_id, w=task.workspace: (
-                self.effective_skill_names(sid, w)
+            skill_filter=lambda sid=session_id, w=task.workspace, a=task.agent: (
+                self.effective_skill_names(sid, w, agent=a)
+            ),
+            extra_skill_dirs=(
+                [d] if (d := self.persona_skill_scope(task.agent)[0]) is not None else None
             ),
         )
         self._seed_task_permissions(engine, task)
@@ -3927,17 +3953,56 @@ class SessionManager:
             return {"ok": False, "error": str(exc)}
         return {"ok": True}
 
+    def persona_mcp_scope(self, persona_id: str) -> Optional[set[str]]:
+        """The persona's declared MCP-server scope (OPE-58 sibling stub): the manifest's
+        `mcp:` names, or None when it declares none (= no scoping). Only ever narrows —
+        the user's enabled/configured/authed gates apply regardless."""
+        entry = self.personas.get(persona_id)
+        names = list((entry.manifest.mcp if entry and entry.manifest else []) or [])
+        return {n for n in names if n} or None
+
+    def persona_skill_scope(
+        self, persona_id: str
+    ) -> tuple[Optional[Path], Optional[set[str]]]:
+        """The persona's own skill folder + optional allowlist (OPE-58).
+
+        A manifest-backed persona carries skills as a `skills/` dir next to its manifest —
+        the sharing bundle shape (manifest + skill folders). The manifest's `skills:` list,
+        when non-empty, narrows which of those activate. Additive on top of global/project
+        scopes: the persona SHIPS skills; it never hides the user's own."""
+        entry = self.personas.get(persona_id)
+        manifest = entry.manifest if entry else None
+        if manifest is None or not manifest.source:
+            return None, None
+        d = Path(manifest.source).parent / "skills"
+        if not d.is_dir():
+            return None, None
+        allow = {s for s in manifest.skills if s} or None
+        return d, allow
+
     def effective_skill_names(
-        self, session_id: str, workspace: Optional[str | Path] = None
+        self,
+        session_id: str,
+        workspace: Optional[str | Path] = None,
+        agent: Optional[str] = None,
     ) -> set[str]:
         """The session's skill menu (§3): merged scopes − Settings disables − session mutes.
-        The single resolver behind the engine catalog, the rail list, and the composer popup."""
+        The single resolver behind the engine catalog, the rail list, and the composer popup.
+        Persona-carried skills (OPE-58) join the merge for the session's persona — user
+        disables and mutes still win over them."""
         dirs = [self.skill_store.global_dir]
         if workspace:
             dirs.append(self.skill_store.project_dir(workspace))
         loader = SkillLoader(dirs)
+        names = set(loader.names())
+        persona_dir, allow = self.persona_skill_scope(self._persona_of(session_id, agent))
+        if persona_dir is not None:
+            persona_names = set(SkillLoader([persona_dir]).names())
+            if allow is not None:
+                persona_names &= allow
+            names |= persona_names
         return effective_skills(
-            names=set(loader.names()),
+            names=names,
             disabled=self.skill_store.disabled_names(),
             session_overrides=self.session_skills.get(session_id),
         )
@@ -3945,7 +4010,9 @@ class SessionManager:
     def session_skills_view(
         self, session_id: str, workspace: Optional[str] = None
     ) -> dict[str, Any]:
-        """The rail payload: every in-scope, Settings-enabled skill with its mute state."""
+        """The rail payload: every in-scope, Settings-enabled skill with its mute state.
+        Persona-carried skills (OPE-58) appear with scope "coworker" — mutable per session
+        like any other, but owned by the persona bundle, not the Settings store."""
         disabled = self.skill_store.disabled_names()
         overrides = self.session_skills.get(session_id)
         rows = [
@@ -3958,6 +4025,23 @@ class SessionManager:
             for r in self.skill_store.rows(workspace or None)
             if r["name"] not in disabled
         ]
+        seen = {r["name"] for r in rows}
+        persona_dir, allow = self.persona_skill_scope(self._persona_of(session_id))
+        if persona_dir is not None:
+            for entry in SkillLoader([persona_dir]).catalog():
+                name = entry["name"]
+                if name in seen or name in disabled:
+                    continue  # a global/project copy shadows the bundle's
+                if allow is not None and name not in allow:
+                    continue
+                rows.append(
+                    {
+                        "name": name,
+                        "description": entry["description"],
+                        "scope": "coworker",
+                        "enabled": overrides.get(name, True),
+                    }
+                )
         return {"skills": rows}
 
     def _scratch_workspace_error(self, workspace: Any) -> Optional[dict[str, Any]]:

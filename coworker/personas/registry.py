@@ -387,6 +387,11 @@ class PersonaRegistry:
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / "manifest.md"
         shutil.copy2(md, dest)
+        # Bundle shape (OPE-58 / sharing v1): a `skills/` dir next to the manifest travels
+        # with the snapshot, so a persona's skills stay stable independent of the source.
+        src_skills = md.parent / "skills"
+        if src_skills.is_dir():
+            shutil.copytree(src_skills, dest_dir / "skills", dirs_exist_ok=True)
         return dest
 
     def install_from_git(

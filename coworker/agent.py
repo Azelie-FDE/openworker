@@ -217,6 +217,9 @@ def build_engine(
     connector_filter: Optional[set[str]] = None,
     # A set (static snapshot) or a zero-arg callable (live, re-evaluated per load_skill).
     skill_filter: Optional[set[str] | Callable[[], set[str]]] = None,
+    # Persona-carried skill folders (OPE-58): the bundle's skills/ dir joins the loader so
+    # its skills are readable by load_skill, not just listed by the filter.
+    extra_skill_dirs: Optional[list[str | Path]] = None,
 ) -> TurnEngine:
     ws = Path(workspace).expanduser().resolve() if workspace else None
     if agent.needs_workspace and ws is None:
@@ -374,7 +377,9 @@ def build_engine(
         if block:
             instructions = f"{instructions}\n\n{block}"
 
-    skill_loader = SkillLoader(_skill_dirs(ws))
+    # Persona dirs come FIRST so a user's global/workspace copy of the same name shadows
+    # the bundle's (later dirs overwrite earlier in the loader).
+    skill_loader = SkillLoader([Path(d) for d in (extra_skill_dirs or [])] + _skill_dirs(ws))
     # Per-session effective menu (SKILLS-SPEC §3). The manager passes a CALLABLE so
     # load_skill consults the LIVE state per call (a Settings disable applies to running
     # sessions; a skill created after this build is still loadable). The catalog itself
