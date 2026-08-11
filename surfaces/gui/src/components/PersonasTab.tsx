@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   deletePersona,
+  exportPersona,
   getPersonas,
   getSessions,
   installPersona,
@@ -8,6 +9,7 @@ import {
   type Persona,
   type PersonaConsent,
 } from "../api";
+import { chooseFolder } from "../tauri";
 import type { SessionInfo } from "../types";
 import { Icon } from "./Icon";
 
@@ -27,7 +29,7 @@ const BTN_BORDERED =
 
 export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) => void }) {
   const [personas, setPersonas] = useState<Persona[]>([]);
-  const [mode, setMode] = useState<"git" | "dir">("git");
+  const [mode, setMode] = useState<"git" | "dir" | "zip">("git");
   const [src, setSrc] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -37,6 +39,14 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
   // arm an inline confirm (same two-step idiom as delete) instead of flipping immediately.
   const [confirmOff, setConfirmOff] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  // The picker's "Import coworker…" door lands here and asks us to put the Add section
+  // front and center (sharing v1).
+  const addRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const focus = () => addRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.addEventListener("ocw-focus-import", focus);
+    return () => window.removeEventListener("ocw-focus-import", focus);
+  }, []);
 
   const reload = () => getPersonas().then(setPersonas).catch(() => {});
   const reloadSessions = () => getSessions().then(setSessions).catch(() => {});
@@ -73,6 +83,36 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
     }
     if (r.personas) setPersonas(r.personas);
     else reload();
+  };
+
+  const finishInstall = (r: Awaited<ReturnType<typeof installPersona>>) => {
+    setBusy(false);
+    if (!r.ok) {
+      setMsg(r.error || "install failed");
+      return;
+    }
+    setConsent(r.consent || []);
+    if (r.personas) setPersonas(r.personas);
+    setMsg(`Installed ${(r.consent || []).length} coworker(s) — review and enable below.`);
+    setSrc("");
+  };
+
+  const installZip = async (file: File) => {
+    setBusy(true);
+    setMsg(null);
+    setConsent(null);
+    const buf = new Uint8Array(await file.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < buf.length; i += 0x8000)
+      bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    finishInstall(await installPersona({ zip_b64: btoa(bin), filename: file.name }));
+  };
+
+  const exportOne = async (p: Persona) => {
+    const dir = await chooseFolder();
+    if (!dir) return;
+    const r = await exportPersona(p.id, dir);
+    setMsg(r.ok ? `Exported to ${r.path}` : r.error || "export failed");
   };
 
   const install = async () => {
@@ -150,6 +190,16 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
                 <Icon name="sliders" size={15} />
               </button>
             )}
+            {!p.builtin && (
+              <button
+                className={BTN_BORDERED}
+                title="Export this coworker as a shareable bundle"
+                data-testid={`persona-export-${p.id}`}
+                onClick={() => void exportOne(p)}
+              >
+                Export…
+              </button>
+            )}
             {!p.builtin &&
               (confirmDel === p.id ? (
                 <span className="flex items-center gap-1.5 shrink-0">
@@ -205,50 +255,138 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
         ))}
       </div>
 
-      <div className={SEC_H + " mb-1.5"}>Add coworkers</div>
+      <div ref={addRef} className={SEC_H + " mb-1.5"}>Add coworkers</div>
       <p className="text-[12px] text-muted mb-3 leading-relaxed">
         Load from a local directory or a public GitHub repo. Files are copied into a managed area (a
         snapshot), so the coworker stays stable even if the source changes. No code runs — a coworker only
         composes vetted tools.
       </p>
       <div className="flex items-center gap-2">
-        <select className={SELECT} value={mode} onChange={(e) => setMode(e.target.value as "git" | "dir")}>
+        <select
+          className={SELECT}
+          value={mode}
+          onChange={(e) => setMode(e.target.value as "git" | "dir" | "zip")}
+        >
           <option value="git">GitHub URL</option>
           <option value="dir">Local directory</option>
+          <option value="zip">Bundle zip</option>
         </select>
-        <input
-          className={INPUT}
-          placeholder={mode === "git" ? "https://github.com/acme/ops-coworker" : "/path/to/coworkers"}
-          value={src}
-          onChange={(e) => setSrc(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && install()}
-        />
-        <button className={BTN_ACCENT} disabled={busy || !src.trim()} onClick={install}>
-          {busy ? "Installing…" : "Install"}
-        </button>
+        {mode === "zip" ? (
+          <label className={BTN_BORDERED + " cursor-pointer"}>
+            {busy ? "Installing…" : "Choose a .zip bundle…"}
+            <input
+              type="file"
+              accept=".zip"
+              className="hidden"
+              data-testid="persona-zip-input"
+              disabled={busy}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void installZip(f);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        ) : (
+          <>
+            <input
+              className={INPUT}
+              placeholder={mode === "git" ? "https://github.com/acme/ops-coworker" : "/path/to/coworkers"}
+              value={src}
+              onChange={(e) => setSrc(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && install()}
+            />
+            <button className={BTN_ACCENT} disabled={busy || !src.trim()} onClick={install}>
+              {busy ? "Installing…" : "Install"}
+            </button>
+          </>
+        )}
       </div>
       {msg && <div className="text-[12.5px] text-muted mt-2.5">{msg}</div>}
 
       {consent && consent.length > 0 && (
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 space-y-2" data-testid="consent-review">
+          {/* Trust first (owner design, 2026-08-11): the source warning leads; capabilities
+              are a one-line summary with the exact tools under a collapsed chevron. A
+              coworker runs no third-party code, so this list is complete — but a prompt
+              still steers an agent, so who it came from genuinely matters. */}
+          <div className="flex items-start gap-2.5 rounded-xl border border-warnInk/30 bg-warnSoft px-3.5 py-2.5 text-[12.5px] text-warnInk">
+            <Icon name="shield" size={15} className="shrink-0 mt-0.5" />
+            <span>
+              Only enable coworkers from someone you trust. Nothing here runs third-party
+              code — but its instructions will guide the coworker's behavior.
+            </span>
+          </div>
           {consent.map((c) => (
-            <div key={c.id} className={CARD + " p-3.5"}>
-              <div className="text-[13.5px] font-medium">{c.name}</div>
-              <div className="text-[12px] text-muted mt-0.5 mb-2">{c.description}</div>
-              <div className="text-[12px] text-ink">Tools: {c.tools.join(", ") || "—"}</div>
-              <div className="text-[12px] text-ink">
-                Risk: {c.risk.join(", ") || "read"}
-                {c.connectors ? " · connectors" : ""}
-                {c.messaging ? " · messaging" : ""}
-                {c.mcp.length ? ` · mcp: ${c.mcp.join(", ")}` : ""}
-              </div>
-              <div className="text-[12px] text-faint mt-1">
-                Recommended mode: {c.recommended_mode}. Enable it above to use it.
-              </div>
+            <ConsentCard key={c.id} c={c} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// One phrase per risk class — the plain-language capability summary the consent card leads
+// with; unknown classes fall back to their raw id so nothing is silently omitted.
+const RISK_PHRASE: Record<string, string> = {
+  read: "read files",
+  write_local: "create & edit files",
+  exec: "run shell commands",
+  network: "access the network",
+  write_remote: "act on connected services",
+};
+
+function ConsentCard({ c }: { c: PersonaConsent }) {
+  const [showTools, setShowTools] = useState(false);
+  const phrases = (c.risk.length ? c.risk : ["read"]).map((r) => RISK_PHRASE[r] || r);
+  const summary = phrases.join(", ").replace(/, ([^,]*)$/, " and $1");
+  const recommends = c.recommends || [];
+  return (
+    <div className={CARD + " p-3.5"} data-testid={`consent-${c.id}`}>
+      <div className="text-[13.5px] font-medium flex items-center gap-2">
+        <span>{c.name}</span>
+        {c.version && <span className="text-[11px] text-faint font-normal">v{c.version}</span>}
+      </div>
+      {c.description && <div className="text-[12px] text-muted mt-0.5">{c.description}</div>}
+      {c.replaces && (
+        <div className="text-[12px] text-muted mt-1.5" data-testid="replaces-note">
+          Replaces {c.name}
+          {c.replaces.version ? ` v${c.replaces.version}` : ""}
+          {c.replaces.installed_at ? ` (installed ${c.replaces.installed_at})` : ""}.
+          {c.replaces.capabilities_grew
+            ? " This update asks for MORE capabilities than the copy it replaces — review below before re-enabling."
+            : " Same capabilities as before — it stays enabled."}
+        </div>
+      )}
+      <div className="text-[12.5px] text-ink mt-2">
+        Can {summary}
+        {c.connectors ? " · use your connected services" : ""}
+        {c.messaging ? " · send messages" : ""}
+        {c.mcp.length ? ` · use MCP: ${c.mcp.join(", ")}` : ""}
+        <button
+          className="ml-2 text-accent text-[12px] hover:underline"
+          data-testid="consent-tools-toggle"
+          onClick={() => setShowTools((v) => !v)}
+        >
+          {showTools ? "Hide tools" : `Exact tools (${c.tools.length})`}
+        </button>
+      </div>
+      {showTools && (
+        <div className="text-[12px] text-muted mt-1 font-mono">{c.tools.join(" · ") || "—"}</div>
+      )}
+      {recommends.length > 0 && (
+        <div className="mt-2 space-y-0.5">
+          {recommends.map((r) => (
+            <div key={r.kind + r.ref} className="text-[12px] text-muted">
+              <span className="text-ink">{r.ref}</span>
+              {r.tier === "core" ? " (recommended)" : " (optional)"} — {r.reason}
             </div>
           ))}
         </div>
       )}
+      <div className="text-[12px] text-faint mt-2">
+        Recommended mode: {c.recommended_mode}. Enable it above to use it.
+      </div>
     </div>
   );
 }

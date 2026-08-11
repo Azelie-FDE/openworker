@@ -450,6 +450,16 @@ def create_app(manager: SessionManager) -> FastAPI:
                 summaries = reg.install_from_git(str(body["git_url"]))
             elif body.get("dir"):
                 summaries = reg.install_from_dir(str(body["dir"]))
+            elif body.get("zip_b64"):
+                # Sharing v1 (OPE-7): a bundle zip — the export format — round-trips
+                # through the same dir installer + consent path.
+                try:
+                    data = base64.b64decode(str(body["zip_b64"]), validate=True)
+                except (ValueError, binascii.Error):
+                    return {"ok": False, "error": "Invalid archive encoding."}
+                summaries = reg.install_from_zip(
+                    data, str(body.get("filename", ""))
+                )
             elif body.get("gallery_slug"):
                 # Gallery install = fetch the manifest markdown from the cloud
                 # (sign-in required), verify its hash, then reuse the exact
@@ -483,11 +493,19 @@ def create_app(manager: SessionManager) -> FastAPI:
             else:
                 return {
                     "ok": False,
-                    "error": "provide a `dir`, `git_url`, or `gallery_slug`",
+                    "error": "provide a `dir`, `git_url`, `zip_b64`, or `gallery_slug`",
                 }
         except Exception as e:  # surface manifest/clone errors to the caller
             return {"ok": False, "error": str(e)}
         return {"ok": True, "consent": summaries, "personas": reg.list_all()}
+
+    @app.post("/v1/personas/{persona_id}/export")
+    def export_persona(persona_id: str, body: dict) -> dict[str, Any]:
+        # Sharing v1 (OPE-7): zip the persona's bundle into the chosen folder. The zip
+        # is the import format — send it to a teammate, they import it from the picker.
+        return manager.personas.export_persona(
+            persona_id, str((body or {}).get("dir", ""))
+        )
 
     @app.get("/v1/cloud/gallery/{slug}")
     def cloud_gallery_detail(slug: str) -> dict[str, Any]:

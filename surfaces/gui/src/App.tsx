@@ -1804,6 +1804,14 @@ export function App() {
                 onPickCoworker={pickCoworker}
                 onPickFolder={pickDraftFolder}
                 onManage={() => openSettings("personas")}
+                onImport={() => {
+                  openSettings("personas");
+                  // Give the Settings page a beat to mount, then spotlight the Add section.
+                  window.setTimeout(
+                    () => window.dispatchEvent(new CustomEvent("ocw-focus-import")),
+                    250,
+                  );
+                }}
               />
             )}
             <Composer

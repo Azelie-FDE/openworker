@@ -31,9 +31,29 @@ def consent_summary(m: PersonaManifest) -> dict:
         "messaging": m.messaging,
         "recommended_mode": m.default_permission_mode,
         "recommended_models": list(m.recommended_models),
+        # Recommended connectors/MCP with reasons + tiers — the consent screen shows
+        # these so the user knows what the coworker hopes to use (sharing v1).
+        "recommends": [
+            {"kind": r.kind, "ref": r.ref, "reason": r.reason, "tier": r.tier}
+            for r in m.recommends
+        ],
+        "version": m.version,
         "source": m.source,
         "builtin": m.builtin,
     }
+
+
+def capability_set(m: PersonaManifest) -> set[str]:
+    """The persona's capability surface as a flat comparable set — used to decide
+    whether an update GREW capabilities (which requires re-consent; a same-or-smaller
+    update keeps the user's enabled state)."""
+    caps = {f"tool:{t}" for t in m.tools}
+    caps |= {f"mcp:{s}" for s in m.mcp}
+    if m.connectors:
+        caps.add("connectors")
+    if m.messaging:
+        caps.add("messaging")
+    return caps
 
 
 def git_clone(

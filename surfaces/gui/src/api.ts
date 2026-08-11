@@ -888,6 +888,8 @@ export interface Persona {
   enabled: boolean;
   surfaced: boolean;
   default: boolean;
+  version?: string;
+  installed_at?: string;
 }
 
 export interface PersonaConsent {
@@ -901,6 +903,9 @@ export interface PersonaConsent {
   messaging: boolean;
   recommended_mode: string;
   recommended_models: string[];
+  recommends?: { kind: string; ref: string; reason: string; tier: string }[];
+  version?: string;
+  replaces?: { version: string; installed_at: string; capabilities_grew: boolean } | null;
   source: string | null;
   builtin: boolean;
 }
@@ -986,8 +991,21 @@ export async function getCloudGalleryDetail(slug: string): Promise<GalleryDetail
   return res.json();
 }
 
+/** Sharing v1 (OPE-7): zip a coworker's bundle into `dir`; the zip is the import format. */
+export async function exportPersona(
+  id: string,
+  dir: string,
+): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const res = await fetch(`${httpBase()}/v1/personas/${encodeURIComponent(id)}/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dir }),
+  });
+  return res.json();
+}
+
 export async function installPersona(
-  body: { dir?: string; git_url?: string; gallery_slug?: string },
+  body: { dir?: string; git_url?: string; gallery_slug?: string; zip_b64?: string; filename?: string },
 ): Promise<{ ok: boolean; consent?: PersonaConsent[]; personas?: Persona[]; error?: string }> {
   const res = await fetch(`${httpBase()}/v1/personas/install`, {
     method: "POST",

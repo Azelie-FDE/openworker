@@ -4,6 +4,7 @@ name: Dependency Audit Coworker
 icon: audit
 tagline: Vulnerable dependencies — audit, minimal upgrades, PRs
 family: code
+version: "1"
 tools: [code_files, git, search, shell, todo]
 connectors: true
 skills: [dependency-audit, safe-upgrade-pr]

@@ -956,9 +956,41 @@ export async function mockApi(page: import("@playwright/test").Page) {
       const b = req.postDataJSON();
       return json({ ok: true, path: b.path });
     }
+    if (/\/v1\/personas\/[^/]+\/export$/.test(p) && m === "POST") {
+      // Sharing v1: export the bundle zip into the chosen folder.
+      const id = p.split("/").slice(-2)[0];
+      const b = req.postDataJSON();
+      return json({ ok: true, path: `${b.dir}/${id}-coworker-v1.zip` });
+    }
     // must precede the /v1/personas/{id} catch-all (install matches it too)
     if (p.endsWith("/v1/personas/install") && m === "POST") {
       const b = req.postDataJSON();
+      if (b.zip_b64) {
+        // Sharing v1: a bundle zip import — consent with version + replaces + recommends.
+        const imported = {
+          id: "team-sec", name: "Team Security Coworker", icon: "shield",
+          tagline: "Our security playbook", needs_workspace: true, builtin: false,
+          family: "code", workspace: "git", tools: ["code_files", "search", "shell"],
+          enabled: false, surfaced: false, default: false, version: "2",
+        };
+        if (!personas.some((x) => x.id === "team-sec")) personas.push(imported);
+        return json({
+          ok: true,
+          personas,
+          consent: [{
+            id: "team-sec", name: "Team Security Coworker",
+            description: "Reviews code the way our team does.",
+            tools: ["code_files", "search", "shell"],
+            risk: ["read", "write_local", "exec"],
+            connectors: true, mcp: [], messaging: false,
+            recommended_mode: "interactive", recommended_models: [],
+            recommends: [{ kind: "connector", ref: "github", reason: "open fix PRs", tier: "core" }],
+            version: "2",
+            replaces: { version: "1", installed_at: "2026-08-01", capabilities_grew: true },
+            source: "/tmp/team-sec.zip", builtin: false,
+          }],
+        });
+      }
       if (b.gallery_slug) {
         return json(
           CLOUD_STATE.signed_in

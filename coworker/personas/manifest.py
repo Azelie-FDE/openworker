@@ -63,6 +63,10 @@ class PersonaManifest:
     recommended_models: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     mcp: list[str] = field(default_factory=list)
+    # Sharing v1 (OPE-7): the author's version string ("1", "1.2", "2026-08"…). Purely
+    # informational provenance — with folder/git distribution there is no authoritative
+    # update channel, so this drives the "replaces vN" note on re-install, nothing more.
+    version: str = ""
     recommends: list[Recommendation] = field(default_factory=list)
     builtin: bool = False
     source: Optional[str] = (
@@ -237,6 +241,7 @@ def parse_manifest(
         recommended_models=_strlist(meta, "recommended_models"),
         skills=_strlist(meta, "skills"),
         mcp=_strlist(meta, "mcp"),
+        version=str(meta.get("version", "") or "").strip(),
         recommends=_recommends(persona_id, meta),
         builtin=builtin,
         source=source,

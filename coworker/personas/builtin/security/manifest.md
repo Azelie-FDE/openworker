@@ -4,6 +4,7 @@ name: Security Coworker
 icon: shield
 tagline: Find and fix security issues — scan, triage, PR
 family: code
+version: "1"
 tools: [code_files, git, search, shell, todo]
 connectors: true
 skills: [semgrep-review, secret-scan, security-fix-pr]

@@ -21,6 +21,9 @@ interface Props {
   onPickCoworker: (id: string) => void;
   onPickFolder: (path: string, branch?: string | null) => void;
   onManage: () => void;
+  // Sharing v1 (OPE-7): the quick door to the import/browse screen — one row, so the
+  // picker itself never grows beyond the user's own coworkers.
+  onImport: () => void;
 }
 
 export function SessionSetupRow(props: Props) {
@@ -89,6 +92,16 @@ export function SessionSetupRow(props: Props) {
               </button>
             ))}
             <div className="border-t border-line mt-1 pt-1">
+              <button
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-paper text-[12px] text-accent"
+                data-testid="import-coworker"
+                onClick={() => {
+                  setOpenMenu(null);
+                  props.onImport();
+                }}
+              >
+                Import coworker…
+              </button>
               <button
                 className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-paper text-[12px] text-accent"
                 onClick={() => {

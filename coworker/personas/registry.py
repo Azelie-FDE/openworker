@@ -85,6 +85,9 @@ class PersonaRegistry:
         self._entries: dict[str, PersonaEntry] = {}
         self._enabled: dict[str, bool] = {}
         self._surfaced: dict[str, bool] = {}
+        # Sharing v1 (OPE-7): install provenance per installed persona —
+        # {version, source, installed_at} — drives the "replaces vN" note on re-install.
+        self._installed_meta: dict[str, dict] = {}
         self._default = DEFAULT_PERSONA_ID
         self._load_builtin(builtin_dir)
         for d in extra_dirs or []:
@@ -209,6 +212,7 @@ class PersonaRegistry:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
             self._enabled = dict(data.get("enabled", {}))
             self._surfaced = dict(data.get("surfaced", {}))
+            self._installed_meta = dict(data.get("installed_meta", {}))
             self._default = data.get("default", DEFAULT_PERSONA_ID)
 
     def save(self) -> None:
@@ -220,6 +224,7 @@ class PersonaRegistry:
                 {
                     "enabled": self._enabled,
                     "surfaced": self._surfaced,
+                    "installed_meta": self._installed_meta,
                     "default": self._default,
                 },
                 indent=2,
@@ -308,6 +313,8 @@ class PersonaRegistry:
                 "enabled": self.is_enabled(e.id),
                 "surfaced": self.is_surfaced(e.id),
                 "default": e.id == self.default_id(),
+                "version": e.manifest.version if e.manifest else "",
+                "installed_at": self._installed_meta.get(e.id, {}).get("installed_at", ""),
             }
             for e in self._entries.values()
         ]
@@ -378,14 +385,108 @@ class PersonaRegistry:
         summaries: list[dict] = []
         for md in mds:
             m = load_manifest_file(md, builtin=False)  # validate before snapshotting
+            replaces = self._replaces_of(m)
             snapshot = self._snapshot(md, m.id)
             installed = load_manifest_file(snapshot, builtin=False) if snapshot else m
             self._register_manifest(installed, builtin=False)
-            self._enabled[m.id] = False  # pending consent — never auto-enabled
-            self._surfaced[m.id] = False
-            summaries.append(consent_summary(installed))
+            # Consent rules (sharing v1): a fresh install always lands disabled pending
+            # consent. An UPDATE keeps the user's enabled state — unless its capability
+            # set GREW, which is a new decision, never a silent upgrade.
+            if replaces is None or replaces.get("capabilities_grew"):
+                self._enabled[m.id] = False
+                self._surfaced[m.id] = False
+            self._installed_meta[m.id] = {
+                "version": installed.version,
+                "source": str(md),
+                "installed_at": self._now_stamp(),
+            }
+            summary = consent_summary(installed)
+            summary["replaces"] = replaces
+            summaries.append(summary)
         self.save()
         return summaries
+
+    @staticmethod
+    def _now_stamp() -> str:
+        from datetime import date
+
+        return date.today().isoformat()
+
+    def _replaces_of(self, incoming) -> Optional[dict]:
+        """When re-installing an already-installed persona id: what the new copy
+        replaces ({version, installed_at, capabilities_grew}), else None."""
+        from .loading import capability_set
+
+        existing = self._entries.get(incoming.id)
+        if existing is None or existing.builtin or existing.manifest is None:
+            return None
+        meta = self._installed_meta.get(incoming.id, {})
+        grew = bool(capability_set(incoming) - capability_set(existing.manifest))
+        return {
+            "version": meta.get("version") or existing.manifest.version or "",
+            "installed_at": meta.get("installed_at", ""),
+            "capabilities_grew": grew,
+        }
+
+    def export_persona(self, persona_id: str, dest_dir: str | Path) -> dict:
+        """Sharing v1 export: zip the persona's bundle (manifest + skills/) into
+        ``dest_dir``. The zip's contents ARE the import format — extract or point the
+        installer at it and the round trip is lossless."""
+        import zipfile
+
+        entry = self._entries.get(persona_id)
+        if entry is None or entry.manifest is None or not entry.manifest.source:
+            return {"ok": False, "error": "this coworker has no shareable bundle"}
+        src_md = Path(entry.manifest.source)
+        if not src_md.is_file():
+            return {"ok": False, "error": "the coworker's bundle files are missing"}
+        dest = Path(dest_dir).expanduser()
+        if not dest.is_dir():
+            return {"ok": False, "error": "destination folder does not exist"}
+        version = entry.manifest.version
+        zip_name = f"{persona_id}-coworker{('-v' + version) if version else ''}.zip"
+        zip_path = dest / zip_name
+        skills_dir = src_md.parent / "skills"
+        try:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(src_md, "manifest.md")
+                if skills_dir.is_dir():
+                    for p in sorted(skills_dir.rglob("*")):
+                        if p.is_file():
+                            zf.write(p, str(Path("skills") / p.relative_to(skills_dir)))
+        except OSError as e:
+            return {"ok": False, "error": f"could not write the archive: {e}"}
+        return {"ok": True, "path": str(zip_path)}
+
+    def install_from_zip(self, data: bytes, filename: str = "") -> list[dict]:
+        """Install persona(s) from a shared bundle zip (the export format). The archive
+        is extracted to a temp dir with a zip-slip guard, then installed like a local
+        directory — landing disabled pending consent like every install."""
+        import io
+        import tempfile
+        import zipfile
+
+        with tempfile.TemporaryDirectory(prefix="ocw-persona-zip-") as tmp:
+            root = Path(tmp)
+            try:
+                with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                    for info in zf.infolist():
+                        name = info.filename
+                        target = (root / name).resolve()
+                        if not str(target).startswith(str(root.resolve())):
+                            raise FileNotFoundError(f"unsafe path in archive: {name}")
+                    zf.extractall(root)
+            except zipfile.BadZipFile as e:
+                raise FileNotFoundError(f"not a valid bundle archive: {e}") from e
+            # Accept both layouts: files at the root, or a single wrapping folder
+            # (how macOS zips a directory).
+            candidates = [root, *[p for p in root.iterdir() if p.is_dir()]]
+            for d in candidates:
+                if list(d.glob("*.md")) or (d / "manifest.md").is_file():
+                    return self.install_from_dir(d)
+            raise FileNotFoundError(
+                f"no persona manifest found in {filename or 'the archive'}"
+            )
 
     def _snapshot(self, md: Path, persona_id: str) -> Optional[Path]:
         """Copy a manifest into the managed install area; return the snapshot path (or None if no
