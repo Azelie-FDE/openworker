@@ -15,9 +15,11 @@ shell-allowlist-chained,interactive,run_shell,"{""command"": ""git status && rm 
 shell-session-command,interactive,run_shell,"{""command"": ""make build""}",,,,make build,,,,allow,exact session command grant
 shell-plan,plan,run_shell,"{""command"": ""ls""}",,,,,,,,deny,plan mode blocks shell
 shell-auto,auto,run_shell,"{""command"": ""rm -rf /""}",,,,,,,,allow,BASELINE-WRONG auto allows any command with no sandbox
-shell-find-delete,interactive,run_shell,"{""command"": ""find . -delete""}",,find,,,,,,allow,BASELINE-WRONG find prefix auto-allows a destructive form
-shell-find-exec,interactive,run_shell,"{""command"": ""find . -exec rm {} +""}",,find,,,,,,allow,BASELINE-WRONG find -exec auto-allowed via prefix
-shell-two-reads,interactive,run_shell,"{""command"": ""git status && git diff""}",,git status|git diff,,,,,,ask,BASELINE-ANNOYING two allowed reads rejected for the operator
+shell-find-delete,interactive,run_shell,"{""command"": ""find . -delete""}",,find,,,,,,ask,FIXED-PR3 -delete is never prefix-eligible
+shell-find-exec,interactive,run_shell,"{""command"": ""find . -exec rm {} +""}",,find,,,,,,ask,FIXED-PR3 -exec is never prefix-eligible
+shell-two-reads,interactive,run_shell,"{""command"": ""git status && git diff""}",,git status|git diff,,,,,,allow,FIXED-PR3 each part independently allowed
+shell-chain-unallowed,interactive,run_shell,"{""command"": ""git status && rm -rf ~""}",,git status,,,,,,ask,chaining still cannot smuggle an unallowed part
+shell-inline-interpreter,interactive,run_shell,"{""command"": ""python -c 'import os'""}",,python,,,,,,ask,FIXED-PR3 inline code is never prefix-eligible
 connector-read,interactive,gmail_list,{},read,,,,,,,allow,connector read never gates
 connector-write,interactive,gmail_send,{},external,,,,,,,ask,connector write asks
 connector-always-ignored,interactive,gmail_send,{},external,,gmail_send,,,,,ask,session tool grant deliberately ignored for connectors

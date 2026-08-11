@@ -16,15 +16,58 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
-# Shell metacharacters that turn one "allowlisted" command into several. Any of these in a
-# command disqualifies it from allowlist auto-run — approval is required instead. Covers
-# chaining (`;` `&` `&&` `||`), pipes (`|`), redirection (`>` `<`), command substitution
-# (`` ` `` `$(`), process substitution / grouping (`(`), and newlines.
-_SHELL_OPERATORS = (";", "&", "|", ">", "<", "`", "$(", "(", "\n", "\r")
+# Constructs whose *contents* we cannot evaluate, so a command carrying one is never
+# eligible for prefix auto-run: command/process substitution, redirection (writes anywhere
+# the allowlist never vetted), and variable expansion (the value was set out of view).
+_OPAQUE_CONSTRUCTS = ("`", "$(", "$", ">", "<", "(")
+
+# Separators that chain several commands into one string. Each part is checked independently
+# against the allowlist — the old behaviour rejected the whole command outright, which both
+# refused harmless `git status && git diff` and (because `-exec` needs no separator) still
+# auto-allowed `find . -exec rm {} +` under a `find` prefix.
+_SEPARATORS = ("&&", "||", ";", "|&", "|", "&", "\n", "\r")
+
+# Programs that run *another* program named in their arguments. A prefix rule on the outer
+# program can never vouch for the inner one, so these always fall through to approval.
+_ARG_EXECUTORS = {
+    "xargs", "env", "nohup", "nice", "stdbuf", "timeout", "watch", "sudo", "doas",
+    "ssh", "docker", "podman", "kubectl", "npx", "pnpx", "bunx", "uvx",
+}
+# Interpreters carrying inline code, e.g. `python -c "..."`, `node -e "..."`.
+_INLINE_CODE_FLAGS = {"-c", "-e", "--eval", "--command", "-Command", "-EncodedCommand"}
+_INTERPRETERS = {
+    "sh", "bash", "zsh", "dash", "ksh", "fish", "powershell", "pwsh", "cmd",
+    "python", "python3", "node", "deno", "bun", "ruby", "perl", "php",
+}
+# Flags that turn a search/list tool into an execution or deletion tool.
+_DANGEROUS_FLAGS = {"-exec", "-execdir", "-delete", "-ok", "-okdir", "-fprintf"}
 
 
-def _has_shell_operators(command: str) -> bool:
-    return any(op in command for op in _SHELL_OPERATORS)
+def _split_commands(command: str) -> list[str]:
+    """Split a compound command on its separators. Longest separators first so `&&` isn't
+    read as two `&`. Purely textual — quoted separators are not respected, which is
+    deliberate: over-splitting only ever produces MORE parts to justify, never fewer."""
+    parts = [command]
+    for sep in _SEPARATORS:
+        parts = [chunk for part in parts for chunk in part.split(sep)]
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _is_prefix_eligible(argv: list[str]) -> bool:
+    """False when a parsed command can never be vouched for by a prefix rule, because it
+    runs code the rule never saw: another program named in its arguments, inline source, or
+    an execution/deletion flag."""
+    if not argv:
+        return False
+    program = Path(argv[0]).name.lower()
+    program = program[:-4] if program.endswith(".exe") else program
+    if program in _ARG_EXECUTORS:
+        return False
+    if program in _INTERPRETERS and any(a in _INLINE_CODE_FLAGS for a in argv[1:]):
+        return False
+    if any(a.lower() in _DANGEROUS_FLAGS for a in argv[1:]):
+        return False
+    return True
 
 
 def protected_paths() -> list[Path]:
@@ -407,25 +450,48 @@ class PermissionEngine:
         return False
 
     def _command_allowed(self, command: str) -> bool:
-        # An allowlist entry auto-runs a command WITHOUT approval, so prefix matching is
-        # unsafe: `git status` would auto-approve `git status && rm -rf ~`. Reject anything
-        # carrying shell operators (chaining/redirection/substitution) up front, then match
-        # the parsed argv against each entry — the entry's own tokens must be an exact
-        # prefix of the command's tokens (so `git status` matches `git status -s` but never
-        # `git statusfoo` or a bare `git`).
-        if _has_shell_operators(command):
+        """True only when EVERY part of a (possibly compound) command is independently
+        covered by an allowlist entry.
+
+        An allowlist entry auto-runs without approval, and a prefix rule can only vouch for
+        the words it matched — everything after is unexamined. So this does two jobs:
+        guarantee the unexamined tail can only be arguments, then match the beginning.
+
+        - Constructs whose contents we can't evaluate (substitution, redirection, variable
+          expansion) disqualify the whole command.
+        - Compound commands are split and each part checked on its own, so
+          `git status && git diff` runs when both are allowed, while
+          `git status && rm -rf ~` does not.
+        - Parts that run code named in their arguments (`xargs`, `sh -c`, `find -exec`,
+          `-delete`) are never prefix-eligible: a `find` rule must not auto-run
+          `find . -exec rm {} +`.
+        - Matching is on parsed words, not text, so `git status` covers `git status -s` but
+          never `git statusfoo` or a bare `git`.
+        """
+        if not command.strip():
             return False
-        try:
-            argv = shlex.split(command)
-        except ValueError:
-            return False  # unbalanced quotes etc. — treat as not-allowlisted
-        if not argv:
+        if any(tok in command for tok in _OPAQUE_CONSTRUCTS):
             return False
+        parts = _split_commands(command)
+        if not parts:
+            return False
+        prefixes: list[list[str]] = []
         for allowed in self.allowed_commands:
             try:
                 prefix = shlex.split(allowed)
             except ValueError:
                 continue
-            if prefix and argv[: len(prefix)] == prefix:
-                return True
-        return False
+            if prefix:
+                prefixes.append(prefix)
+        if not prefixes:
+            return False
+        for part in parts:
+            try:
+                argv = shlex.split(part)
+            except ValueError:
+                return False  # unbalanced quotes etc. — treat as not-allowlisted
+            if not argv or not _is_prefix_eligible(argv):
+                return False
+            if not any(argv[: len(p)] == p for p in prefixes):
+                return False
+        return True
