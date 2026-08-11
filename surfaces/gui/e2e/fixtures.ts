@@ -947,6 +947,15 @@ export async function mockApi(page: import("@playwright/test").Page) {
       const b = req.postDataJSON();
       return json({ ok: true, path: b.path, git_branch: "main" });
     }
+    if (p.endsWith("/v1/workspaces/temp") && m === "POST") {
+      // UX-029: "Start in a temporary folder" — created at send time, git-ready.
+      const b = req.postDataJSON();
+      return json({ ok: true, path: `/tmp/ow-temp/${b.session_id}`, git: b.git !== false });
+    }
+    if (/\/v1\/sessions\/[^/]+\/save-as-project$/.test(p) && m === "POST") {
+      const b = req.postDataJSON();
+      return json({ ok: true, path: b.path });
+    }
     // must precede the /v1/personas/{id} catch-all (install matches it too)
     if (p.endsWith("/v1/personas/install") && m === "POST") {
       const b = req.postDataJSON();

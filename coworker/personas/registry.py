@@ -219,11 +219,15 @@ class PersonaRegistry:
         return self._entries.get(persona_id)
 
     def is_enabled(self, persona_id: str) -> bool:
-        # No user choice recorded → only the default persona ships enabled (owner call,
-        # 2026-07-09): a fresh install is Coworker-only, everything else is opt-in from
-        # Settings ▸ Personas. Explicit state (either way) always wins.
+        # Explicit state (either way) always wins. Absent a user choice, BUILT-IN personas
+        # ship enabled — the composer picker is their front door (UX-029, supersedes the
+        # 2026-07-09 Coworker-only default that fit the old hidden ▾ menu). Installed
+        # third-party personas stay disabled until the user consents from the risk screen.
         if persona_id in self._enabled:
             return bool(self._enabled[persona_id])
+        entry = self._entries.get(persona_id)
+        if entry is not None and entry.builtin:
+            return True
         return persona_id == self._default or persona_id == DEFAULT_PERSONA_ID
 
     def is_surfaced(self, persona_id: str) -> bool:

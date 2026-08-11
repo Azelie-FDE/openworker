@@ -6,12 +6,10 @@ import { expect } from "@playwright/test";
 import { test } from "./fixtures";
 
 async function openPersonas(page) {
-  // Personas is launch-flagged off by default — these suites cover the flagged-on flows.
-  await page.addInitScript(() => localStorage.setItem("ocw.flag.personas", "1"));
   await page.goto("/");
   await page.getByTestId("account-row").click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Personas", exact: true }).click();
+  await page.getByRole("button", { name: "Coworkers", exact: true }).click();
   await expect(page.getByTestId("gallery-link")).toBeVisible();
 }
 
@@ -65,9 +63,9 @@ test("signed in: featured carousel + list; solo page installs informed; Done ret
   await expect(page.getByTestId("gallery-team-teaser")).toContainText("coming soon");
 
   // Search narrows the list.
-  await page.getByPlaceholder("Search personas").fill("recruit");
+  await page.getByPlaceholder("Search coworkers").fill("recruit");
   await expect(page.getByTestId("gallery-sales")).not.toBeVisible();
-  await page.getByPlaceholder("Search personas").fill("");
+  await page.getByPlaceholder("Search coworkers").fill("");
 
   // Solo page: pitch + manifest-derived capabilities BEFORE install.
   await page.getByTestId("gallery-sales").click();

@@ -51,7 +51,7 @@ export function PersonaView({
     setError(null);
     getPersonaDetail(personaId)
       .then((d) => live && setDetail(d))
-      .catch(() => live && setError("Could not load this persona."));
+      .catch(() => live && setError("Could not load this coworker."));
     getConnectors()
       .then((list) => live && setByName(indexConnectors(list)))
       .catch(() => {});
@@ -88,7 +88,7 @@ export function PersonaView({
           <span className="text-faint">·</span>
         </>
       )}
-      <span className="text-[13px] font-semibold">Persona</span>
+      <span className="text-[13px] font-semibold">Coworker</span>
     </div>
   );
 
@@ -119,7 +119,7 @@ export function PersonaView({
             </div>
             <div className="ml-auto flex items-center gap-2">
               <span className="text-[12px] text-muted">{detail.enabled ? "Enabled" : "Disabled"}</span>
-              <Toggle checked={detail.enabled} onChange={toggleEnabled} title="Enable this persona" />
+              <Toggle checked={detail.enabled} onChange={toggleEnabled} title="Enable this coworker" />
             </div>
           </header>
 
@@ -153,7 +153,7 @@ export function PersonaView({
             <section>
               <div className={`${SEC_H} mb-1`}>Connections for full benefit</div>
               <p className="text-[12.5px] text-muted mb-2.5">
-                Declared by the persona — wire {shortPersonaName(detail.name, personaId)} into these
+                Declared by the coworker — wire {shortPersonaName(detail.name, personaId)} into these
                 to unlock its full workflow.
               </p>
               <div className="rounded-xl2 border border-line overflow-hidden">

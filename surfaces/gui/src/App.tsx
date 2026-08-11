@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import {
   announceInboxUnlock,
+  createTempWorkspace,
   finalizeAutomationRun,
   getArtifacts,
   getHealth,
@@ -21,6 +22,7 @@ import {
   deleteSession,
   renameSession,
   runAutomation,
+  saveSessionAsProject,
   setSessionFlags,
   setUnattended,
   Session,
@@ -40,13 +42,13 @@ import type {
   TodoItem,
   WsEvent,
 } from "./types";
-import { isProjectScoped } from "./personaScope";
+import { fullPersonaName, isProjectScoped } from "./personaScope";
 import { baseName } from "./paths";
 import { itemsFromMessages } from "./itemsFromMessages";
 import { addTurnUsage, emptyUsage, usageFromMessages } from "./usage";
 import { streamMode } from "./streamGate";
 import { InboxItemCard } from "./components/InboxItemCard";
-import { isTauri, platformOS, startWindowDrag } from "./tauri";
+import { chooseFolder, isTauri, platformOS, startWindowDrag } from "./tauri";
 import { Icon } from "./components/Icon";
 import { Sidebar } from "./components/Sidebar";
 import { ThinkingBlock, Transcript } from "./components/Transcript";
@@ -55,6 +57,8 @@ import { Markdown } from "./components/Markdown";
 import { SearchModal } from "./components/SearchModal";
 import { SessionIntro } from "./components/SessionIntro";
 import { FolderGate } from "./components/FolderGate";
+import { SessionSetupRow } from "./components/SessionSetupRow";
+import { SendFolderDialog } from "./components/SendFolderDialog";
 import { Onboarding } from "./components/Onboarding";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ScheduledView } from "./components/ScheduledView";
@@ -158,6 +162,20 @@ function fallbackWorkspace(current: string | null, projects: RecentWorkspace[]):
 export function App() {
   const [workspace, setWorkspace] = useState<string | null>(null);
   const [branch, setBranch] = useState<string | null>(null);
+  // UX-029: the active session runs in a temporary folder (never show its raw path —
+  // the header says "Temporary folder" and offers Save as project…). Set locally when a
+  // temp dir is created at send, corrected by every `ready` event (server truth).
+  const [tempWorkspace, setTempWorkspace] = useState(false);
+  // UX-029 send-time folder enforcement: the stashed message while the folder dialog is
+  // up. The message goes out the moment the dialog resolves; Escape restores the draft.
+  const [sendGate, setSendGate] = useState<{
+    text: string;
+    attachments?: Attachment[];
+    skill?: string;
+  } | null>(null);
+  // Bumped to force a socket rebuild on the SAME session id (Save as project… moves the
+  // folder server-side; the engine rebinds on reconnect).
+  const [connectNonce, setConnectNonce] = useState(0);
   const [showGate, setShowGate] = useState(false);
   const [workspaceTrustRequest, setWorkspaceTrustRequest] =
     useState<WorkspaceCommandTrust | null>(null);
@@ -321,7 +339,12 @@ export function App() {
   // code-family persona gates a folder like Code, and a knowledge persona starts orphan like Cowork).
   const [personas, setPersonas] = useState<Persona[] | null>(null);
   useEffect(() => {
-    getPersonas().then(setPersonas).catch(() => {});
+    const load = () => getPersonas().then(setPersonas).catch(() => {});
+    load();
+    // The composer's coworker picker is always mounted on a fresh session — refetch on
+    // mutations (enable/install from Settings) instead of going stale.
+    window.addEventListener(PERSONAS_CHANGED, load);
+    return () => window.removeEventListener(PERSONAS_CHANGED, load);
   }, []);
   const personaOf = (a: string) => personas?.find((p) => p.id === a);
 
@@ -378,8 +401,15 @@ export function App() {
 
   const sessionRef = useRef<Session | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  // A prompt to auto-send once the next session connects (used by "Run now").
-  const pendingPromptRef = useRef<string | null>(null);
+  // A message to auto-send once the next session connects — "Run now" task prompts, and
+  // UX-029's deferred first send (folder resolved at send time → reconnect → message goes).
+  const pendingPromptRef = useRef<{
+    text: string;
+    attachments?: Attachment[];
+    skill?: string;
+    model?: string;
+    notice?: string; // e.g. "Temporary folder created · git initialized", shown after the message
+  } | null>(null);
   // The in-flight manual run to finalize after its first turn ({taskId, runId, sessionId}).
   const activeRunRef = useRef<{ taskId: string; runId: string; sessionId: string } | null>(null);
 
@@ -549,15 +579,15 @@ export function App() {
     return () => window.removeEventListener(PERSONAS_CHANGED, onPersonas);
   }, [refreshSessions]);
 
-  // If the active surface isn't visible (hidden in Settings, or a resumed session landed on a
-  // hidden surface), fall back to Cowork (always visible). Watches both agent and surfaces so it
-  // corrects regardless of which settled last.
+  // If the active persona is DISABLED (turned off in Settings, or a resumed session landed
+  // on one), fall back to Cowork. This used to key on the legacy sidebar-visibility prefs
+  // (show_chat/show_code) — with the composer picker shipped (UX-029), enablement is the
+  // one visibility axis, and a deliberately picked coworker must never be reverted.
   useEffect(() => {
-    if ((agent === "chat" && !surfaces.chat) || (agent === "code" && !surfaces.code)) {
-      switchAgent("cowork");
-    }
+    const p = personaOf(agent);
+    if (p && !p.enabled) switchAgent("cowork");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agent, surfaces]);
+  }, [agent, personas]);
 
   useEffect(() => {
     if (surface === "session") rememberLastSession(agent, sessionId, workspace);
@@ -600,6 +630,8 @@ export function App() {
           if (d.command_trust?.required) setWorkspaceTrustRequest(d.command_trust);
           // Cowork: adopt the server-provisioned scratch dir (only when we don't already have one).
           if (d.workspace) setWorkspace((cur) => cur || d.workspace);
+          // UX-029: server truth on whether this session runs in a temporary folder.
+          if (typeof d.temp_workspace === "boolean") setTempWorkspace(d.temp_workspace);
           break;
         case "turn_start":
           setRunning(true);
@@ -622,7 +654,11 @@ export function App() {
             // `input` is model-facing. Surface/dedupe on what the user actually sees.
             const shown = (typeof d.display === "string" && d.display) || (d.input as string);
             setItems((p) => {
-              const last = p[p.length - 1];
+              // Look past trailing notices — the UX-029 "Temporary folder created" line
+              // sits between the local echo and this event's arrival.
+              let i = p.length - 1;
+              while (i >= 0 && p[i].kind === "notice") i--;
+              const last = p[i];
               return last && last.kind === "user" && last.text === shown
                 ? p
                 : [...p, { kind: "user", text: shown, ts: Date.now() / 1000 }];
@@ -795,12 +831,20 @@ export function App() {
       onEvent: handleEvent,
       onOpen: () => {
         setConnected(true);
-        // Auto-send the task prompt once a "Run now" session connects.
+        // Auto-send the pending message once the session connects ("Run now" prompts and
+        // UX-029's deferred first send).
         const p = pendingPromptRef.current;
         if (p) {
           pendingPromptRef.current = null;
-          setItems((prev) => [...prev, { kind: "user", text: p, ts: Date.now() / 1000 }]);
-          sessionRef.current?.userMessage(p);
+          const shown = p.skill ? `/${p.skill}${p.text ? ` ${p.text}` : ""}` : p.text;
+          setItems((prev) => [
+            ...prev,
+            { kind: "user", text: shown, attachments: p.attachments, ts: Date.now() / 1000 },
+            ...(p.notice
+              ? [{ kind: "notice", tone: "info", text: p.notice } as Item]
+              : []),
+          ]);
+          sessionRef.current?.userMessage(p.text, p.attachments, p.model, p.skill);
         }
       },
       onClose: () => setConnected(false),
@@ -815,7 +859,7 @@ export function App() {
     // first connect, dropping the user's first message (the "send twice" bug). The scratch
     // dir is deterministic from `sessionId` server-side, so skipping that reconnect is safe.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [booting, sessionId, agent, refreshSessions]);
+  }, [booting, sessionId, agent, refreshSessions, connectNonce]);
 
   // Stream-following (FB-004): auto-scroll only while the user is AT the bottom, so scrolling
   // up to read during a streaming turn sticks. `atBottomRef` is the live truth (per scroll
@@ -890,6 +934,13 @@ export function App() {
   }, [surface, sessionId, browserRefreshKey, markUnattended]);
 
   const send = (text: string, attachments?: Attachment[], skill?: string) => {
+    // UX-029: folder enforcement AT SEND. A code-family session with no folder has no
+    // socket yet (the connect effect waits) — stash the message and ask where to work;
+    // it goes out the moment the dialog resolves.
+    if (gatesWorkspace(agent) && !workspace) {
+      setSendGate({ text, attachments, skill });
+      return;
+    }
     // Force-run shows exactly what the user typed: "/name rest". Must match the server's
     // `display` sidecar formula so the turn_start dedupe recognizes the local echo.
     const shown = skill ? `/${skill}${text ? ` ${text}` : ""}` : text;
@@ -957,17 +1008,115 @@ export function App() {
     if (target !== agent) {
       setAgent(target);
       if (gatesWorkspace(target)) {
-        // Never inherit the previous persona's folder — it may be a scratch dir. Clearing it
-        // also blocks the connection effect, so nothing can chat behind the open gate.
+        // Never inherit the previous persona's folder — it may be a scratch dir. Clearing
+        // it also blocks the connection effect; the setup row's folder chip (or the
+        // send-time dialog) provides the folder — no modal gate up front (UX-029).
         setWorkspace(null);
         setBranch(null);
-        setShowGate(true);
-      } else setShowGate(false);
+      }
+      setShowGate(false);
     }
     // Knowledge family: a new conversation starts fresh (orphan) — clear the workspace so the
-    // server provisions a NEW scratch dir for the new session id. Code keeps its repo.
-    if (!gatesWorkspace(target)) setWorkspace(null);
+    // server provisions a NEW scratch dir for the new session id. Code keeps its repo — but
+    // never a TEMPORARY dir (per-conversation by definition; the next session picks anew).
+    if (!gatesWorkspace(target) || tempWorkspace) {
+      setWorkspace(null);
+      setBranch(null);
+    }
+    setTempWorkspace(false);
     setSessionId(newId());
+  };
+  // UX-029: re-target the DRAFT session (no messages yet) to another coworker. Unlike
+  // switchAgent this never resumes that coworker's last conversation — the user is
+  // composing a new one. A fresh id keeps knowledge families' per-conversation scratch
+  // dirs clean and re-triggers the connection effect.
+  const pickCoworker = (id: string) => {
+    if (id === agent) return;
+    setAgent(id);
+    setWorkspace(null);
+    setBranch(null);
+    setTempWorkspace(false);
+    setShowGate(false);
+    setSessionId(newId());
+  };
+  // UX-029: the setup row's folder chip — bind the draft to a folder before the first
+  // message. A fresh id re-triggers the connection effect with the folder attached.
+  const pickDraftFolder = (path: string, b?: string | null) => {
+    setWorkspace(path);
+    setBranch(b ?? null);
+    setTempWorkspace(false);
+    setSessionId(newId());
+    getRecentWorkspaces().then(setProjects).catch(() => {});
+  };
+  // UX-029 send-time dialog resolutions: bind the folder, park the stashed message for
+  // the reconnect's onOpen, and let it fly. The user's send already happened — no second
+  // click needed.
+  const resolveSendFolder = (path: string, b?: string | null) => {
+    const gate = sendGate;
+    if (!gate) return;
+    setSendGate(null);
+    setWorkspace(path);
+    setBranch(b ?? null);
+    setTempWorkspace(false);
+    pendingPromptRef.current = { ...gate, model };
+    setSessionId(newId());
+    getRecentWorkspaces().then(setProjects).catch(() => {});
+  };
+  const startTempAndSend = async () => {
+    const gate = sendGate;
+    if (!gate) return;
+    const sid = newId();
+    const res = await createTempWorkspace(sid, true);
+    if (!res.ok || !res.path) {
+      setSendGate(null);
+      setItems((p) => [
+        ...p,
+        { kind: "notice", tone: "warn", text: res.error || "Could not create a temporary folder." },
+      ]);
+      prefillComposer(gate.skill ? `/${gate.skill} ${gate.text}` : gate.text, gate.attachments);
+      return;
+    }
+    setSendGate(null);
+    setWorkspace(res.path);
+    setBranch(null);
+    setTempWorkspace(true);
+    pendingPromptRef.current = {
+      ...gate,
+      model,
+      notice: res.git ? "Temporary folder created · git initialized" : "Temporary folder created",
+    };
+    setSessionId(sid);
+  };
+  const cancelSendGate = () => {
+    const gate = sendGate;
+    setSendGate(null);
+    // Give the draft back — the composer cleared it when the user hit send.
+    if (gate) prefillComposer(gate.skill ? `/${gate.skill} ${gate.text}` : gate.text, gate.attachments);
+  };
+  // UX-029 "Save as project…": move the temporary folder somewhere real, then reconnect
+  // so the engine rebinds to the new path (same session id — the transcript stays).
+  const saveAsProject = async () => {
+    if (running) return;
+    const dest = await chooseFolder();
+    if (!dest) return;
+    const res = await saveSessionAsProject(sessionId, dest);
+    if (!res.ok || !res.path) {
+      setItems((p) => [
+        ...p,
+        { kind: "notice", tone: "warn", text: res.error || "Could not save as a project." },
+      ]);
+      return;
+    }
+    const newPath = res.path;
+    setWorkspace(newPath);
+    setBranch(null);
+    setTempWorkspace(false);
+    setItems((p) => [
+      ...p,
+      { kind: "notice", tone: "info", text: `Saved as a project — now working in ${baseName(newPath)}.` },
+    ]);
+    setConnectNonce((n) => n + 1);
+    refreshSessions();
   };
   // Inbox → session: the item carries its session's workspace/agent, so open it directly.
   // UX-026: 5s top-right toast when a SCHEDULED automation run starts (never for
@@ -1016,6 +1165,7 @@ export function App() {
     setStreaming("");
     setRunning(false);
     if (ag) setAgent(ag);
+    setTempWorkspace(false); // the `ready` event restores the truth for temp sessions
     if (!gatesWorkspace(ag)) setShowGate(false);
     if (ws && ws !== workspace) {
       setWorkspace(ws); // switch project to the session's folder
@@ -1048,8 +1198,9 @@ export function App() {
 
     // The live workspace is only a valid fallback for a gated persona if it came from
     // another gated persona — a knowledge persona's workspace is a scratch dir, and a
-    // code-family session must never adopt one. (`agent` is still the previous persona here.)
-    const inheritable = gatesWorkspace(agent) ? workspace : null;
+    // code-family session must never adopt one. Same for a code session's TEMPORARY dir:
+    // per-conversation, never inherited. (`agent` is still the previous persona here.)
+    const inheritable = gatesWorkspace(agent) && !tempWorkspace ? workspace : null;
 
     if (target) {
       // Code falls back to a recent folder; Cowork resumes its scratch (target.workspace) or
@@ -1174,7 +1325,7 @@ export function App() {
   const runTaskNow = async (taskId: string, title?: string) => {
     const r = await runAutomation(taskId);
     if (!r || !r.ok) return;
-    pendingPromptRef.current = r.prompt;
+    pendingPromptRef.current = { text: r.prompt };
     activeRunRef.current = { taskId, runId: r.run_id, sessionId: r.session_id };
     openRunSession(r.session_id, r.workspace, r.agent, { id: taskId, title: title || "" });
   };
@@ -1193,10 +1344,13 @@ export function App() {
   const modelDisplay =
     modelLabels[model]?.split(" · ")[0] ||
     (model.includes(":") ? model.split(":").slice(1).join(":") : model);
-  // Persona name dropped for this release (owner ask 2026-07-22): personas are hidden,
-  // so "Coworker" read as noise. The model (+ project folder) are the real fixed facts.
-  const subtitleParts = [modelDisplay];
-  if (isProjectScoped(personaOf(agent)) && workspace) subtitleParts.push(baseName(workspace));
+  // UX-029: with the coworker picker shipping, the coworker's name is a fixed fact again
+  // (it was dropped 2026-07-22 while personas were hidden). For temporary folders the raw
+  // path never shows — "Temporary folder" + the Save as project… affordance instead.
+  const subtitleParts = [fullPersonaName(personaOf(agent)?.name, agent), modelDisplay];
+  if (isProjectScoped(personaOf(agent)) && workspace)
+    subtitleParts.push(tempWorkspace ? "Temporary folder" : baseName(workspace));
+  const showSaveAsProject = hasHistory && tempWorkspace && isProjectScoped(personaOf(agent));
   const activeInfo = sessions.find((s) => s.session_id === sessionId);
   const activeTitle = activeInfo?.title || "New session";
 
@@ -1362,7 +1516,6 @@ export function App() {
         onOpenPersona={(id) => {
           openPersona(id, "session");
         }}
-        onManagePersonas={() => openSettings("personas")}
         onOpenScheduled={() => setSurface("scheduled")}
         onOpenAutomation={(id) => {
           setScheduledOpenId(id);
@@ -1474,6 +1627,19 @@ export function App() {
             {hasHistory && (
               <span className="title-sub" data-testid="session-subtitle">
                 {subtitleParts.join(" · ")}
+                {showSaveAsProject && (
+                  <>
+                    {" · "}
+                    <button
+                      className="text-accent hover:underline"
+                      data-testid="save-as-project"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={() => void saveAsProject()}
+                    >
+                      Save as project…
+                    </button>
+                  </>
+                )}
               </span>
             )}
           </div>
@@ -1625,6 +1791,21 @@ export function App() {
               </div>
             )}
 
+            {/* UX-029: per-session setup (coworker + folder) lives in its own quiet row
+                above the composer — never inside the per-message control row. One-time
+                pick: the whole row leaves after the first message; its facts move to the
+                session header. */}
+            {idle && !sessionId.startsWith("__run__") && (
+              <SessionSetupRow
+                personas={personas}
+                agent={agent}
+                showFolder={needsWorkspace(agent)}
+                folderName={workspace && !tempWorkspace ? baseName(workspace) : null}
+                onPickCoworker={pickCoworker}
+                onPickFolder={pickDraftFolder}
+                onManage={() => openSettings("personas")}
+              />
+            )}
             <Composer
               mode={mode}
               model={model}
@@ -1707,7 +1888,7 @@ export function App() {
             projectScoped={isProjectScoped(personaOf(agent))}
             workspace={workspace || undefined}
             branch={branch}
-            scratchPrimary={agent === "cowork"}
+            scratchPrimary={agent === "cowork" || tempWorkspace}
             openAccessKey={accessKey}
             onOpenIntegrations={() => setSurface("integrations")}
           />
@@ -1729,6 +1910,16 @@ export function App() {
         />
       )}
 
+      {/* UX-029: the send-time folder dialog — the stashed message flies as soon as a
+          choice lands; Escape/backdrop restores the draft to the composer. */}
+      {sendGate && surface === "session" && (
+        <SendFolderDialog
+          coworkerName={fullPersonaName(personaOf(agent)?.name, agent)}
+          onPick={resolveSendFolder}
+          onTemp={() => void startTempAndSend()}
+          onCancel={cancelSendGate}
+        />
+      )}
       {showGate && surface === "session" && gatesWorkspace(agent) && (
         <FolderGate
           create={gateCreate}

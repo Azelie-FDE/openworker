@@ -641,6 +641,21 @@ def create_app(manager: SessionManager) -> FastAPI:
             trusted=bool((body or {}).get("trusted", False)),
         )
 
+    @app.post("/v1/workspaces/temp")
+    def provision_temp_workspace(body: dict) -> dict[str, Any]:
+        # UX-029: a code-family session starting "in a temporary folder" — created only
+        # at send time, with git ready. Knowledge families keep their auto-provisioned dir.
+        return manager.provision_temp_workspace(
+            str((body or {}).get("session_id", "")),
+            git=bool((body or {}).get("git", True)),
+        )
+
+    @app.post("/v1/sessions/{session_id}/save-as-project")
+    def save_session_as_project(session_id: str, body: dict) -> dict[str, Any]:
+        # UX-029 "Save as project…": move the temporary folder somewhere real. The GUI
+        # reconnects afterwards so the engine rebinds to the new path.
+        return manager.save_temp_as_project(session_id, str((body or {}).get("path", "")))
+
     @app.post("/v1/workspaces/pick")
     async def pick_workspace() -> dict[str, Any]:
         # Native folder picker opened by the LOCAL sidecar (browser GUIs can't get absolute
@@ -1796,6 +1811,13 @@ def create_app(manager: SessionManager) -> FastAPI:
                     "model": engine.model,
                     "mode": engine.permissions.mode.value,
                     "workspace": (
+                        str(getattr(engine, "executor").cwd)
+                        if getattr(engine, "executor", None)
+                        else None
+                    ),
+                    # UX-029: the GUI never shows a temporary folder's raw path — this flag
+                    # is how it knows to say "Temporary folder" (and offer Save as project).
+                    "temp_workspace": manager.is_temp_workspace(
                         str(getattr(engine, "executor").cwd)
                         if getattr(engine, "executor", None)
                         else None

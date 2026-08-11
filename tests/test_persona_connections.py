@@ -65,7 +65,7 @@ def test_persona_detail_endpoint(tmp_path, monkeypatch):
     # identity + capabilities (from the manifest/entry)
     assert detail["id"] == "ops"
     assert detail["name"] == "Ops Coworker"
-    assert detail["enabled"] is False  # non-default personas ship disabled (opt-in)
+    assert detail["enabled"] is True  # builtins ship enabled (UX-029)
     assert (
         detail["workspace"] == "deliverable"
     )  # §16 collapse: ops is a scratch persona now
@@ -131,7 +131,7 @@ def test_persona_enable_toggle(tmp_path, monkeypatch):
     client = TestClient(create_app(mgr))
 
     before = {p["id"]: p for p in client.get("/v1/personas").json()["personas"]}
-    assert before["ops"]["enabled"] is False  # ships disabled; only cowork starts on
+    assert before["ops"]["enabled"] is True  # builtins ship enabled (UX-029)
     assert before["cowork"]["enabled"] is True
 
     resp = client.post("/v1/personas/ops/enable", json={"enabled": True}).json()

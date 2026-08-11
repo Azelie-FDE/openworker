@@ -20,29 +20,27 @@ def test_builtins_present(tmp_path):
     assert reg.get("code").manifest is None
 
 
-def test_sidebar_defaults_to_cowork_only(tmp_path):
+def test_sidebar_defaults_to_surfaced_builtins(tmp_path):
     reg = _reg(tmp_path)
     sidebar = reg.sidebar()
     ids = [e["name"] for e in sidebar]
-    # A fresh install offers ONLY the default persona (owner call 2026-07-09);
-    # everything else is opt-in from Settings ▸ Personas.
-    assert ids == ["cowork"]
-    assert sidebar[0]["default"] is True
-    # Enabling adds to the picker (enable implies surface).
-    reg.set_enabled("code", True)
-    reg.set_enabled("ops", True)
-    ids = [e["name"] for e in reg.sidebar()]
+    # Built-ins ship enabled (UX-029: the coworker picker is their front door); Chat
+    # stays default-hidden via the surfaced axis. Installed personas remain opt-in.
     assert ids[0] == "cowork"
     assert set(ids) == {"cowork", "code", "ops"}
+    assert sidebar[0]["default"] is True
+    # An explicit disable removes a builtin from the picker.
+    reg.set_enabled("code", False)
+    assert "code" not in [e["name"] for e in reg.sidebar()]
 
 
-def test_chat_disabled_by_default_but_resolvable(tmp_path):
+def test_chat_hidden_by_default_but_resolvable(tmp_path):
     reg = _reg(tmp_path)
-    assert reg.is_surfaced("chat") is False  # default-hidden
-    assert reg.is_enabled("chat") is False  # opt-in like every non-default persona
+    assert reg.is_surfaced("chat") is False  # default-hidden from the grouped nav
+    assert reg.is_enabled("chat") is True  # builtins ship enabled (UX-029)
     assert reg.agent("chat").name == "chat"  # live sessions keep resolving
-    # The user can enable it from the Personas tab (enable implies surface).
-    reg.set_enabled("chat", True)
+    # Surfacing it adds it to the sidebar picker too.
+    reg.set_surfaced("chat", True)
     assert "chat" in [e["name"] for e in reg.sidebar()]
 
 

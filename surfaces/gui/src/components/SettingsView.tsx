@@ -73,7 +73,7 @@ const SET_TABS: {
   { key: "skills", label: "Skills", icon: "book" },
   { key: "voice", label: "Voice input", icon: "mic" },
   { key: "memory", label: "Memory", icon: "archive" },
-  { key: "personas", label: "Personas", icon: "sparkle" },
+  { key: "personas", label: "Coworkers", icon: "sparkle" },
 ];
 
 export function SettingsView({
@@ -378,8 +378,8 @@ function PersonasSection({ onOpenPersona }: { onOpenPersona?: (id: string) => vo
   return (
     <section>
       <PanelHead
-        title="Personas"
-        sub="Which coworkers are enabled and shown in the picker, plus installing new persona bundles."
+        title="Coworkers"
+        sub="Which coworkers are enabled and shown in the picker, plus installing new coworker bundles."
       />
       <PersonasTab key={galleryBump} onOpenPersona={onOpenPersona} />
       <button
@@ -389,7 +389,7 @@ function PersonasSection({ onOpenPersona }: { onOpenPersona?: (id: string) => vo
       >
         <Icon name="sparkle" size={16} className="text-accent shrink-0" />
         <span className="min-w-0 flex-1">
-          <span className="block text-[13.5px] font-medium">Browse the Persona Gallery</span>
+          <span className="block text-[13.5px] font-medium">Browse the Coworker Gallery</span>
           <span className="block text-[12px] text-muted">
             Curated coworkers from the OpenWorker team — see what each can do before installing.
           </span>

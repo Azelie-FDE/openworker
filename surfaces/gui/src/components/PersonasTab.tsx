@@ -90,14 +90,14 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
     }
     setConsent(r.consent || []);
     if (r.personas) setPersonas(r.personas);
-    setMsg(`Installed ${(r.consent || []).length} persona(s) — review and enable below.`);
+    setMsg(`Installed ${(r.consent || []).length} coworker(s) — review and enable below.`);
     setSrc("");
   };
 
   return (
     <div>
       <p className="text-[12.5px] text-muted mb-3 leading-relaxed">
-        Enable a coworker, then choose whether it appears in the new-session picker. The starred persona
+        Enable a coworker, then choose whether it appears in the coworker picker. The starred coworker
         is the default for new sessions.
       </p>
 
@@ -167,7 +167,7 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
               ) : (
                 <button
                   className="text-faint hover:text-danger shrink-0 p-1"
-                  title="Delete this persona"
+                  title="Delete this coworker"
                   aria-label={`Delete ${p.name}`}
                   data-testid={`persona-delete-${p.id}`}
                   onClick={() => setConfirmDel(p.id)}
@@ -205,10 +205,10 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
         ))}
       </div>
 
-      <div className={SEC_H + " mb-1.5"}>Add personas</div>
+      <div className={SEC_H + " mb-1.5"}>Add coworkers</div>
       <p className="text-[12px] text-muted mb-3 leading-relaxed">
         Load from a local directory or a public GitHub repo. Files are copied into a managed area (a
-        snapshot), so the persona stays stable even if the source changes. No code runs — a persona only
+        snapshot), so the coworker stays stable even if the source changes. No code runs — a coworker only
         composes vetted tools.
       </p>
       <div className="flex items-center gap-2">
@@ -218,7 +218,7 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
         </select>
         <input
           className={INPUT}
-          placeholder={mode === "git" ? "https://github.com/acme/ops-persona" : "/path/to/personas"}
+          placeholder={mode === "git" ? "https://github.com/acme/ops-coworker" : "/path/to/coworkers"}
           value={src}
           onChange={(e) => setSrc(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && install()}

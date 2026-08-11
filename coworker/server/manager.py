@@ -361,6 +361,75 @@ class SessionManager:
         d.mkdir(parents=True, exist_ok=True)
         return str(d.resolve())
 
+    _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+    def is_temp_workspace(self, path: Optional[str]) -> bool:
+        """True when `path` is a per-conversation temporary directory (lives under the
+        scratch base). The GUI uses this to label the folder "Temporary folder" instead
+        of exposing its raw path."""
+        if not path:
+            return False
+        try:
+            return (
+                Path(path).expanduser().resolve().is_relative_to(self.scratch_base().resolve())
+            )
+        except OSError:
+            return False
+
+    def provision_temp_workspace(self, session_id: str, *, git: bool = True) -> dict[str, Any]:
+        """UX-029 "Start in a temporary folder": create the conversation's temporary
+        directory at SEND time (not connect) and, for code-family work, make git ready.
+        Idempotent — re-sending against an existing dir is a no-op."""
+        if not self._SESSION_ID_RE.match(session_id or "") or session_id in {".", ".."}:
+            return {"ok": False, "error": "invalid session id"}
+        path = self._provision_scratch(session_id)
+        if git and not (Path(path) / ".git").is_dir():
+            try:
+                subprocess.run(
+                    ["git", "init", "-q"],
+                    cwd=path,
+                    capture_output=True,
+                    timeout=10,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                pass  # no git on PATH → still a usable folder, just not a repo
+        return {"ok": True, "path": path, "git": (Path(path) / ".git").is_dir()}
+
+    def save_temp_as_project(self, session_id: str, dest: str) -> dict[str, Any]:
+        """UX-029 "Save as project…": move a session's temporary folder to a real
+        location and rebind the session there. The cached engine is dropped so the next
+        connect rebuilds against the new path — callers must reconnect after this."""
+        if not dest or not dest.strip():
+            return {"ok": False, "error": "no destination folder"}
+        record = self.session_store.load(session_id)
+        src = record.workspace if record and record.workspace else None
+        if not src:
+            engine = self._engines.get(session_id)
+            executor = getattr(engine, "executor", None) if engine else None
+            src = str(executor.cwd) if executor else None
+        if not src or not self.is_temp_workspace(src) or not Path(src).is_dir():
+            return {"ok": False, "error": "this session is not in a temporary folder"}
+        if self.is_running(session_id):
+            return {"ok": False, "error": "wait for the current task to finish first"}
+        d = Path(dest).expanduser()
+        if d.exists():
+            if not d.is_dir() or any(d.iterdir()):
+                return {"ok": False, "error": "destination must be a new or empty folder"}
+            d.rmdir()  # shutil.move into an existing dir would nest src inside it
+        try:
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(src, str(d))
+        except OSError as e:
+            return {"ok": False, "error": f"could not move the folder: {e}"}
+        new_path = str(d.resolve())
+        if record:
+            record.workspace = new_path
+            self.session_store.save(record)
+        self._engines.pop(session_id, None)
+        self.session_store.touch_workspace(new_path)
+        return {"ok": True, "path": new_path}
+
     def resolve_workspace(self, requested: Optional[str]) -> Optional[str]:
         if requested:
             p = Path(requested).expanduser()

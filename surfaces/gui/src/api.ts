@@ -97,6 +97,37 @@ export async function openWorkspace(
   return res.json();
 }
 
+/** UX-029 "Start in a temporary folder": create the conversation's temp dir at send time
+ * (git-init'd for code-family work). Idempotent. */
+export async function createTempWorkspace(
+  sessionId: string,
+  git = true,
+): Promise<{ ok: boolean; path?: string; git?: boolean; error?: string }> {
+  const res = await fetch(`${httpBase()}/v1/workspaces/temp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, git }),
+  });
+  return res.json();
+}
+
+/** UX-029 "Save as project…": move a session's temporary folder to a real location.
+ * Callers reconnect afterwards so the engine rebinds to the new path. */
+export async function saveSessionAsProject(
+  sessionId: string,
+  path: string,
+): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const res = await fetch(
+    `${httpBase()}/v1/sessions/${encodeURIComponent(sessionId)}/save-as-project`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    },
+  );
+  return res.json();
+}
+
 export async function getTrustedWorkspaces(): Promise<WorkspaceCommandTrust[]> {
   const res = await fetch(`${httpBase()}/v1/workspaces/trusted`);
   return (await res.json()).workspaces ?? [];
