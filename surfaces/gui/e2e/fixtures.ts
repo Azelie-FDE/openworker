@@ -606,6 +606,7 @@ export async function mockApi(page: import("@playwright/test").Page) {
             name: "run_shell",
             arguments: { command: "ls" },
             reason: "The coworker wants to run a command.",
+            readonly_ok: true, // `ls` classifies read-only server-side
           });
           return; // suspended on the approval
         }

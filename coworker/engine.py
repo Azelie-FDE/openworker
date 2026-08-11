@@ -31,7 +31,18 @@ class ApprovalOutcome(str, Enum):
     ONCE = "once"
     ALWAYS_TOOL = "always_tool"
     ALWAYS_COMMAND = "always_command"
+    # Session-wide grant for classifier-approved read-only shell commands (readonly.py).
+    READONLY_SESSION = "readonly_session"
     DENY = "deny"
+
+
+def _readonly_ok(arguments: dict) -> bool:
+    command = str((arguments or {}).get("command", "") or "")
+    if not command:
+        return False
+    from .readonly import is_readonly_command
+
+    return is_readonly_command(command)
 
 
 @dataclass
@@ -711,6 +722,9 @@ class TurnEngine:
                         metadata,
                         self.permissions.risk_overrides,
                     ),
+                    # True when this shell command classifies as read-only — the card
+                    # offers "Allow read-only commands for this session" only then.
+                    "readonly_ok": _readonly_ok(tool_call.arguments),
                 },
             )
             self._audit(tool_call, stage="approval_requested", reason=decision.reason)
@@ -745,6 +759,8 @@ class TurnEngine:
                     self.permissions.allow_command_for_session(
                         str(tool_call.arguments.get("command", ""))
                     )
+                elif outcome is ApprovalOutcome.READONLY_SESSION:
+                    self.permissions.allow_readonly_for_session()
                 allowed, reason = True, "approved by user"
                 self._audit(
                     tool_call,

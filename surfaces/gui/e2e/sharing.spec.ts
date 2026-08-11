@@ -50,9 +50,13 @@ test("zip import: trust warning leads, tools collapse behind a chevron, replaces
   await expect(card.getByTestId("replaces-note")).toContainText("MORE capabilities");
   await expect(card.getByText(/github.*(recommended).*open fix PRs/)).toBeVisible();
 
-  // Imported coworker landed disabled in the list above, pending consent.
+  // Imported coworker landed disabled in the list above, pending consent —
+  // and the card itself carries the Enable action (no hunting back up the list).
   const row = page.locator(".divide-y > div").filter({ hasText: "Team Security Coworker" });
   await expect(row.getByRole("checkbox", { name: "Enabled" })).not.toBeChecked();
+  await card.getByTestId("consent-enable-team-sec").click();
+  await expect(card.getByTestId("consent-enabled")).toContainText("it's in your coworker picker");
+  await expect(row.getByRole("checkbox", { name: "Enabled" })).toBeChecked();
 });
 
 test("Export… zips an installed coworker's bundle to a chosen folder", async ({ page }) => {

@@ -318,7 +318,14 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
             </span>
           </div>
           {consent.map((c) => (
-            <ConsentCard key={c.id} c={c} />
+            <ConsentCard
+              key={c.id}
+              c={c}
+              enabled={personas.find((p) => p.id === c.id)?.enabled ?? false}
+              onEnable={async () => {
+                await toggle(c.id, { enabled: true, surfaced: true });
+              }}
+            />
           ))}
         </div>
       )}
@@ -336,8 +343,17 @@ const RISK_PHRASE: Record<string, string> = {
   write_remote: "act on connected services",
 };
 
-function ConsentCard({ c }: { c: PersonaConsent }) {
+function ConsentCard({
+  c,
+  enabled,
+  onEnable,
+}: {
+  c: PersonaConsent;
+  enabled: boolean;
+  onEnable: () => Promise<void>;
+}) {
   const [showTools, setShowTools] = useState(false);
+  const [busy, setBusy] = useState(false);
   const phrases = (c.risk.length ? c.risk : ["read"]).map((r) => RISK_PHRASE[r] || r);
   const summary = phrases.join(", ").replace(/, ([^,]*)$/, " and $1");
   const recommends = c.recommends || [];
@@ -384,8 +400,27 @@ function ConsentCard({ c }: { c: PersonaConsent }) {
           ))}
         </div>
       )}
-      <div className="text-[12px] text-faint mt-2">
-        Recommended mode: {c.recommended_mode}. Enable it above to use it.
+      <div className="flex items-center gap-3 mt-2.5">
+        {/* Enable right here (owner ask 2026-08-11) — the old "enable it above" copy
+            sent the user hunting back up the list. */}
+        {enabled ? (
+          <span className="text-[12.5px] text-muted" data-testid="consent-enabled">
+            ✓ Enabled — it's in your coworker picker.
+          </span>
+        ) : (
+          <button
+            className={BTN_ACCENT}
+            data-testid={`consent-enable-${c.id}`}
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void onEnable().finally(() => setBusy(false));
+            }}
+          >
+            {busy ? "Enabling…" : "Enable this coworker"}
+          </button>
+        )}
+        <span className="text-[12px] text-faint">Recommended mode: {c.recommended_mode}.</span>
       </div>
     </div>
   );

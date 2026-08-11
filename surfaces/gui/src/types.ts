@@ -34,7 +34,7 @@ import type { MessageSource } from "./api";
 
 // "always_task" persists to the owning automation's task record (standing scoped
 // approval, UX-DECISIONS §25) — offered only on automation-run approval cards, in-app.
-export type ApprovalDecision = "once" | "deny" | "always_tool" | "always_command" | "always_task";
+export type ApprovalDecision = "once" | "deny" | "always_tool" | "always_command" | "always_task" | "readonly_session";
 
 export interface TodoItem {
   content: string;
@@ -116,6 +116,9 @@ export type Item =
       // The exact target a standing rule could pin (server-computed) — with a run
       // context, the card offers "Allow every time" (§25).
       standingTarget?: string;
+      // Server-classified: this shell command only reads locally, so the card may offer
+      // the session-wide "Allow read-only commands" grant.
+      readonlyOk?: boolean;
       resolved?: ApprovalDecision;
     }
   | {

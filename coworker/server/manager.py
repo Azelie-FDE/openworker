@@ -98,7 +98,13 @@ def _grants_of(engine) -> dict[str, Any]:
     """The engine's session-scoped "Always allow" approvals, in persistable shape."""
     tools = sorted(getattr(engine.permissions, "session_allow_tools", None) or ())
     commands = sorted(getattr(engine.permissions, "session_allow_commands", None) or ())
-    return {"tools": tools, "commands": commands} if (tools or commands) else {}
+    readonly = bool(getattr(engine.permissions, "session_readonly", False))
+    out: dict[str, Any] = {}
+    if tools or commands or readonly:
+        out = {"tools": tools, "commands": commands}
+        if readonly:
+            out["readonly"] = True
+    return out
 
 
 def _approval_body(request) -> str:
@@ -3525,6 +3531,8 @@ class SessionManager:
             engine.permissions.allow_tool_for_session(str(tool))
         for command in grants.get("commands") or []:
             engine.permissions.allow_command_for_session(str(command))
+        if grants.get("readonly"):
+            engine.permissions.allow_readonly_for_session()
 
     @staticmethod
     def _extra_roots_of(engine: TurnEngine) -> list[dict[str, Any]]:

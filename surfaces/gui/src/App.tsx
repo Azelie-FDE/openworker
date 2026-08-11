@@ -710,6 +710,7 @@ export function App() {
               reason: d.reason,
               category: d.category,
               standingTarget: d.standing_target || undefined,
+              readonlyOk: !!d.readonly_ok,
             },
           ]);
           break;
