@@ -27,6 +27,48 @@ def _has_shell_operators(command: str) -> bool:
     return any(op in command for op in _SHELL_OPERATORS)
 
 
+def protected_paths() -> list[Path]:
+    """Files that govern the permission system itself. Nothing the agent does may write
+    these — in any mode, through any tool. The escalation this blocks is: approve one
+    ordinary-looking command, it quietly appends to the rule file, every future session is
+    more permissive. That happens in the DEFAULT interactive mode, so this cannot be a
+    property of a sandbox or of any one mode; it is a floor."""
+    from .secrets import state_dir
+
+    base = state_dir()
+    return [
+        base / "config.toml",
+        base / "risk_overrides.json",
+        base / "workspace_trust.json",
+        base / "unattended.json",
+        base / "coworker.db",  # session records carry the saved "always allow" grants
+        base / "secrets.json",
+        base / "inbox_routing.json",
+    ]
+
+
+# Files INSIDE a workspace that execute on a later, innocuous-looking action. An edit here
+# is a deferred command: writing `.git/hooks/pre-commit` and then running `git commit` runs
+# it. They stay writable, but never WITHOUT a human — no auto-approve path may clear them.
+_PROTECTED_IN_PROJECT = (
+    ".git/hooks/",
+    ".github/workflows/",
+    ".gitlab-ci.yml",
+    ".vscode/tasks.json",
+    ".coworker/",  # workspace policy + skills the agent would otherwise self-grant
+)
+
+
+def _is_protected_in_project(candidate: Path) -> bool:
+    posix = candidate.as_posix()
+    return any(
+        (f"/{marker}" in posix or posix.startswith(marker))
+        if marker.endswith("/")
+        else posix.endswith("/" + marker)
+        for marker in _PROTECTED_IN_PROJECT
+    )
+
+
 def _host_of(url_or_domain: str) -> str:
     """The lowercased host of a URL, or a bare domain as-is. `''` when there's nothing
     usable. Accepts both `https://docs.python.org/x` and `docs.python.org`."""
@@ -182,6 +224,19 @@ class PermissionEngine:
         is_egress = risk is RiskClass.EGRESS
         consequential = is_consequential(risk)
 
+        # SELF-PROTECTION FLOOR — runs before mode, allowlists and every auto-approve path,
+        # because the escalation it blocks happens in the DEFAULT mode. No verdict below can
+        # reach these files, and no human click in the flow can grant it either: loosening
+        # requires editing the files out-of-band.
+        if is_write or is_shell:
+            hit = self._touches_protected(tool_name, arguments, is_shell)
+            if hit is not None:
+                return Decision(
+                    False,
+                    f"refusing to modify OpenWorker's own settings: {hit}",
+                    needs_user=False,
+                )
+
         # Discuss / plan modes: read-only.
         if self.mode in READ_ONLY_MODES and consequential:
             return Decision(
@@ -191,6 +246,7 @@ class PermissionEngine:
         # Path scoping for writes (all modes): every path the write touches must land in a
         # writable root. A write whose path can't be located is not scoped-able, so it fails
         # closed to approval rather than slipping through auto/custom unscoped.
+        needs_human_for_protected = False
         if is_write:
             paths, located = write_paths(tool_name, arguments)
             if not located:
@@ -204,10 +260,23 @@ class PermissionEngine:
                     return Decision(
                         False, f"path is not in a writable directory: {path}"
                     )
+                # In-project files that run on a later action (git hooks, CI configs) may be
+                # edited, but never by an auto-approve path — a human must see it.
+                if _is_protected_in_project(self._candidate(path)):
+                    needs_human_for_protected = True
 
         # Non-consequential tools always run.
         if not consequential:
             return Decision(True, "low risk")
+
+        # A protected in-project target (git hooks, CI config) skips every auto-approve path
+        # below — including auto mode and the session/config allowlists — and asks.
+        if needs_human_for_protected:
+            return Decision(
+                False,
+                "this file runs automatically later — approval required",
+                needs_user=True,
+            )
 
         # Full access.
         if self.mode is Mode.AUTO:
@@ -288,6 +357,40 @@ class PermissionEngine:
             except ValueError:
                 continue
         return False
+
+    def _touches_protected(
+        self, tool_name: str, arguments: dict[str, Any], is_shell: bool
+    ) -> Optional[str]:
+        """The protected settings path this call would modify, or None.
+
+        For writes we resolve the real target. For shell we can only inspect the command
+        text — parser depth, so it stops accidents and casual attempts, not a determined
+        adversary (that needs the OS sandbox). Cheap and worth having regardless.
+
+        Shell matching is on the FULL path only, never a bare filename: matching
+        `secrets.json` anywhere in a command would refuse unrelated work that merely
+        mentions the name. A command naming the real settings path is refused whether it
+        reads or writes — we cannot tell which from text, and the conservative direction is
+        the right one for these files.
+        """
+        targets = [str(p) for p in protected_paths()]
+        if is_shell:
+            command = str(arguments.get("command", ""))
+            if not command:
+                return None
+            lowered = command.replace("\\", "/").lower()
+            for target in targets:
+                if target.replace("\\", "/").lower() in lowered:
+                    return target
+            return None
+        paths, located = write_paths(tool_name, arguments)
+        if not located:
+            return None  # unlocatable writes are already failed closed by the caller
+        resolved = {str(self._candidate(p)) for p in paths}
+        for target in targets:
+            if str(Path(target).resolve()) in resolved:
+                return target
+        return None
 
     def _domain_allowed(self, url: str) -> bool:
         """True when the URL's host is an allowed egress destination — an exact match or a
