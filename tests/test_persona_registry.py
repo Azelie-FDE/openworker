@@ -27,7 +27,7 @@ def test_sidebar_defaults_to_surfaced_builtins(tmp_path):
     # Built-ins ship enabled (UX-029: the coworker picker is their front door); Chat
     # stays default-hidden via the surfaced axis. Installed personas remain opt-in.
     assert ids[0] == "cowork"
-    assert set(ids) == {"cowork", "code", "ops"}
+    assert set(ids) == {"cowork", "code", "ops", "security", "cloud-posture", "dep-audit"}
     assert sidebar[0]["default"] is True
     # An explicit disable removes a builtin from the picker.
     reg.set_enabled("code", False)

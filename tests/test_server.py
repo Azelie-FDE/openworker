@@ -61,9 +61,11 @@ def test_agents_and_memory_rest(tmp_path):
     client = _client(tmp_path, [])
     agents = client.get("/v1/agents").json()["agents"]
     # The picker lists enabled+surfaced personas — builtins ship enabled (UX-029);
-    # Chat stays default-hidden via the surfaced axis.
+    # Chat stays default-hidden via the surfaced axis. The security bundles (Phase C)
+    # ship in the picker out of the box.
     names = [a["name"] for a in agents]
-    assert names == ["cowork", "code", "ops"]
+    assert names[0] == "cowork"
+    assert set(names) == {"cowork", "code", "ops", "security", "cloud-posture", "dep-audit"}
     assert "skills" in client.get("/v1/skills").json()  # catalog (may be empty)
 
     added = client.post("/v1/memory", json={"content": "prefer pathlib"}).json()

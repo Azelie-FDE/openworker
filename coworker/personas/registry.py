@@ -173,6 +173,15 @@ class PersonaRegistry:
             self._register_manifest(
                 load_manifest_file(md, builtin=builtin), builtin=builtin
             )
+        # Bundle subdirs (OPE-58): <dir>/<id>/manifest.md with an optional sibling
+        # skills/ folder — the same self-contained shape an install snapshot uses, so a
+        # persona's skills live with it instead of leaking into a shared flat dir.
+        for sub in sorted(p for p in d.iterdir() if p.is_dir()):
+            md = sub / "manifest.md"
+            if md.is_file():
+                self._register_manifest(
+                    load_manifest_file(md, builtin=builtin), builtin=builtin
+                )
 
     def _register_manifest(self, m, *, builtin: bool) -> None:
         self._entries[m.id] = PersonaEntry(

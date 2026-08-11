@@ -59,7 +59,11 @@ where = ["."]
 include = ["coworker*"]
 
 [tool.setuptools.package-data]
-coworker = ["personas/builtin/*.md"]
+coworker = [
+    "personas/builtin/*.md",
+    "personas/builtin/*/manifest.md",
+    "personas/builtin/*/skills/*/SKILL.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
