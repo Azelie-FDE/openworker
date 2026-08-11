@@ -101,6 +101,38 @@ def _grants_of(engine) -> dict[str, Any]:
     return {"tools": tools, "commands": commands} if (tools or commands) else {}
 
 
+def _grant_offered(outcome, request) -> bool:
+    """Whether a persistent grant is legitimately offered for this tool — the server-side
+    mirror of what the approval card actually renders (`ApprovalCard.tsx`).
+
+    - ALWAYS_TOOL is tool-wide and argument-unbounded, so it is withheld from run_shell (the
+      command-scoped grant is the narrower option), from save_skill (every skill proposal
+      gets its own review), and from anything that reaches off the machine — connectors and
+      MCP tools alike, where "always allow send_message" would cover every future recipient.
+    - ALWAYS_COMMAND only means anything for the shell tool.
+    - ALWAYS_DOMAIN only means anything for a tool carrying a url.
+    """
+    from ..engine import ApprovalOutcome
+    from ..risk import RiskClass, classify
+
+    name = getattr(request, "tool_name", "")
+    metadata = getattr(request, "metadata", None)
+    args = getattr(request, "arguments", None) or {}
+    risk = classify(name, metadata)
+
+    if outcome is ApprovalOutcome.ALWAYS_COMMAND:
+        return risk is RiskClass.EXEC
+    if outcome is ApprovalOutcome.ALWAYS_DOMAIN:
+        return risk is RiskClass.EGRESS and bool(args.get("url"))
+    if outcome is ApprovalOutcome.ALWAYS_TOOL:
+        if risk in (RiskClass.EXEC, RiskClass.EXTERNAL):
+            return False
+        if getattr(metadata, "category", "") == "connector":
+            return False
+        return name != "save_skill"
+    return True
+
+
 def _approval_body(request) -> str:
     """Approval card body: the tool's reason (if any) plus a compact preview of its args, so a
     mirrored 'Run `write_file`?' shows the path/content rather than just the tool name.
@@ -2668,26 +2700,100 @@ class SessionManager:
     def approval_outcome(self, resolution: str, request, session_id: str):
         """Map an approval resolution (from any surface) to an ApprovalOutcome, handling
         the task-persistent "always_task" vocabulary alongside the session-scoped ones.
+
+        Server-side validated, not trusted from the caller: a grant that no UI offers for
+        this tool is downgraded to a one-time approval rather than honoured. The GUI already
+        hides the broad "always allow" for run_shell / connectors / save_skill, and Slack
+        mirrors only ever render approve/deny — but `POST /v1/inbox/{id}/resolve` takes a raw
+        string, so without this check any local API caller could mint a session-wide
+        any-argument shell grant. Same philosophy as mint_task_rule: validate here, don't
+        trust the card.
         """
         from ..engine import ApprovalOutcome
 
         if resolution == "always_task":
-            self.mint_task_rule(
+            minted = self.mint_task_rule(
                 session_id,
                 request.tool_name,
                 getattr(request, "arguments", None),
                 getattr(request, "metadata", None),
             )
+            if not minted:
+                self._audit_grant_refused(session_id, request, resolution)
             return ApprovalOutcome.ONCE
         try:
-            return ApprovalOutcome(resolution)
+            outcome = ApprovalOutcome(resolution)
         except ValueError:
-            pass
-        if resolution == "allow":
+            if resolution == "allow":
+                return ApprovalOutcome.ONCE
+            if resolution == "always":
+                outcome = ApprovalOutcome.ALWAYS_TOOL
+            else:
+                return ApprovalOutcome.DENY
+        if outcome in (
+            ApprovalOutcome.ALWAYS_TOOL,
+            ApprovalOutcome.ALWAYS_COMMAND,
+            ApprovalOutcome.ALWAYS_DOMAIN,
+        ) and not _grant_offered(outcome, request):
+            self._audit_grant_refused(session_id, request, resolution)
             return ApprovalOutcome.ONCE
-        if resolution == "always":
-            return ApprovalOutcome.ALWAYS_TOOL
-        return ApprovalOutcome.DENY
+        return outcome
+
+    def audit_autonomy_change(
+        self, session_id: str, kind: str, before: Any, after: Any
+    ) -> None:
+        """Record a change to how much the agent may do unsupervised — the permission mode,
+        or the attended/unattended toggle. Without this, "who turned on auto mode, and when"
+        is unanswerable from the audit store, which is at odds with the per-call trail the
+        rest of the engine keeps. Raising autonomy is flagged so it can be filtered."""
+        order = {"discuss": 0, "plan": 1, "interactive": 2, "custom": 2, "auto": 3}
+        raised = (
+            order.get(str(after), 0) > order.get(str(before), 0)
+            if kind == "mode"
+            else bool(after) and not bool(before)
+        )
+        try:
+            self.audit_store.append(
+                {
+                    "session_id": session_id,
+                    "tool": "",
+                    "arguments": {},
+                    "stage": f"{kind}_changed",
+                    "status": "raised" if raised else "lowered",
+                    "reason": f"{kind}: {before} → {after}",
+                }
+            )
+        except Exception:
+            pass
+
+    def set_unattended(self, session_id: str, on: bool) -> dict[str, Any]:
+        """Flip the attended/unattended toggle, with an audit row. Note this changes only
+        WHERE the human is reached, never the autonomy ceiling (that's the mode) — but it is
+        still worth recording, since an unattended session routes prompts away from the
+        screen the user is looking at."""
+        before = self.unattended.is_unattended(session_id)
+        self.unattended.set(session_id, on)
+        if before != on:
+            self.audit_autonomy_change(session_id, "unattended", before, on)
+        return {"ok": True, "session_id": session_id, "unattended": on}
+
+    def _audit_grant_refused(self, session_id: str, request, resolution: str) -> None:
+        try:
+            self.audit_store.append(
+                {
+                    "session_id": session_id,
+                    "tool": getattr(request, "tool_name", ""),
+                    "arguments": getattr(request, "arguments", None) or {},
+                    "stage": "grant_refused",
+                    "status": "downgraded",
+                    "reason": (
+                        f"resolution {resolution!r} is not offered for this tool — "
+                        "applied as a one-time approval"
+                    ),
+                }
+            )
+        except Exception:
+            pass
 
     def _scheduled_approver(self, task, session_id: str):
         from ..engine import ApprovalOutcome

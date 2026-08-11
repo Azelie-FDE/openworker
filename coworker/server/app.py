@@ -385,10 +385,9 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.post("/v1/sessions/{session_id}/unattended")
     def set_unattended(session_id: str, body: dict) -> dict[str, Any]:
-        # The GUI gates the on-transition behind a one-tap confirm.
-        on = bool(body.get("unattended"))
-        manager.unattended.set(session_id, on)
-        return {"ok": True, "session_id": session_id, "unattended": on}
+        # The GUI gates the on-transition behind a one-tap confirm; the manager records the
+        # transition either way, so the change is answerable from the audit store.
+        return manager.set_unattended(session_id, bool(body.get("unattended")))
 
     @app.get("/v1/sessions/{session_id}/skills")
     def session_skills(session_id: str, workspace: str = "") -> dict[str, Any]:
@@ -1921,9 +1920,16 @@ def create_app(manager: SessionManager) -> FastAPI:
                     await claim_turn(retry=True)
                 elif kind == "set_mode":
                     try:
-                        engine.permissions.mode = Mode(message.get("mode"))
+                        new_mode = Mode(message.get("mode"))
                     except (TypeError, ValueError):
                         pass
+                    else:
+                        previous = engine.permissions.mode
+                        engine.permissions.mode = new_mode
+                        if previous is not new_mode:
+                            manager.audit_autonomy_change(
+                                session_id, "mode", previous.value, new_mode.value
+                            )
                 elif kind == "set_model":
                     model = message.get("model")
                     if model is not None and not isinstance(model, str):
