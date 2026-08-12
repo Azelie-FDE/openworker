@@ -42,6 +42,10 @@ class Config:
     # subdomain). Empty by default — the first fetch to any host asks. A power-user opt-in,
     # like `allowed_commands`; user-global only, so a repo can't widen the agent's network reach.
     allowed_domains: list[str] = field(default_factory=list)
+    # Auto-Approve mode's feature flag (spec §1.5): when true, sessions get an LLM reviewer
+    # that judges would-be approval cards in Mode.AUTO_APPROVE. Off by default; user-global
+    # only — a cloned repo must not be able to hand itself a looser reviewer.
+    auto_approve: bool = False
     host: str = "127.0.0.1"
     port: int = 8765
     # Web search provider: "duckduckgo" (keyless default) | "tavily" | "brave" (need a key).
@@ -72,6 +76,7 @@ _FIELDS = {
     "allowed_commands",
     "auto_allow",
     "allowed_domains",
+    "auto_approve",
     "host",
     "port",
     "web_search_provider",
@@ -86,7 +91,7 @@ _FIELDS = {
 # workspace override pass never applies them. `allowed_commands` is added separately only
 # for a canonically trusted workspace; `auto_allow` and `allowed_domains` remain user-global
 # only (a repo must not be able to widen the agent's command or network reach).
-_GLOBAL_ONLY_FIELDS = {"allowed_commands", "auto_allow", "allowed_domains"}
+_GLOBAL_ONLY_FIELDS = {"allowed_commands", "auto_allow", "allowed_domains", "auto_approve"}
 _WORKSPACE_FIELDS = _FIELDS - _GLOBAL_ONLY_FIELDS
 
 

@@ -502,6 +502,21 @@ def build_engine(
             workspace=ws,
         )
     )
+    # Auto-Approve reviewer (spec Part 8). Attached only when the user-global flag is on —
+    # a repo config can never enable it (`auto_approve` is in _GLOBAL_ONLY_FIELDS, same
+    # rule as `auto_allow`). With no reviewer attached, Mode.AUTO_APPROVE behaves exactly
+    # like INTERACTIVE, which is also the fallback for unattended sessions and after the
+    # per-turn retry guard trips (engine._reviewer_active). Uses the session's own
+    # provider and model: no second key, and if it's trusted to drive the agent it's
+    # strong enough to review it (§1.5).
+    if getattr(config, "auto_approve", False):
+        from .reviewer import Reviewer
+
+        engine.reviewer = Reviewer(
+            provider=provider,
+            model=model,
+            known_world=engine.session_facts.world.render(),
+        )
     engine.audit_context = {
         "session_id": session_id or "",
         "agent": agent.name,

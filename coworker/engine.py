@@ -118,6 +118,14 @@ class TurnEngine:
         # compaction above, so the constructor footprint stays put. None ⇒ nothing recorded
         # and behaviour is byte-identical; NOTHING consumes it in v1 either way.
         self.session_facts: Optional[session_facts.SessionFacts] = None
+        # Auto-Approve reviewer (spec Part 8). Set post-construction; None ⇒ Mode.AUTO_APPROVE
+        # behaves exactly like INTERACTIVE. Consulted only on decisions the gate marked
+        # needs_user, only in AUTO_APPROVE mode, only when the session is attended (an
+        # unset is_attended counts as NOT attended here — automations never set it), and
+        # only until two denials in a turn (§8.4 retry guard).
+        self.reviewer: Optional[Any] = None
+        self._reviewer_denials = 0
+        self._reviewer_verdicts: dict[str, Any] = {}
         self._last_context_tokens: Optional[int] = None
         self.audit_context: dict[str, Any] = {}
         if instructions and not (
@@ -197,6 +205,10 @@ class TurnEngine:
         self._cancel.clear()
         if self.session_facts is not None:
             self.session_facts.begin_turn()
+        # §8.4 retry guard resets per user turn: two reviewer denials in one turn route
+        # everything else that turn to the human. A fresh user message is a fresh brief.
+        self._reviewer_denials = 0
+        self._reviewer_verdicts.clear()
         data: dict[str, Any] = {"input": user_input}
         if source is not None:
             data["source"] = source
@@ -596,6 +608,13 @@ class TurnEngine:
         """Run one assistant turn's tool calls: authorize all of them first (sequentially —
         approval prompts are interactive), then execute. Low-risk calls (reads, searches)
         run concurrently; everything else runs one at a time in call order."""
+        # Auto-Approve: fire the reviewer for every call that will need it, all at once,
+        # BEFORE the sequential authorize loop (spec §8.6 — one action per request, sent
+        # concurrently; the wall-clock cost of reviewing N calls is one round-trip, and a
+        # verdict physically cannot land on the wrong action). The loop below stays
+        # sequential because approval cards are interactive and must reach the human one
+        # at a time, in call order.
+        await self._preconsult_reviewer(tool_calls)
         cleared: list[ToolCall] = []
         for tool_call in tool_calls:
             if self._cancel.is_set():
@@ -679,6 +698,99 @@ class TurnEngine:
             metadata, "requires_approval", False
         )
 
+    # -- Auto-Approve reviewer (spec Part 8) ----------------------------------------
+
+    def _reviewer_active(self) -> bool:
+        """The reviewer is consulted only when ALL of these hold. Any miss ⇒ today's
+        behaviour (the card). Attended is required explicitly: `is_attended` unset counts
+        as NOT attended, so automations — which never set it — can never be reviewed
+        (§1.5: the mode is attended-only)."""
+        from .permissions import Mode
+
+        return (
+            self.reviewer is not None
+            and self.permissions.mode is Mode.AUTO_APPROVE
+            and self.is_attended is not None
+            and self.is_attended()
+            and self._reviewer_denials < 2
+        )
+
+    def _user_history(self) -> tuple[str, list[dict[str, Any]]]:
+        """(current request, earlier user messages) — the user's own words only, extracted
+        mechanically (§8.2). Never agent output, never tool results, never a summary."""
+        texts: list[str] = []
+        for msg in self.messages:
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if isinstance(content, str):
+                text = content
+            elif isinstance(content, list):
+                text = " ".join(
+                    str(part.get("text", ""))
+                    for part in content
+                    if isinstance(part, dict) and part.get("type") == "text"
+                )
+            else:
+                continue
+            text = text.strip()
+            if text:
+                texts.append(text)
+        if not texts:
+            return "", []
+        return texts[-1], [{"text": t} for t in texts[:-1]]
+
+    async def _preconsult_reviewer(self, tool_calls: list[ToolCall]) -> None:
+        """Fire one reviewer request per call that will escalate, all concurrently, and
+        park the verdicts for `_authorize` to consume. One action per request — there is
+        no verdict list to pair back, so a verdict cannot land on the wrong action (§8.6).
+        Skips calls the gate already decides (allow or hard-deny): the reviewer only ever
+        sees what would otherwise become an approval card (§1.2)."""
+        if not self._reviewer_active() or not tool_calls:
+            return
+        interactive = {"request_directory", "propose_plan", "ask_user"}
+        pending: list[ToolCall] = []
+        for tool_call in tool_calls:
+            if tool_call.name in interactive or tool_call.id in self._reviewer_verdicts:
+                continue
+            spec = self.registry.get(tool_call.name)
+            if spec is None:
+                continue
+            decision = self.permissions.evaluate(
+                tool_call.name, tool_call.arguments, spec.metadata
+            )
+            if not decision.allowed and decision.needs_user:
+                pending.append(tool_call)
+        if not pending:
+            return
+        request, history = self._user_history()
+        verdicts = await asyncio.gather(
+            *[
+                self.reviewer.review(
+                    request=request,
+                    history=history,
+                    tool_name=tc.name,
+                    arguments=tc.arguments,
+                )
+                for tc in pending
+            ]
+        )
+        for tc, verdict in zip(pending, verdicts):
+            self._reviewer_verdicts[tc.id] = verdict
+
+    async def _consult_reviewer(self, tool_call: ToolCall) -> Any:
+        """The parked verdict from `_preconsult_reviewer`, or a fresh single call."""
+        verdict = self._reviewer_verdicts.pop(tool_call.id, None)
+        if verdict is not None:
+            return verdict
+        request, history = self._user_history()
+        return await self.reviewer.review(
+            request=request,
+            history=history,
+            tool_name=tool_call.name,
+            arguments=tool_call.arguments,
+        )
+
     async def _authorize(self, tool_call: ToolCall) -> "AsyncIterator[Event | bool]":
         """Permission flow for one call (TOOL_PROPOSED is emitted by the caller). Yields
         its events, then True/False (allowed) last. Denied/unknown calls get their
@@ -702,6 +814,52 @@ class TurnEngine:
             self._audit(
                 tool_call, stage="auto_allowed", status="allowed", reason=reason
             )
+
+        if not allowed and decision.needs_user and self._reviewer_active():
+            # The one thing the reviewer may do: turn "ask the human" into "go ahead" —
+            # never "blocked" into "go ahead" (§1.2; hard denies never reach this branch
+            # because needs_user is False on them).
+            verdict = await self._consult_reviewer(tool_call)
+            self._audit(
+                tool_call,
+                stage="reviewer_verdict",
+                status=verdict.verdict,
+                reason=verdict.reason,
+                tokens_in=verdict.tokens_in,
+                tokens_out=verdict.tokens_out,
+            )
+            if verdict.verdict == "allow":
+                allowed = True
+                reason = f"allowed by reviewer: {verdict.reason}"
+            elif verdict.verdict == "deny":
+                # §8.4 deny asymmetry — full reason to the USER (event + audit above),
+                # terse non-diagnostic refusal to the AGENT. The sanctioned way around a
+                # deny is ask the human, never reshape the request.
+                from .reviewer import AGENT_DENY_MESSAGE
+
+                self._reviewer_denials += 1
+                yield Event(
+                    EventType.TOOL_FINISHED,
+                    {
+                        "name": tool_call.name,
+                        "status": "denied",
+                        "reason": "blocked by the safety reviewer",
+                        "reviewer_reason": verdict.reason,
+                        "allow_anyway": True,
+                    },
+                )
+                self.messages.append(
+                    _tool_error_message(tool_call, AGENT_DENY_MESSAGE)
+                )
+                self._audit(
+                    tool_call,
+                    stage="finished",
+                    status="denied",
+                    reason=f"denied by reviewer: {verdict.reason}",
+                )
+                yield False
+                return
+            # "unsure" falls through to today's card — the human decides.
 
         if not allowed and decision.needs_user:
             yield Event(

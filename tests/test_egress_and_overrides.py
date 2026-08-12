@@ -28,7 +28,7 @@ def test_web_fetch_is_egress_not_read():
         (Mode.CUSTOM, True, False),  # asks
         (Mode.PLAN, False, False),  # denied (read-only, egress is not a read)
         (Mode.DISCUSS, False, False),  # denied
-        (Mode.AUTO, False, True),  # allowed
+        (Mode.BYPASS_APPROVALS, False, True),  # allowed
     ],
 )
 def test_web_fetch_gated_in_every_mode(tmp_path, mode, expected_needs_user, expected_allowed):
@@ -103,13 +103,13 @@ def test_unknown_write_tool_fails_closed(tmp_path):
     # A tool promoted to write via an override, whose path we can't locate, must not slip
     # through auto mode unscoped — it asks instead.
     ov = _override({"weird_writer": RiskClass.WRITE_LOCAL})
-    eng = PermissionEngine(workspace_root=tmp_path, mode=Mode.AUTO, risk_overrides=ov)
+    eng = PermissionEngine(workspace_root=tmp_path, mode=Mode.BYPASS_APPROVALS, risk_overrides=ov)
     d = eng.evaluate("weird_writer", {"blob": "..."}, None)
     assert not d.allowed and d.needs_user
 
 
 def test_patch_scoping_holds_in_auto_mode(tmp_path):
-    eng = PermissionEngine(workspace_root=tmp_path, mode=Mode.AUTO)
+    eng = PermissionEngine(workspace_root=tmp_path, mode=Mode.BYPASS_APPROVALS)
     escape = "*** Begin Patch\n*** Update File: ../../etc/hosts\n@@\n-a\n+b\n*** End Patch"
     assert not eng.evaluate("apply_patch", {"patch": escape}, None).allowed
     ok = "*** Begin Patch\n*** Update File: src/app.py\n@@\n-a\n+b\n*** End Patch"

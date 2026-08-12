@@ -89,13 +89,13 @@ def test_external_asks_in_interactive_allows_in_auto(tmp_path):
     d = interactive.evaluate("send_message", {"text": "hi"}, EXTERNAL_META)
     assert not d.allowed and d.needs_user
 
-    auto = PermissionEngine(workspace_root=tmp_path, mode=Mode.AUTO)
+    auto = PermissionEngine(workspace_root=tmp_path, mode=Mode.BYPASS_APPROVALS)
     d = auto.evaluate("send_message", {"text": "hi"}, EXTERNAL_META)
     assert d.allowed
 
 
 def test_write_local_path_scoped(tmp_path):
-    eng = PermissionEngine(workspace_root=tmp_path, mode=Mode.AUTO)
+    eng = PermissionEngine(workspace_root=tmp_path, mode=Mode.BYPASS_APPROVALS)
     assert eng.evaluate("write_file", {"path": "ok.py", "content": "x"}, None).allowed
     escape = eng.evaluate("write_file", {"path": "../bad.py", "content": "x"}, None)
     assert not escape.allowed

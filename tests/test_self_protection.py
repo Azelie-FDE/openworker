@@ -14,7 +14,7 @@ import pytest
 from coworker.permissions import Mode, PermissionEngine, protected_paths
 from coworker.secrets import state_dir
 
-ALL_MODES = [Mode.DISCUSS, Mode.PLAN, Mode.INTERACTIVE, Mode.CUSTOM, Mode.AUTO]
+ALL_MODES = [Mode.DISCUSS, Mode.PLAN, Mode.INTERACTIVE, Mode.CUSTOM, Mode.AUTO_APPROVE, Mode.BYPASS_APPROVALS]
 
 
 def _engine(tmp_path, mode=Mode.INTERACTIVE, **kw):
@@ -44,7 +44,7 @@ def test_shell_touching_settings_blocked_in_every_mode(tmp_path, mode):
 def test_settings_write_beats_auto_mode_and_allowlists(tmp_path):
     # Every auto-approve path must lose to the floor.
     target = str(state_dir() / "config.toml")
-    auto = _engine(tmp_path, Mode.AUTO)
+    auto = _engine(tmp_path, Mode.BYPASS_APPROVALS)
     assert not auto.evaluate("write_file", {"path": target, "content": "x"}, None).allowed
 
     custom = _engine(tmp_path, Mode.CUSTOM, auto_allow_tools={"write_file"})
@@ -57,7 +57,7 @@ def test_settings_write_beats_auto_mode_and_allowlists(tmp_path):
 
 def test_settings_protected_via_patch_blob(tmp_path):
     # The patch path is extracted from the blob, so this route is covered too.
-    eng = _engine(tmp_path, Mode.AUTO)
+    eng = _engine(tmp_path, Mode.BYPASS_APPROVALS)
     target = str(state_dir() / "workspace_trust.json")
     patch = f"*** Begin Patch\n*** Update File: {target}\n@@\n-a\n+b\n*** End Patch"
     assert not eng.evaluate("apply_patch", {"patch": patch}, None).allowed
@@ -80,7 +80,7 @@ def test_protected_paths_cover_the_grant_and_trust_stores():
 )
 def test_protected_in_project_never_auto_approved(tmp_path, rel):
     # Writable (inside the root) but must always reach a human, even in auto mode.
-    for mode in (Mode.AUTO, Mode.CUSTOM, Mode.INTERACTIVE):
+    for mode in (Mode.BYPASS_APPROVALS, Mode.CUSTOM, Mode.INTERACTIVE):
         eng = _engine(tmp_path, mode, auto_allow_tools={"write_file"})
         eng.allow_tool_for_session("write_file")
         d = eng.evaluate("write_file", {"path": rel, "content": "x"}, None)
@@ -90,11 +90,11 @@ def test_protected_in_project_never_auto_approved(tmp_path, rel):
 
 def test_ordinary_project_file_still_auto_approves(tmp_path):
     # The protection must not leak onto normal edits.
-    eng = _engine(tmp_path, Mode.AUTO)
+    eng = _engine(tmp_path, Mode.BYPASS_APPROVALS)
     assert eng.evaluate("write_file", {"path": "src/app.py", "content": "x"}, None).allowed
 
 
 def test_lookalike_paths_are_not_protected(tmp_path):
     # A file merely NAMED like a hook, outside the protected dirs, is ordinary.
-    eng = _engine(tmp_path, Mode.AUTO)
+    eng = _engine(tmp_path, Mode.BYPASS_APPROVALS)
     assert eng.evaluate("write_file", {"path": "docs/pre-commit.md", "content": "x"}, None).allowed

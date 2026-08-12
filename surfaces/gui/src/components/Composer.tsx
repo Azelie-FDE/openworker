@@ -20,10 +20,14 @@ import {
 // polished enough to ship, and Custom (config.toml auto-allow rules) is a power-user mode
 // with no in-app explanation. The server still honors both — a session already in one of
 // those modes keeps working; the picker just doesn't offer them.
+// "auto" is the legacy wire value for Bypass approvals (server: Mode.BYPASS_APPROVALS) —
+// kept so saved sessions and configs keep working. Auto-Approve ("auto-approve") is the
+// reviewer mode (spec: reviewed-auto-mode.md); it appears only when the server says the
+// feature flag is on, wired in the settings pass — until then the picker omits it.
 const PERMISSION_OPTIONS: Option[] = [
   { value: "discuss", label: "Discuss", description: "Chat and explore — no edits or commands" },
   { value: "interactive", label: "Ask for approval", description: "Ask before edits and commands" },
-  { value: "auto", label: "Full access", description: "Run everything without asking" },
+  { value: "auto", label: "Bypass approvals", description: "Run everything without asking — approvals off" },
 ];
 
 // No hardcoded model fallback: until the server supplies the list (a few seconds after a

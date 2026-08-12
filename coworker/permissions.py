@@ -174,8 +174,24 @@ class Mode(str, Enum):
         "plan"  # read-only + the planning contract (explore → propose_plan → execute)
     )
     INTERACTIVE = "interactive"  # ask for approval (default)
-    AUTO = "auto"  # full access
+    # Renamed from "auto" (spec §1.5, 2026-08-12): "bypass" names the action — switching a
+    # safety system off — and can't be confused with AUTO_APPROVE in a picker. Deliberately
+    # NOT "bypass-ALL-approvals": Phase 1's floors (settings files, out-of-root writes,
+    # `.git/hooks`) still hold in this mode, so "all" would be a false promise.
+    BYPASS_APPROVALS = "bypass-approvals"  # full access (minus the hard floors)
+    # Interactive, but an LLM reviewer judges each would-be approval card first: clear
+    # allows run without a prompt, everything else still reaches the human. The reviewer
+    # can only turn "ask" into "allow", never "blocked" into "allow" (spec §1.2). With no
+    # reviewer plugged into the engine this mode behaves exactly like INTERACTIVE.
+    AUTO_APPROVE = "auto-approve"
     CUSTOM = "custom"  # interactive + auto-allow the config's `auto_allow` tools
+
+    @classmethod
+    def _missing_(cls, value: object) -> "Mode | None":
+        # Legacy spelling from configs, saved sessions, and older UIs.
+        if value == "auto":
+            return cls.BYPASS_APPROVALS
+        return None
 
 
 # Modes whose enforcement is read-only. DISCUSS and PLAN share the same gate; they differ
@@ -322,21 +338,38 @@ class PermissionEngine:
             )
 
         # Full access.
-        if self.mode is Mode.AUTO:
+        if self.mode is Mode.BYPASS_APPROVALS:
             return Decision(True, "full access")
 
-        # interactive / custom: allowlists.
+        # interactive / custom / auto-approve: allowlists.
+        #
+        # In AUTO_APPROVE, session grants ("always allow this …" clicks) deliberately do
+        # NOT auto-allow (spec §1.5): out-of-band standing policy — the user-settings
+        # allowlists checked via `_command_allowed` / config `allowed_domains` — may skip
+        # the judge, but an in-flow click may not. A domain grant matches on host only and
+        # is blind to the path and query string (where exfiltration rides), and command
+        # grants replay as exact text; both are precisely what the reviewer should see.
+        # The skipped checks return `needs_user` instead, which routes to the reviewer.
+        honor_session_grants = self.mode is not Mode.AUTO_APPROVE
         if is_shell:
             command = str(arguments.get("command", ""))
             if self._command_allowed(command):
                 return Decision(True, "command on allowlist")
-            if command and command in self.session_allow_commands:
+            if (
+                honor_session_grants
+                and command
+                and command in self.session_allow_commands
+            ):
                 return Decision(True, "command allowed for session")
         if is_egress:
             url = str(arguments.get("url", ""))
-            if self._domain_allowed(url):
+            if self._domain_allowed(url, include_session=honor_session_grants):
                 return Decision(True, "domain on allowlist")
-        if tool_name in self.session_allow_tools and not is_connector:
+        if (
+            honor_session_grants
+            and tool_name in self.session_allow_tools
+            and not is_connector
+        ):
             return Decision(True, "tool allowed for session")
 
         # Task-scoped standing rules (§25): tool + exact target, owned by the automation.
@@ -435,15 +468,19 @@ class PermissionEngine:
                 return target
         return None
 
-    def _domain_allowed(self, url: str) -> bool:
+    def _domain_allowed(self, url: str, *, include_session: bool = True) -> bool:
         """True when the URL's host is an allowed egress destination — an exact match or a
         subdomain of an allowed domain (so `docs.python.org` matches `python.org`, but
-        `evil-python.org` never matches `python.org`)."""
+        `evil-python.org` never matches `python.org`).
+
+        `include_session=False` (AUTO_APPROVE mode) checks the user-settings list only:
+        mid-session "always allow this domain" clicks don't bypass the reviewer there."""
         host = _host_of(url)
         if not host:
             return False
         allowed = {d for d in (_host_of(x) for x in self.allowed_domains) if d}
-        allowed |= self.session_allow_domains
+        if include_session:
+            allowed |= self.session_allow_domains
         for dom in allowed:
             if host == dom or host.endswith("." + dom):
                 return True

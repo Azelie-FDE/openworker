@@ -2746,7 +2746,18 @@ class SessionManager:
         or the attended/unattended toggle. Without this, "who turned on auto mode, and when"
         is unanswerable from the audit store, which is at odds with the per-call trail the
         rest of the engine keeps. Raising autonomy is flagged so it can be filtered."""
-        order = {"discuss": 0, "plan": 1, "interactive": 2, "custom": 2, "auto": 3}
+        # AUTO_APPROVE sits above interactive (turning the reviewer on means fewer human
+        # checks — that IS raising autonomy) and below bypass, which removes checks
+        # entirely. "auto" is the legacy spelling of "bypass-approvals".
+        order = {
+            "discuss": 0,
+            "plan": 1,
+            "interactive": 2,
+            "custom": 2,
+            "auto-approve": 3,
+            "auto": 4,
+            "bypass-approvals": 4,
+        }
         raised = (
             order.get(str(after), 0) > order.get(str(before), 0)
             if kind == "mode"
