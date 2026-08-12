@@ -24,10 +24,19 @@ import {
 // kept so saved sessions and configs keep working. Auto-Approve ("auto-approve") is the
 // reviewer mode (spec: reviewed-auto-mode.md); it appears only when the server says the
 // feature flag is on, wired in the settings pass — until then the picker omits it.
-const PERMISSION_OPTIONS: Option[] = [
+// `note` renders as a second, dimmer line under the description; `caution` prefixes the
+// label with a warning triangle. Both are picker-local extensions of Dropdown's Option.
+type ModeOption = Option & { note?: string; caution?: boolean };
+
+const PERMISSION_OPTIONS: ModeOption[] = [
   { value: "discuss", label: "Discuss", description: "Chat and explore — no edits or commands" },
   { value: "interactive", label: "Ask for approval", description: "Ask before edits and commands" },
-  { value: "auto", label: "Bypass approvals", description: "Run everything without asking — approvals off" },
+  {
+    value: "auto",
+    label: "Bypass approvals",
+    description: "Run everything without asking — approvals off",
+    caution: true,
+  },
 ];
 
 // No hardcoded model fallback: until the server supplies the list (a few seconds after a
@@ -877,13 +886,22 @@ function ModeMenu({
               >
                 <span
                   className={
-                    "text-[13px] " + (o.value === mode ? "font-medium text-accent" : "text-ink")
+                    "flex items-center text-[13px] " +
+                    (o.value === mode ? "font-medium text-accent" : "text-ink")
                   }
                 >
+                  {o.caution && (
+                    <Icon name="warning" size={13} className="mr-1.5 shrink-0 text-warnInk" />
+                  )}
                   {o.label}
                   {o.value === mode && <span className="ml-1.5">✓</span>}
                 </span>
                 <span className="text-[11px] text-faint leading-snug">{o.description}</span>
+                {o.note && (
+                  <span className="text-[10.5px] text-faint/80 italic leading-snug mt-0.5">
+                    {o.note}
+                  </span>
+                )}
               </button>
             ))}
             {onUnattendedChange && (
