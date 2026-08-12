@@ -20,6 +20,7 @@ from enum import Enum
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
 from . import compaction as _compaction
+from . import session_facts
 from .events import Event, EventType
 from .permissions import Mode, PermissionEngine
 from .providers import AssistantTurn, ProviderClient, ToolCall
@@ -112,6 +113,11 @@ class TurnEngine:
         self.compaction_state: Optional[_compaction.CompactionState] = None
         self.compaction_settings: Optional[Callable[[], dict[str, Any]]] = None
         self.is_attended: Optional[Callable[[], bool]] = None
+        # Session facts (spec Part 0 / §2.4) — the known world frozen at session start, plus
+        # the per-turn ingestion record. Set post-construction by the surface, same as
+        # compaction above, so the constructor footprint stays put. None ⇒ nothing recorded
+        # and behaviour is byte-identical; NOTHING consumes it in v1 either way.
+        self.session_facts: Optional[session_facts.SessionFacts] = None
         self._last_context_tokens: Optional[int] = None
         self.audit_context: dict[str, Any] = {}
         if instructions and not (
@@ -189,6 +195,8 @@ class TurnEngine:
             message["_display"] = display
         self.messages.append(message)
         self._cancel.clear()
+        if self.session_facts is not None:
+            self.session_facts.begin_turn()
         data: dict[str, Any] = {"input": user_input}
         if source is not None:
             data["source"] = source
@@ -827,6 +835,7 @@ class TurnEngine:
             result=result,
             result_preview=_preview(result),
         )
+        self._note_ingestion(tool_call, status)
         rule = self._standing_notes.pop(tool_call.id, "")
         return Event(
             EventType.TOOL_FINISHED,
@@ -838,6 +847,25 @@ class TurnEngine:
                 **({"standing_rule": rule} if rule else {}),
             },
         )
+
+    def _note_ingestion(self, tool_call: ToolCall, status: str) -> None:
+        """Record that outside content entered this session, and from where. The fact and
+        the source only — never the content, not even truncated.
+
+        **Nothing consumes this in v1.** It exists so that when the reviewer is eventually
+        offered the fact (v2, `PRV-1`), the question "would it have changed a verdict?" can
+        be answered by replaying a shadow run instead of re-argued. See
+        `session_facts.py` and the spec's Part 0.
+
+        Failed calls are skipped: a fetch that errored brought nothing in.
+        """
+        if self.session_facts is None or status != "ok":
+            return
+        spec = self.registry.get(tool_call.name)
+        if not session_facts.is_ingesting(spec.metadata if spec else None):
+            return
+        record = self.session_facts.note(tool_call.name, tool_call.arguments)
+        self._audit(tool_call, **record.to_audit())
 
     def _audit(self, tool_call: ToolCall, **event: Any) -> None:
         if self.audit_sink is None:

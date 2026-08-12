@@ -32,6 +32,7 @@ from .memory import (
 )
 from .permissions import Mode, PermissionEngine
 from .project import load_agents_md
+from . import session_facts
 from .roots import RootDir, normalize_roots, render_context
 from .providers import ProviderClient, ProviderRouter
 from .overrides import RiskOverrideStore
@@ -490,6 +491,17 @@ def build_engine(
     engine.todo = todo  # type: ignore[attr-defined]
     engine.agent_name = agent.name  # type: ignore[attr-defined]
     engine.roots = root_list  # type: ignore[attr-defined]  # shared list; Slice C mutates in place
+    # Session facts (spec Part 0 / §2.4): freeze the known world NOW, before the agent has
+    # acted. Freezing is the whole point — compared against live state, an agent that runs
+    # `git remote add backup https://attacker.net/…` would make its own destination look
+    # familiar. Nothing consumes this in v1; ingestion is recorded to the audit log only.
+    engine.session_facts = session_facts.SessionFacts(
+        world=session_facts.capture(
+            roots=root_list,
+            allowed_domains=config.allowed_domains,
+            workspace=ws,
+        )
+    )
     engine.audit_context = {
         "session_id": session_id or "",
         "agent": agent.name,
