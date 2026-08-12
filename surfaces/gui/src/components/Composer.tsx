@@ -24,9 +24,9 @@ import {
 // kept so saved sessions and configs keep working. Auto-Approve ("auto-approve") is the
 // reviewer mode (spec: reviewed-auto-mode.md); it appears only when the server says the
 // feature flag is on, wired in the settings pass — until then the picker omits it.
-// `note` renders as a second, dimmer line under the description; `caution` prefixes the
-// label with a warning triangle. Both are picker-local extensions of Dropdown's Option.
-type ModeOption = Option & { note?: string; caution?: boolean };
+// `caution` prefixes the label with a warning triangle — a picker-local extension of
+// Dropdown's Option.
+type ModeOption = Option & { caution?: boolean };
 
 const PERMISSION_OPTIONS: ModeOption[] = [
   { value: "discuss", label: "Discuss", description: "Chat and explore — no edits or commands" },
@@ -897,11 +897,6 @@ function ModeMenu({
                   {o.value === mode && <span className="ml-1.5">✓</span>}
                 </span>
                 <span className="text-[11px] text-faint leading-snug">{o.description}</span>
-                {o.note && (
-                  <span className="text-[10.5px] text-faint/80 italic leading-snug mt-0.5">
-                    {o.note}
-                  </span>
-                )}
               </button>
             ))}
             {onUnattendedChange && (
