@@ -338,14 +338,16 @@ export function App() {
   // Persona metadata drives workspace behavior by FAMILY, not by hardcoded id (so a DevOps/SecOps
   // code-family persona gates a folder like Code, and a knowledge persona starts orphan like Cowork).
   const [personas, setPersonas] = useState<Persona[] | null>(null);
+  const loadPersonas = useCallback(() => {
+    getPersonas().then(setPersonas).catch(() => {});
+  }, []);
   useEffect(() => {
-    const load = () => getPersonas().then(setPersonas).catch(() => {});
-    load();
+    loadPersonas();
     // The composer's coworker picker is always mounted on a fresh session — refetch on
     // mutations (enable/install from Settings) instead of going stale.
-    window.addEventListener(PERSONAS_CHANGED, load);
-    return () => window.removeEventListener(PERSONAS_CHANGED, load);
-  }, []);
+    window.addEventListener(PERSONAS_CHANGED, loadPersonas);
+    return () => window.removeEventListener(PERSONAS_CHANGED, loadPersonas);
+  }, [loadPersonas]);
   const personaOf = (a: string) => personas?.find((p) => p.id === a);
 
   // Pending Inbox items for the ACTIVE session — surfaced inline above the composer so an
@@ -505,6 +507,11 @@ export function App() {
           // on a cold start that left "Loading models…" stuck until the user visited
           // Settings (owner-hit 2026-07-23). Health just answered, so this one lands.
           loadSettings();
+          // Same race, same fix: the mount-time persona fetch loses to the sidecar boot in
+          // the packaged app, and its only other trigger is PERSONAS_CHANGED — so the
+          // composer's coworker picker stayed empty for the whole session while Settings
+          // (mounted later) looked fine (owner-hit 2026-08-13).
+          loadPersonas();
           if (!cancelled) setBooting(false);
         })
         .catch(() => {
