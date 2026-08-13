@@ -509,7 +509,9 @@ def build_engine(
     # per-turn retry guard trips (engine._reviewer_active). Uses the session's own
     # provider and model: no second key, and if it's trusted to drive the agent it's
     # strong enough to review it (§1.5).
-    if getattr(config, "auto_approve", False):
+    if getattr(config, "auto_approve", False) or getattr(
+        config, "auto_approve_shadow", False
+    ):
         from .reviewer import Reviewer
 
         engine.reviewer = Reviewer(
@@ -517,6 +519,10 @@ def build_engine(
             model=model,
             known_world=engine.session_facts.world.render(),
         )
+        # Shadow evaluation (Part 6 step 3): with only the shadow flag on, the reviewer is
+        # attached but the LIVE path stays off unless the session is actually in
+        # Mode.AUTO_APPROVE — shadow verdicts are recorded on approval cards in any mode.
+        engine.reviewer_shadow = bool(getattr(config, "auto_approve_shadow", False))
     engine.audit_context = {
         "session_id": session_id or "",
         "agent": agent.name,

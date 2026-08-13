@@ -126,6 +126,13 @@ class TurnEngine:
         self.reviewer: Optional[Any] = None
         self._reviewer_denials = 0
         self._reviewer_verdicts: dict[str, Any] = {}
+        # Shadow evaluation (spec Part 6 step 3): when True and a reviewer is attached, the
+        # reviewer records what it WOULD have decided on each approval card while the human
+        # still decides. Fire-and-forget — the card is never delayed, no decision is ever
+        # touched, and the verdict lands in the audit log (stage="reviewer_shadow", joined
+        # to the human's approval_resolved row by call_id).
+        self.reviewer_shadow = False
+        self._shadow_tasks: set[asyncio.Task] = set()
         self._last_context_tokens: Optional[int] = None
         self.audit_context: dict[str, Any] = {}
         if instructions and not (
@@ -791,6 +798,45 @@ class TurnEngine:
             arguments=tool_call.arguments,
         )
 
+    def _spawn_shadow_review(self, tool_call: ToolCall) -> None:
+        """Shadow evaluation (spec Part 6 step 3): record what the reviewer WOULD have
+        decided about this card, without touching anything. Fire-and-forget — the card
+        renders immediately; the verdict lands in the audit log when the call returns,
+        joined to the human's `approval_resolved` row by `call_id`. There is deliberately
+        no code path from a shadow verdict to a decision."""
+        if self.reviewer is None or not self.reviewer_shadow:
+            return
+        request, history = self._user_history()
+
+        async def _shadow() -> None:
+            try:
+                verdict = await self.reviewer.review(
+                    request=request,
+                    history=history,
+                    tool_name=tool_call.name,
+                    arguments=tool_call.arguments,
+                )
+                self._audit(
+                    tool_call,
+                    stage="reviewer_shadow",
+                    status=verdict.verdict,
+                    reason=verdict.reason,
+                    call_id=tool_call.id,
+                    tokens_in=verdict.tokens_in,
+                    tokens_out=verdict.tokens_out,
+                )
+            except Exception:
+                pass  # shadow must never surface a failure
+
+        task = asyncio.create_task(_shadow())
+        self._shadow_tasks.add(task)
+        task.add_done_callback(self._shadow_tasks.discard)
+
+    async def drain_shadow_reviews(self) -> None:
+        """Await in-flight shadow verdicts (tests and orderly shutdown; never the hot path)."""
+        if self._shadow_tasks:
+            await asyncio.gather(*list(self._shadow_tasks), return_exceptions=True)
+
     async def _authorize(self, tool_call: ToolCall) -> "AsyncIterator[Event | bool]":
         """Permission flow for one call (TOOL_PROPOSED is emitted by the caller). Yields
         its events, then True/False (allowed) last. Denied/unknown calls get their
@@ -815,10 +861,12 @@ class TurnEngine:
                 tool_call, stage="auto_allowed", status="allowed", reason=reason
             )
 
+        consulted_live = False
         if not allowed and decision.needs_user and self._reviewer_active():
             # The one thing the reviewer may do: turn "ask the human" into "go ahead" —
             # never "blocked" into "go ahead" (§1.2; hard denies never reach this branch
             # because needs_user is False on them).
+            consulted_live = True
             verdict = await self._consult_reviewer(tool_call)
             self._audit(
                 tool_call,
@@ -862,6 +910,11 @@ class TurnEngine:
             # "unsure" falls through to today's card — the human decides.
 
         if not allowed and decision.needs_user:
+            # Shadow evaluation: record what the reviewer would have said about this card.
+            # Skipped when the live path already consulted it (an `unsure` falling through
+            # to the card is already audited as reviewer_verdict — no double spend).
+            if not consulted_live:
+                self._spawn_shadow_review(tool_call)
             yield Event(
                 EventType.PERMISSION_REQUIRED,
                 {
@@ -880,7 +933,12 @@ class TurnEngine:
                     ),
                 },
             )
-            self._audit(tool_call, stage="approval_requested", reason=decision.reason)
+            self._audit(
+                tool_call,
+                stage="approval_requested",
+                reason=decision.reason,
+                call_id=tool_call.id,
+            )
             outcome = await self._interruptible(
                 self.approver(
                     PermissionRequest(
@@ -901,6 +959,7 @@ class TurnEngine:
                 self._audit(
                     tool_call,
                     stage="approval_resolved",
+                    call_id=tool_call.id,
                     status="denied",
                     approval=outcome.value,
                     reason=reason,
@@ -920,6 +979,7 @@ class TurnEngine:
                 self._audit(
                     tool_call,
                     stage="approval_resolved",
+                    call_id=tool_call.id,
                     status="approved",
                     approval=outcome.value,
                     reason=reason,
