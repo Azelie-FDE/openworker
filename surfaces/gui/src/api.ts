@@ -1420,6 +1420,25 @@ export async function setUnattended(
   return res.json();
 }
 
+// Auto-Approve metering (§1.7): per-session reviewer counts from the durable audit rows.
+export interface ReviewerBucket {
+  checks: number;
+  allow: number;
+  deny: number;
+  unsure: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+export interface ReviewerStats {
+  live: ReviewerBucket;   // the mode actually deciding (Mode.AUTO_APPROVE)
+  shadow: ReviewerBucket; // shadow evaluation: recorded next to the human's own decisions
+}
+
+export async function getReviewerStats(sessionId: string): Promise<ReviewerStats> {
+  const res = await fetch(`${httpBase()}/v1/sessions/${sessionId}/reviewer-stats`);
+  return res.json();
+}
+
 export async function getSettings(): Promise<ModelSettings> {
   const res = await fetch(`${httpBase()}/v1/settings`);
   return res.json();

@@ -383,6 +383,12 @@ def create_app(manager: SessionManager) -> FastAPI:
     def get_unattended(session_id: str) -> dict[str, Any]:
         return {"unattended": manager.unattended.is_unattended(session_id)}
 
+    @app.get("/v1/sessions/{session_id}/reviewer-stats")
+    def get_reviewer_stats(session_id: str) -> dict[str, Any]:
+        # Auto-Approve metering (§1.7): checks/verdicts/tokens from the durable audit rows.
+        # Drives the composer's "Auto-Approve · N checks" badge and the mode-menu summary.
+        return manager.audit_store.reviewer_stats(session_id)
+
     @app.post("/v1/sessions/{session_id}/unattended")
     def set_unattended(session_id: str, body: dict) -> dict[str, Any]:
         # The GUI gates the on-transition behind a one-tap confirm; the manager records the

@@ -97,6 +97,9 @@ interface Props {
   // when" is one mental model. Absent handler = no toggle (e.g. Chat).
   unattended?: boolean;
   onUnattendedChange?: (on: boolean) => void;
+  // Auto-Approve metering (§1.7): the "Auto-Approve · N checks" badge + mode-menu summary.
+  // Absent/zero hides both; only the LIVE bucket surfaces here (shadow is a Settings concern).
+  reviewerStats?: { checks: number; allow: number; deny: number; unsure: number; tokens_in: number; tokens_out: number } | null;
   approvalSlot?: ReactNode;
   // Push text + attachments into the composer (e.g. a start-panel task card). The `nonce` makes
   // repeated identical prefills re-apply; the user can still edit before sending.
@@ -599,6 +602,7 @@ export function Composer(props: Props) {
           ) : props.workspace !== undefined ? (
             <ModeMenu
               mode={props.mode}
+              reviewerStats={props.reviewerStats}
               onModeChange={props.onModeChange}
               unattended={props.unattended}
               onUnattendedChange={props.onUnattendedChange}
@@ -851,11 +855,13 @@ function ModeMenu({
   onModeChange,
   unattended,
   onUnattendedChange,
+  reviewerStats,
 }: {
   mode: string;
   onModeChange: (mode: string) => void;
   unattended?: boolean;
   onUnattendedChange?: (on: boolean) => void;
+  reviewerStats?: { checks: number; allow: number; deny: number; unsure: number; tokens_in: number; tokens_out: number } | null;
 }) {
   const [open, setOpen] = useState(false);
   // The Auto-Approve entry is gated on the server flag. Fetch once on first open; a session
@@ -889,6 +895,11 @@ function ModeMenu({
         }
       >
         {current?.label || mode}
+        {mode === "auto-approve" && !!reviewerStats?.checks && (
+          <span className="text-faint" data-testid="reviewer-badge">
+            · {reviewerStats.checks} {reviewerStats.checks === 1 ? "check" : "checks"}
+          </span>
+        )}
         <Icon name="chevronDown" size={11} className="text-faint" />
       </button>
       {open && (
@@ -923,6 +934,18 @@ function ModeMenu({
                 <span className="text-[11px] text-faint leading-snug">{o.description}</span>
               </button>
             ))}
+            {mode === "auto-approve" && !!reviewerStats?.checks && (
+              <>
+                <div className="my-1 border-t border-line" />
+                <div className="px-2.5 py-1.5 text-[11px] text-faint leading-snug" data-testid="reviewer-summary">
+                  This session: {reviewerStats.checks} {reviewerStats.checks === 1 ? "check" : "checks"} ·{" "}
+                  {reviewerStats.allow} cleared · {reviewerStats.deny} blocked · {reviewerStats.unsure} asked you
+                  {reviewerStats.tokens_in + reviewerStats.tokens_out > 0 && (
+                    <> · ~{Math.round((reviewerStats.tokens_in + reviewerStats.tokens_out) / 100) / 10}k tokens</>
+                  )}
+                </div>
+              </>
+            )}
             {onUnattendedChange && (
               <>
                 <div className="my-1 border-t border-line" />
