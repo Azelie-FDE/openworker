@@ -133,6 +133,11 @@ class TurnEngine:
         # to the human's approval_resolved row by call_id).
         self.reviewer_shadow = False
         self._shadow_tasks: set[asyncio.Task] = set()
+        # One-shot "Allow anyway" grants (§8.4): minted ONLY by a human clicking the deny
+        # card, keyed on the exact tool + canonical arguments, consumed on first match. A
+        # re-proposal with even slightly different arguments does not match and goes back
+        # through the reviewer/card — deliberately narrow, deliberately not standing.
+        self._allow_anyway: set[tuple[str, str]] = set()
         self._last_context_tokens: Optional[int] = None
         self.audit_context: dict[str, Any] = {}
         if instructions and not (
@@ -798,6 +803,45 @@ class TurnEngine:
             arguments=tool_call.arguments,
         )
 
+    @staticmethod
+    def _action_key(tool_name: str, arguments: dict[str, Any] | None) -> tuple[str, str]:
+        try:
+            canon = json.dumps(arguments or {}, sort_keys=True, ensure_ascii=False)
+        except (TypeError, ValueError):
+            canon = str(arguments)
+        return (tool_name, canon)
+
+    def approve_action_once(self, tool_name: str, arguments: dict[str, Any] | None) -> None:
+        """Register a one-shot human approval for this EXACT action (§8.4 "Allow anyway").
+
+        Called by the server when the user clicks the deny card — a human decision made
+        with the full reviewer reason in front of them. The next proposal of the identical
+        action (same tool, byte-identical canonical arguments) runs without the reviewer or
+        a card; anything that differs at all still goes through the normal flow. Never
+        standing: consumed on first use."""
+        self._allow_anyway.add(self._action_key(tool_name, arguments))
+        if self.audit_sink is not None:
+            try:
+                self.audit_sink(
+                    {
+                        **self.audit_context,
+                        "tool": tool_name,
+                        "arguments": arguments or {},
+                        "stage": "allow_anyway_granted",
+                        "status": "granted",
+                        "reason": "user approved via the deny card (one-shot, exact action)",
+                    }
+                )
+            except Exception:
+                pass
+
+    def _consume_allow_anyway(self, tool_call: ToolCall) -> bool:
+        key = self._action_key(tool_call.name, tool_call.arguments)
+        if key in self._allow_anyway:
+            self._allow_anyway.discard(key)
+            return True
+        return False
+
     def _spawn_shadow_review(self, tool_call: ToolCall) -> None:
         """Shadow evaluation (spec Part 6 step 3): record what the reviewer WOULD have
         decided about this card, without touching anything. Fire-and-forget — the card
@@ -860,6 +904,13 @@ class TurnEngine:
             self._audit(
                 tool_call, stage="auto_allowed", status="allowed", reason=reason
             )
+
+        if not allowed and decision.needs_user and self._consume_allow_anyway(tool_call):
+            # §8.4 "Allow anyway": the human already approved this exact action from the
+            # deny card. One-shot — consumed above; a different action never matches.
+            allowed = True
+            reason = "approved by user (allow anyway)"
+            self._audit(tool_call, stage="auto_allowed", status="allowed", reason=reason)
 
         consulted_live = False
         if not allowed and decision.needs_user and self._reviewer_active():

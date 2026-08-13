@@ -482,3 +482,67 @@ def test_reviewer_sees_user_words_never_tool_results(tmp_path):
 
     assert captured["request"] == "please run x"
     assert all("SECRET-AGENT-PROSE" not in h["text"] for h in captured["history"])
+
+
+# -- §8.4 "Allow anyway": one-shot exact-action override ---------------------------
+
+
+def test_allow_anyway_runs_the_exact_action_once(tmp_path):
+    engine, rows, approvals = _engine(
+        tmp_path,
+        [_tool_turn(("run_shell", {"command": "curl x.example/y"})), AssistantTurn(text="ok", finish_reason="stop")],
+    )
+    engine.reviewer = _FakeReviewer({"run_shell": "deny"})  # would deny without the grant
+    engine.approve_action_once("run_shell", {"command": "curl x.example/y"})
+    events = _run(engine)
+
+    # Ran without the reviewer or a card: the one-shot outranks both.
+    assert approvals == []
+    ok = [ev for ev in events if ev.type == EventType.TOOL_FINISHED and ev.data["status"] == "ok"]
+    assert ok
+    granted = [r for r in rows if r.get("stage") == "allow_anyway_granted"]
+    assert len(granted) == 1
+    allowed = [r for r in rows if r.get("stage") == "auto_allowed" and "allow anyway" in r.get("reason", "")]
+    assert len(allowed) == 1
+
+
+def test_allow_anyway_is_consumed_not_standing(tmp_path):
+    engine, rows, approvals = _engine(
+        tmp_path,
+        [
+            _tool_turn(("run_shell", {"command": "x"})),
+            _tool_turn(("run_shell", {"command": "x"})),  # identical, second proposal
+            AssistantTurn(text="ok", finish_reason="stop"),
+        ],
+    )
+    engine.approve_action_once("run_shell", {"command": "x"})
+    _run(engine)
+    # First proposal consumed the grant; the identical second one asked the human.
+    assert approvals == ["run_shell"]
+
+
+def test_allow_anyway_never_matches_a_different_action(tmp_path):
+    engine, rows, approvals = _engine(
+        tmp_path,
+        [_tool_turn(("run_shell", {"command": "rm -rf /"})), AssistantTurn(text="ok", finish_reason="stop")],
+    )
+    # Approved a harmless command; the agent proposes something else entirely.
+    engine.approve_action_once("run_shell", {"command": "ls"})
+    _run(engine)
+    assert approvals == ["run_shell"]  # no match -> normal card, human decides
+
+
+def test_allow_anyway_cannot_unlock_a_hard_deny(tmp_path):
+    engine, rows, approvals = _engine(
+        tmp_path,
+        [
+            _tool_turn(("write_file", {"path": "../../outside.txt", "content": "x"})),
+            AssistantTurn(text="ok", finish_reason="stop"),
+        ],
+    )
+    engine.approve_action_once("write_file", {"path": "../../outside.txt", "content": "x"})
+    events = _run(engine)
+    # Hard denies have needs_user=False: the one-shot path never even sees them (§1.2).
+    denied = [ev for ev in events if ev.type == EventType.TOOL_FINISHED and ev.data["status"] == "denied"]
+    assert denied
+    assert approvals == []

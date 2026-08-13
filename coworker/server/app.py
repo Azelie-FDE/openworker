@@ -1925,6 +1925,19 @@ def create_app(manager: SessionManager) -> FastAPI:
                     )
                 elif kind == "question_response":
                     _resolve_pending(str(message.get("answer", "")))
+                elif kind == "allow_anyway":
+                    # §8.4: the user clicked "Allow anyway" on a reviewer-denied tool card.
+                    # Registers a ONE-SHOT exact-action approval on the engine; the GUI then
+                    # sends its canned retry message through the normal user_message path,
+                    # and the re-proposed identical action runs without the reviewer/card.
+                    name = message.get("name")
+                    arguments = message.get("arguments")
+                    if not isinstance(name, str) or not name:
+                        await reject_input("Invalid allow_anyway: missing tool name.")
+                    elif arguments is not None and not isinstance(arguments, dict):
+                        await reject_input("Invalid allow_anyway: arguments must be an object.")
+                    else:
+                        engine.approve_action_once(name, arguments or {})
                 elif kind == "interrupt":
                     engine.request_interrupt()
                 elif kind == "retry":

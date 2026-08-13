@@ -2102,6 +2102,12 @@ export class Session {
     this.send({ type: "approval", decision });
   }
 
+  /** §8.4 "Allow anyway": register a ONE-SHOT exact-action approval for a reviewer-denied
+   *  tool call. The caller follows up with a normal user message so the agent retries. */
+  allowAnyway(name: string, args: any) {
+    this.send({ type: "allow_anyway", name, arguments: args ?? {} });
+  }
+
   // Reply to a `request_directory` prompt: grant a folder (with access level) or decline.
   respondDirectory(granted: boolean, path?: string, writable?: boolean) {
     this.send({ type: "directory_response", granted, ...(path ? { path } : {}), writable: !!writable });

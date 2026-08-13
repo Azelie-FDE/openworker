@@ -712,6 +712,8 @@ export function App() {
               d.result_preview || d.reason,
               d.display?.hidden_by_filters,
               d.standing_rule,
+              d.reviewer_reason,
+              d.allow_anyway,
             ),
           );
           // Refresh the right rail when something it shows may have changed: browser state, or a
@@ -905,6 +907,13 @@ export function App() {
   // the 4s poll restores anything genuinely still pending.
   const dropSessionInbox = (kind: string) =>
     setSessionInbox((cur) => cur.filter((it) => it.kind !== kind));
+  // §8.4 "Allow anyway" on a reviewer-denied tool: register the one-shot exact-action
+  // approval, then send a visible user message so the agent retries. The engine runs the
+  // identical re-proposal without the reviewer or a card; anything different still asks.
+  const allowAnyway = (name: string, args: any) => {
+    sessionRef.current?.allowAnyway(name, args);
+    send(`I reviewed the blocked ${name} action — go ahead with it exactly as proposed.`);
+  };
   const approve = (decision: ApprovalDecision) => {
     setItems((p) => resolveLastApproval(p, decision));
     dropSessionInbox("approval");
@@ -1574,6 +1583,7 @@ export function App() {
                     onApprove={approve}
                     running={running}
                     onRetry={retry}
+                    onAllowAnyway={allowAnyway}
                     onUndoMemory={(id, previous) => void undoMemorySave(id, previous)}
                     // §33 ref #3: sub-threshold streamed text renders INSIDE the live turn
                     // group (header when collapsed, quiet line when expanded) — never as a
@@ -1780,6 +1790,8 @@ function updateLastTool(
   preview?: string,
   hidden?: number,
   standingRule?: string,
+  reviewerReason?: string,
+  allowAnyway?: boolean,
 ): Item[] {
   const copy = [...items];
   for (let i = copy.length - 1; i >= 0; i--) {
@@ -1791,6 +1803,8 @@ function updateLastTool(
         preview,
         ...(hidden ? { hidden } : {}),
         ...(standingRule ? { standingRule } : {}),
+        ...(reviewerReason ? { reviewerReason } : {}),
+        ...(allowAnyway ? { allowAnyway } : {}),
       };
       break;
     }
