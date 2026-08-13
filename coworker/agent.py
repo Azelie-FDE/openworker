@@ -218,6 +218,11 @@ def build_engine(
     connector_filter: Optional[set[str]] = None,
     # A set (static snapshot) or a zero-arg callable (live, re-evaluated per load_skill).
     skill_filter: Optional[set[str] | Callable[[], set[str]]] = None,
+    # Auto-Approve flags (spec Part 8 / §1.5). None ⇒ read the config.toml value; the server
+    # passes its prefs-backed booleans so the GUI Settings toggle takes effect. Both stores
+    # are user-global, preserving the "a repo can't enable this" invariant.
+    auto_approve: Optional[bool] = None,
+    auto_approve_shadow: Optional[bool] = None,
 ) -> TurnEngine:
     ws = Path(workspace).expanduser().resolve() if workspace else None
     if agent.needs_workspace and ws is None:
@@ -509,9 +514,18 @@ def build_engine(
     # per-turn retry guard trips (engine._reviewer_active). Uses the session's own
     # provider and model: no second key, and if it's trusted to drive the agent it's
     # strong enough to review it (§1.5).
-    if getattr(config, "auto_approve", False) or getattr(
-        config, "auto_approve_shadow", False
-    ):
+    #
+    # The two flags may be overridden by the caller (the GUI Settings toggle persists them
+    # to the user-global prefs store, which the server reads and passes here); None ⇒ take
+    # the config.toml value. Both stores are user-global, so a repo still can't turn either
+    # on regardless of which path set it.
+    live_on = auto_approve if auto_approve is not None else getattr(config, "auto_approve", False)
+    shadow_on = (
+        auto_approve_shadow
+        if auto_approve_shadow is not None
+        else getattr(config, "auto_approve_shadow", False)
+    )
+    if live_on or shadow_on:
         from .reviewer import Reviewer
 
         engine.reviewer = Reviewer(
@@ -522,7 +536,7 @@ def build_engine(
         # Shadow evaluation (Part 6 step 3): with only the shadow flag on, the reviewer is
         # attached but the LIVE path stays off unless the session is actually in
         # Mode.AUTO_APPROVE — shadow verdicts are recorded on approval cards in any mode.
-        engine.reviewer_shadow = bool(getattr(config, "auto_approve_shadow", False))
+        engine.reviewer_shadow = bool(shadow_on)
     engine.audit_context = {
         "session_id": session_id or "",
         "agent": agent.name,

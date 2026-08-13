@@ -513,6 +513,10 @@ class SessionManager:
             # Per-session skill menu, LIVE (SKILLS-SPEC §3): a callable so load_skill sees
             # disables/new skills immediately; the catalog snapshot is taken at build.
             skill_filter=lambda sid=session_id, w=ws: self.effective_skill_names(sid, w),
+            # Auto-Approve (spec §1.5): prefs-backed, so the Settings toggle takes effect on
+            # the next session build without a config.toml edit.
+            auto_approve=self.auto_approve(),
+            auto_approve_shadow=self.auto_approve_shadow(),
         )
         # An automation run rebuilt here (manual "Run now" over WS, durable resume) still
         # carries its task's standing allowances — the rules live on the task record.
@@ -1896,6 +1900,10 @@ class SessionManager:
             "nav_layout": self._nav_layout(),
             "sessions_peek": self.sessions_peek(),
             "context_bar": self.context_bar(),
+            # Auto-Approve feature flag + its shadow-eval sibling (spec §1.5). Drive the
+            # Settings toggles and gate the composer's Auto-Approve mode entry.
+            "auto_approve": self.auto_approve(),
+            "auto_approve_shadow": self.auto_approve_shadow(),
             "scratch_base": self._prefs.get("scratch_base")
             or self.DEFAULT_SCRATCH_BASE,
             # Real on-disk secrets location, so the UI shows the OS-native path instead of a
@@ -1964,6 +1972,42 @@ class SessionManager:
         self._prefs["context_bar"] = bool(shown)
         self._save_prefs()
         return {"ok": True, "context_bar": self.context_bar()}
+
+    # -- Auto-Approve (spec §1.5, Part 6 step 3) --------------------------------
+    # The feature flag and its shadow-eval sibling live in prefs (GUI-writable), falling
+    # back to the config.toml value a power user may have hand-set. Prefs is user-global,
+    # so a cloned repo still can't enable either — same guarantee as the config path.
+    def auto_approve(self) -> bool:
+        from ..config import load_config
+
+        if "auto_approve" in self._prefs:
+            return bool(self._prefs["auto_approve"])
+        return bool(load_config().auto_approve)
+
+    def auto_approve_shadow(self) -> bool:
+        from ..config import load_config
+
+        if "auto_approve_shadow" in self._prefs:
+            return bool(self._prefs["auto_approve_shadow"])
+        return bool(load_config().auto_approve_shadow)
+
+    def set_auto_approve(self, on: Any) -> dict[str, Any]:
+        self._prefs["auto_approve"] = bool(on)
+        self._save_prefs()
+        return {
+            "ok": True,
+            "auto_approve": self.auto_approve(),
+            "auto_approve_shadow": self.auto_approve_shadow(),
+        }
+
+    def set_auto_approve_shadow(self, on: Any) -> dict[str, Any]:
+        self._prefs["auto_approve_shadow"] = bool(on)
+        self._save_prefs()
+        return {
+            "ok": True,
+            "auto_approve": self.auto_approve(),
+            "auto_approve_shadow": self.auto_approve_shadow(),
+        }
 
     # -- PDF attachments / token savings (owner ask, 2026-07-17) ----------------
     DEFAULT_PDF_MAX_PAGES = 20

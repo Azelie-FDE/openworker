@@ -24,13 +24,24 @@ import {
 // kept so saved sessions and configs keep working. Auto-Approve ("auto-approve") is the
 // reviewer mode (spec: reviewed-auto-mode.md); it appears only when the server says the
 // feature flag is on, wired in the settings pass — until then the picker omits it.
-// `caution` prefixes the label with a warning triangle — a picker-local extension of
-// Dropdown's Option.
-type ModeOption = Option & { caution?: boolean };
+// `caution` prefixes the label with a warning triangle; `gated` hides the entry unless the
+// server's auto_approve flag is on. Picker-local extensions of Dropdown's Option.
+type ModeOption = Option & { caution?: boolean; gated?: boolean };
 
+// "auto" is the legacy wire value for Bypass approvals (server: Mode.BYPASS_APPROVALS).
+// Auto-Approve is `gated`: shown only when getSettings().auto_approve is true (the feature
+// flag, off by default). Copy (owner, 2026-08-12): two lines like every other entry —
+// "your session model" carries the who-judges fact inline; per-check cost surfaces in the
+// metering badge, not as picker text.
 const PERMISSION_OPTIONS: ModeOption[] = [
   { value: "discuss", label: "Discuss", description: "Chat and explore — no edits or commands" },
   { value: "interactive", label: "Ask for approval", description: "Ask before edits and commands" },
+  {
+    value: "auto-approve",
+    label: "Auto-Approve",
+    description: "Your session model clears routine actions; doubtful ones still ask",
+    gated: true,
+  },
   {
     value: "auto",
     label: "Bypass approvals",
@@ -847,6 +858,19 @@ function ModeMenu({
   onUnattendedChange?: (on: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // The Auto-Approve entry is gated on the server flag. Fetch once on first open; a session
+  // already IN auto-approve mode always shows its own entry so the current mode is legible
+  // even if the flag was later turned off.
+  const [autoApproveEnabled, setAutoApproveEnabled] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    getSettings()
+      .then((s) => setAutoApproveEnabled(s.auto_approve === true))
+      .catch(() => {});
+  }, [open]);
+  const options = PERMISSION_OPTIONS.filter(
+    (o) => !o.gated || autoApproveEnabled || o.value === mode,
+  );
   const current = PERMISSION_OPTIONS.find((o) => o.value === mode);
   return (
     <div className="relative">
@@ -875,7 +899,7 @@ function ModeMenu({
             role="menu"
             data-testid="mode-menu"
           >
-            {PERMISSION_OPTIONS.map((o) => (
+            {options.map((o) => (
               <button
                 key={o.value}
                 className="w-full flex flex-col items-start px-2.5 py-1.5 rounded-lg text-left hover:bg-paper"

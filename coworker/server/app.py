@@ -1459,6 +1459,19 @@ def create_app(manager: SessionManager) -> FastAPI:
         # Composer: show the context-window fill bar, or just the popover (owner ask).
         return manager.set_context_bar((body or {}).get("context_bar", True))
 
+    @app.post("/v1/settings/auto-approve")
+    def settings_set_auto_approve(body: dict) -> dict[str, Any]:
+        # Auto-Approve feature flag (spec §1.5): when on, Mode.AUTO_APPROVE gets an LLM
+        # reviewer. Takes effect on the next session build. Turning it off leaves any
+        # shadow-eval setting alone (they are independent switches).
+        return manager.set_auto_approve((body or {}).get("auto_approve", False))
+
+    @app.post("/v1/settings/auto-approve-shadow")
+    def settings_set_auto_approve_shadow(body: dict) -> dict[str, Any]:
+        # Shadow evaluation (Part 6 step 3): the reviewer records what it WOULD decide on
+        # every approval card while the human still decides. Independent of the live flag.
+        return manager.set_auto_approve_shadow((body or {}).get("auto_approve_shadow", False))
+
     @app.post("/v1/settings/pdf")
     def settings_set_pdf(body: dict) -> dict[str, Any]:
         # Token savings (owner ask, 2026-07-17): fallback mode for models without native
