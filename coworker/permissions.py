@@ -401,8 +401,15 @@ class PermissionEngine:
             self.session_allow_commands.add(command)
 
     def allow_domain_for_session(self, url_or_domain: str) -> None:
-        """Remember an egress destination for this session ("Always allow this domain")."""
+        """Remember an egress destination for this session ("Always allow this domain").
+
+        A leading `www.` is stripped at minting (§1.9): `bbc.com` and `www.bbc.com` are one
+        site in every user's mental model, and the suffix match in `_domain_allowed` already
+        treats `www.bbc.com` as a subdomain of `bbc.com`. Pure spelling only — never eTLD+1
+        or any broader normalisation, which would silently widen the grant."""
         host = _host_of(url_or_domain)
+        if host.startswith("www."):
+            host = host[4:]
         if host:
             self.session_allow_domains.add(host)
 

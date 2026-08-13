@@ -78,6 +78,43 @@ def test_always_command_only_for_shell(manager):
     )
 
 
+def test_always_tool_refused_for_url_carrying_egress(manager):
+    # §1.9: "always allow web_fetch" would cover every future destination — the
+    # domain-scoped grant is the one the card offers, so tool-wide is refused here.
+    assert (
+        manager.approval_outcome(
+            "always_tool", _request("web_fetch", {"url": "https://bbc.com/x"}), "s13"
+        )
+        is ApprovalOutcome.ONCE
+    )
+    assert "grant_refused" in _stages(manager, "s13")
+    # Fixed-destination egress keeps it: web_search's tool-wide IS provider-wide.
+    assert (
+        manager.approval_outcome(
+            "always_tool", _request("web_search", {"query": "x"}), "s14"
+        )
+        is ApprovalOutcome.ALWAYS_TOOL
+    )
+
+
+def test_provider_change_clears_web_search_session_grant(manager):
+    # §1.9: the search grant is consent to a NAMED destination; a new provider is a new
+    # destination, so every live session's grant dies with the old one.
+    from types import SimpleNamespace as NS
+
+    eng = NS(permissions=NS(session_allow_tools={"web_search", "run_shell_x"}))
+    manager._engines["s15"] = eng
+    before = manager.get_web_search()["provider"]
+    other = next(p for p in manager.get_web_search()["providers"] if p != before)
+    assert manager.set_web_search(other)["ok"]
+    assert "web_search" not in eng.permissions.session_allow_tools
+    assert "run_shell_x" in eng.permissions.session_allow_tools  # only the search grant dies
+    # Re-setting the SAME provider (e.g. adding a key) leaves grants alone.
+    eng.permissions.session_allow_tools.add("web_search")
+    assert manager.set_web_search(other, api_key="k")["ok"]
+    assert "web_search" in eng.permissions.session_allow_tools
+
+
 def test_always_domain_only_for_egress_with_a_url(manager):
     assert (
         manager.approval_outcome("always_domain", _request("write_file", {"path": "a"}), "s6")

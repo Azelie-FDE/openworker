@@ -138,6 +138,14 @@ class TurnEngine:
         # re-proposal with even slightly different arguments does not match and goes back
         # through the reviewer/card — deliberately narrow, deliberately not standing.
         self._allow_anyway: set[tuple[str, str]] = set()
+        # Extra user-facing fields for a tool's approval card, merged into the
+        # PERMISSION_REQUIRED payload — e.g. web_search's live provider name, so the card
+        # can say where queries actually go (§1.9). Set post-construction by the surface
+        # (the engine itself knows nothing about providers); None ⇒ no extras. Called at
+        # card time, not session start, so a mid-session Settings change shows through.
+        self.approval_extras: Optional[
+            Callable[[str, dict[str, Any]], dict[str, Any]]
+        ] = None
         self._last_context_tokens: Optional[int] = None
         self.audit_context: dict[str, Any] = {}
         if instructions and not (
@@ -981,6 +989,11 @@ class TurnEngine:
                         tool_call.arguments,
                         metadata,
                         self.permissions.risk_overrides,
+                    ),
+                    **(
+                        self.approval_extras(tool_call.name, tool_call.arguments)
+                        if self.approval_extras
+                        else {}
                     ),
                 },
             )

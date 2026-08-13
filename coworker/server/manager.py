@@ -107,8 +107,11 @@ def _grant_offered(outcome, request) -> bool:
 
     - ALWAYS_TOOL is tool-wide and argument-unbounded, so it is withheld from run_shell (the
       command-scoped grant is the narrower option), from save_skill (every skill proposal
-      gets its own review), and from anything that reaches off the machine — connectors and
-      MCP tools alike, where "always allow send_message" would cover every future recipient.
+      gets its own review), from anything that reaches off the machine — connectors and
+      MCP tools alike, where "always allow send_message" would cover every future recipient —
+      and from URL-carrying egress (§1.9): "always allow web_fetch" would cover every future
+      destination, and the domain-scoped grant is the one the card offers. Fixed-destination
+      egress (web_search: no url argument) keeps it — tool-wide IS provider-wide there.
     - ALWAYS_COMMAND only means anything for the shell tool.
     - ALWAYS_DOMAIN only means anything for a tool carrying a url.
     """
@@ -126,6 +129,8 @@ def _grant_offered(outcome, request) -> bool:
         return risk is RiskClass.EGRESS and bool(args.get("url"))
     if outcome is ApprovalOutcome.ALWAYS_TOOL:
         if risk in (RiskClass.EXEC, RiskClass.EXTERNAL):
+            return False
+        if risk is RiskClass.EGRESS and args.get("url"):
             return False
         if getattr(metadata, "category", "") == "connector":
             return False
@@ -1502,10 +1507,18 @@ class SessionManager:
 
         if provider not in provider_names():
             return {"ok": False, "error": f"unknown provider: {provider}"}
+        before = self.get_web_search()["provider"]
         profile: dict[str, Any] = {"provider": provider}
         if api_key:
             profile["api_key"] = api_key
         self.secrets.put("web_search:default", profile)
+        # §1.9: "Always allow searches this session" is consent to a NAMED destination —
+        # the card says which provider the queries go to. A new provider is a new
+        # destination, so every live session's grant dies with the old one. (Scheduled
+        # tasks that name-allow web_search are unaffected: their approver re-allows.)
+        if provider != before:
+            for engine in self._engines.values():
+                engine.permissions.session_allow_tools.discard("web_search")
         return {"ok": True, "provider": provider}
 
     # -- model providers (OpenAI, Ollama, …) ------------------------------------

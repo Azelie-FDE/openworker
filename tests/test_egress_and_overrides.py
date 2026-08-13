@@ -17,8 +17,29 @@ from coworker.risk import RiskClass, classify
 # -- egress classification ------------------------------------------------------
 def test_web_fetch_is_egress_not_read():
     assert classify("web_fetch") is RiskClass.EGRESS
-    # web_search stays a read: it hits a fixed configured provider, not a model-chosen host.
-    assert classify("web_search") is RiskClass.READ
+    # web_search is egress too (§2.2, decided 2026-08-12): the destination is fixed (the
+    # configured provider) but the query is model-chosen free text — an outbound channel.
+    assert classify("web_search") is RiskClass.EGRESS
+
+
+def test_web_search_gated_like_egress(tmp_path):
+    eng = PermissionEngine(workspace_root=tmp_path, mode=Mode.INTERACTIVE)
+    d = eng.evaluate("web_search", {"query": "AWS_SECRET_KEY=abc123"}, None)
+    assert not d.allowed and d.needs_user
+    # "Always allow searches this session" is a tool-wide grant — provider-wide, since the
+    # destination is fixed. After it, searches run without asking.
+    eng.allow_tool_for_session("web_search")
+    assert eng.evaluate("web_search", {"query": "anything"}, None).allowed
+    # A domain allowlist is meaningless for web_search (no url argument) and must not leak.
+    eng2 = PermissionEngine(workspace_root=tmp_path, allowed_domains=["python.org"])
+    assert eng2.evaluate("web_search", {"query": "x"}, None).needs_user
+
+
+def test_web_search_session_grant_ignored_in_auto_approve(tmp_path):
+    # §1.5: in Auto-Approve, in-flow session grants route to the reviewer instead.
+    eng = PermissionEngine(workspace_root=tmp_path, mode=Mode.AUTO_APPROVE)
+    eng.allow_tool_for_session("web_search")
+    assert eng.evaluate("web_search", {"query": "x"}, None).needs_user
 
 
 @pytest.mark.parametrize(
@@ -50,6 +71,20 @@ def test_egress_session_domain_grant(tmp_path):
     assert eng.evaluate("web_fetch", {"url": "https://api.github.com/x"}, None).needs_user
     eng.allow_domain_for_session("https://api.github.com/anything")
     assert eng.evaluate("web_fetch", {"url": "https://api.github.com/x"}, None).allowed
+
+
+def test_session_domain_grant_strips_www(tmp_path):
+    # §1.9: bbc.com and www.bbc.com are one grant — pure spelling, nothing broader.
+    eng = PermissionEngine(workspace_root=tmp_path)
+    eng.allow_domain_for_session("https://www.bbc.com/news/article")
+    assert eng.session_allow_domains == {"bbc.com"}
+    assert eng.evaluate("web_fetch", {"url": "https://bbc.com/sport"}, None).allowed
+    assert eng.evaluate("web_fetch", {"url": "https://www.bbc.com/sport"}, None).allowed
+    # NOT eTLD+1: an unrelated suffix look-alike never matches.
+    assert not eng.evaluate("web_fetch", {"url": "https://notbbc.com/x"}, None).allowed
+    # A host that merely STARTS with www-something keeps its spelling.
+    eng.allow_domain_for_session("https://www2.example.org/a")
+    assert "www2.example.org" in eng.session_allow_domains
 
 
 # -- override tightening --------------------------------------------------------

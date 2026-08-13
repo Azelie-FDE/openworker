@@ -34,7 +34,7 @@ import type { MessageSource } from "./api";
 
 // "always_task" persists to the owning automation's task record (standing scoped
 // approval, UX-DECISIONS §25) — offered only on automation-run approval cards, in-app.
-export type ApprovalDecision = "once" | "deny" | "always_tool" | "always_command" | "always_task";
+export type ApprovalDecision = "once" | "deny" | "always_tool" | "always_command" | "always_domain" | "always_task";
 
 export interface TodoItem {
   content: string;
@@ -119,6 +119,9 @@ export type Item =
       // The exact target a standing rule could pin (server-computed) — with a run
       // context, the card offers "Allow every time" (§25).
       standingTarget?: string;
+      // web_search only (§1.9): the LIVE configured provider name, resolved server-side
+      // when the card was raised — the grant description names the actual destination.
+      searchProvider?: string;
       resolved?: ApprovalDecision;
     }
   | {

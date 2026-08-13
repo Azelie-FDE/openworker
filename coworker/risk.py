@@ -26,10 +26,11 @@ class RiskClass(str, Enum):
 # Built-in tools whose risk is fixed by name (the old WRITE_TOOLS / SHELL_TOOL, as data).
 WRITE_TOOLS = {"write_file", "replace_in_file", "apply_patch", "apply_unified_diff"}
 SHELL_TOOL = "run_shell"
-# Model-chosen network reads. `web_fetch` takes a URL straight from the model and the URL's
-# query string can carry data outbound, so it is NOT a pure read — it must reach the gate.
-# `web_search` stays READ: it hits a fixed configured provider, not a model-chosen host.
-EGRESS_TOOLS = {"web_fetch"}
+# Model-chosen network egress. `web_fetch` takes a URL straight from the model and the
+# URL's path/query can carry data outbound, so it is NOT a pure read — it must reach the
+# gate. `web_search` reaches a FIXED destination (the configured provider), but its query
+# is model-chosen free text — the same outbound channel — so it gates too (spec §2.2).
+EGRESS_TOOLS = {"web_fetch", "web_search"}
 
 _BASE: dict[str, RiskClass] = {
     **{name: RiskClass.WRITE_LOCAL for name in WRITE_TOOLS},

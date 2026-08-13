@@ -95,6 +95,18 @@ export function TitleText({ line }: { line: HumanLine }) {
   );
 }
 
+// The host a fetch-card domain grant would cover (§1.9): lowercased, `www.` stripped —
+// pure spelling only, mirroring the server's minting in `allow_domain_for_session`. The
+// button must name exactly what the grant covers. "" when the URL doesn't parse.
+export function grantHost(url: any): string {
+  try {
+    const h = new URL(String(url ?? "")).hostname.toLowerCase();
+    return h.startsWith("www.") ? h.slice(4) : h;
+  } catch {
+    return "";
+  }
+}
+
 // Plain-words scope note (replaces the "local action" badge): where does this act?
 // Shared with the parked-approval card (InboxItemCard) so both dialects match (§35).
 export function scopeNote(
@@ -106,6 +118,11 @@ export function scopeNote(
   // or turn off the skill afterwards.
   if (name === "save_skill") return { text: "saves to Settings ▸ Skills", external: false };
   if (category === "connector") return { text: "acts on a connected service", external: true };
+  // Egress (§1.9): the request itself reaches the network — never "stays on this computer".
+  if (name === "web_fetch")
+    return { text: `leaves this computer → ${grantHost(args?.url) || "the web"}`, external: true };
+  if (name === "web_search")
+    return { text: "leaves this computer → your search provider", external: true };
   if (EXTERNAL.has(name)) {
     const platform = String(args?.target ?? "").split(":")[0];
     const names: Record<string, string> = { slack: "Slack", telegram: "Telegram" };
@@ -166,15 +183,33 @@ function Buttons({
   runTask,
   primaryLabel,
   denyLabel = "Deny",
+  autoApprove = false,
 }: {
   item: ApprovalItem;
   onApprove: (decision: ApprovalDecision) => void;
   runTask?: { id: string; title: string } | null;
   primaryLabel: string;
   denyLabel?: string;
+  // Session is in Auto-Approve mode: session grants don't skip the reviewer there (§1.5),
+  // so no session-scoped "always" button is shown at all — a button that lies is worse
+  // than none. Allow once / Deny only.
+  autoApprove?: boolean;
 }) {
   const connector = item.category === "connector";
   const offerStanding = !!(runTask && item.standingTarget);
+  // §1.9: egress grants are destination-shaped. web_fetch offers the DOMAIN — tool-wide
+  // would cover every future destination, so it's withheld (and server-refused). web_search
+  // has a fixed destination (the configured provider), so tool-wide IS provider-wide and
+  // the button is labelled by what it actually grants: searches.
+  const fetchHost = item.name === "web_fetch" ? grantHost(item.args?.url) : "";
+  const noSessionGrant =
+    autoApprove ||
+    offerStanding ||
+    connector ||
+    item.name === "run_shell" ||
+    item.name === "save_skill" ||
+    item.name === "web_fetch" ||
+    item.name === "web_search";
   return (
     <div className="approval-btns">
       <button className="btn approval-primary" onClick={() => onApprove("once")}>
@@ -196,7 +231,7 @@ function Buttons({
           tool-wide one stays out of the card. */}
       {/* save_skill: no session-wide "always" — every skill proposal gets its own review
           (SKILLS-SPEC §5: one gate, always). */}
-      {!connector && !offerStanding && item.name !== "run_shell" && item.name !== "save_skill" && (
+      {!noSessionGrant && (
         <button
           className="btn"
           title={`Always allow ${TOOL_VERBS[item.name]?.toLowerCase() || item.name} for this session`}
@@ -205,7 +240,25 @@ function Buttons({
           Always allow
         </button>
       )}
-      {item.name === "run_shell" && (
+      {!autoApprove && !offerStanding && item.name === "web_fetch" && fetchHost && (
+        <button
+          className="btn"
+          title={`Every fetch to ${fetchHost} (and its subdomains) runs without asking for the rest of this session`}
+          onClick={() => onApprove("always_domain")}
+        >
+          Always allow {fetchHost} this session
+        </button>
+      )}
+      {!autoApprove && !offerStanding && item.name === "web_search" && (
+        <button
+          className="btn"
+          title="Every web search runs without asking for the rest of this session — the grant ends if you change the search provider"
+          onClick={() => onApprove("always_tool")}
+        >
+          Always allow searches this session
+        </button>
+      )}
+      {!autoApprove && item.name === "run_shell" && (
         <button className="btn" onClick={() => onApprove("always_command")}>
           Always allow this command
         </button>
@@ -223,6 +276,7 @@ export function ApprovalCard({
   onApprove,
   runTask,
   compact = false,
+  autoApprove = false,
 }: {
   item: ApprovalItem;
   onApprove: (decision: ApprovalDecision) => void;
@@ -230,6 +284,9 @@ export function ApprovalCard({
   // task-persistent "Allow every time" (in-app only, §25).
   runTask?: { id: string; title: string } | null;
   compact?: boolean;
+  // Session is in Auto-Approve mode — this card is a reviewer fall-through, and session
+  // grants wouldn't skip the reviewer anyway (§1.5), so the "always" buttons are hidden.
+  autoApprove?: boolean;
 }) {
   const [peek, setPeek] = useState(false);
   const title = humanizeApprovalTitle(item.name, item.args);
@@ -254,7 +311,13 @@ export function ApprovalCard({
             </button>
           )}
           <span className="spacer" />
-          <Buttons item={item} onApprove={onApprove} runTask={runTask} primaryLabel="Allow" />
+          <Buttons
+            item={item}
+            onApprove={onApprove}
+            runTask={runTask}
+            primaryLabel="Allow"
+            autoApprove={autoApprove}
+          />
         </div>
         {peek && content && <PreviewBlock text={content} />}
         {reason && <div className="approval-reason">{reason}</div>}
@@ -298,6 +361,14 @@ export function ApprovalCard({
       )}
       {/* save_skill (SKILLS-SPEC §5.2): the arguments ARE the review surface. */}
       {item.name === "save_skill" && <SaveSkillPreview args={item.args} />}
+      {/* web_search (§1.9): name the LIVE destination — "currently", never "default",
+          because the card must show the setting as it stands right now. */}
+      {item.name === "web_search" && (
+        <div className="approval-with">
+          Queries go to your configured search provider
+          {item.searchProvider ? ` (currently: ${item.searchProvider})` : ""}.
+        </div>
+      )}
 
       {grants.length > 0 && (
         <div className="approval-grants" data-testid="approval-grants">
@@ -332,6 +403,7 @@ export function ApprovalCard({
           runTask={runTask}
           primaryLabel={approvalActionLabels(item.name).allow}
           denyLabel={approvalActionLabels(item.name).deny}
+          autoApprove={autoApprove}
         />
       )}
     </div>

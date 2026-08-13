@@ -507,6 +507,18 @@ def build_engine(
             workspace=ws,
         )
     )
+
+    # §1.9: the web_search approval card names the LIVE destination ("Queries go to your
+    # configured search provider (currently: ‹name›)"). Resolved when the card is raised,
+    # not at session start, so a mid-session Settings change shows through.
+    def _approval_extras(tool_name: str, _arguments: dict) -> dict:
+        if tool_name == "web_search":
+            from .web import provider_name
+
+            return {"search_provider": provider_name(secrets)}
+        return {}
+
+    engine.approval_extras = _approval_extras
     # Auto-Approve reviewer (spec Part 8). Attached only when the user-global flag is on —
     # a repo config can never enable it (`auto_approve` is in _GLOBAL_ONLY_FIELDS, same
     # rule as `auto_allow`). With no reviewer attached, Mode.AUTO_APPROVE behaves exactly

@@ -264,6 +264,78 @@ describe("ApprovalCard — save_skill (SKILLS-SPEC §5.2)", () => {
   });
 });
 
+describe("ApprovalCard — §1.9 egress cards", () => {
+  const fetchApproval = (extra: Partial<ApprovalItem> = {}): ApprovalItem => ({
+    kind: "approval",
+    name: "web_fetch",
+    args: { url: "https://www.bbc.com/news/article-1" },
+    reason: "requires approval",
+    category: undefined,
+    ...extra,
+  });
+
+  it("web_fetch offers the DOMAIN grant (www-stripped), never a tool-wide always", () => {
+    const onApprove = vi.fn();
+    render(<ApprovalCard item={fetchApproval()} onApprove={onApprove} />);
+    // The grant button names exactly what it covers — the spelling the server mints.
+    fireEvent.click(screen.getByText("Always allow bbc.com this session"));
+    expect(onApprove).toHaveBeenCalledWith("always_domain");
+    expect(screen.queryByText("Always allow")).toBeNull(); // no tool-wide button
+    expect(screen.getByText(/leaves this computer → bbc\.com/)).toBeTruthy();
+  });
+
+  it("web_fetch with an unparseable url falls back to once/deny only", () => {
+    render(<ApprovalCard item={fetchApproval({ args: { url: "not a url" } })} onApprove={vi.fn()} />);
+    expect(screen.queryByText(/Always allow/)).toBeNull();
+    expect(screen.getByText("Allow once")).toBeTruthy();
+  });
+
+  it("web_search offers the searches grant and names the LIVE provider", () => {
+    const onApprove = vi.fn();
+    render(
+      <ApprovalCard
+        item={fetchApproval({
+          name: "web_search",
+          args: { query: "H-1B visa rule change" },
+          searchProvider: "duckduckgo",
+        })}
+        onApprove={onApprove}
+      />,
+    );
+    expect(
+      screen.getByText(/Queries go to your configured search provider \(currently: duckduckgo\)\./),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByText("Always allow searches this session"));
+    expect(onApprove).toHaveBeenCalledWith("always_tool"); // tool-wide IS provider-wide here
+    expect(screen.getByText(/leaves this computer → your search provider/)).toBeTruthy();
+  });
+
+  it("Auto-Approve fall-through cards hide every session 'always' (§1.5: grants don't skip the reviewer)", () => {
+    render(<ApprovalCard item={fetchApproval()} onApprove={vi.fn()} autoApprove />);
+    expect(screen.queryByText(/Always allow/)).toBeNull();
+    cleanup();
+    render(
+      <ApprovalCard
+        item={fetchApproval({ name: "web_search", args: { query: "x" } })}
+        onApprove={vi.fn()}
+        autoApprove
+      />,
+    );
+    expect(screen.queryByText(/Always allow/)).toBeNull();
+    cleanup();
+    render(
+      <ApprovalCard
+        item={fetchApproval({ name: "run_shell", args: { command: "ls" } })}
+        onApprove={vi.fn()}
+        autoApprove
+      />,
+    );
+    expect(screen.queryByText("Always allow this command")).toBeNull();
+    expect(screen.getByText("Allow once")).toBeTruthy();
+    expect(screen.getByText("Deny")).toBeTruthy();
+  });
+});
+
 describe("InboxItemCard — parked save_skill proposals (SKILLS-SPEC §5.2)", () => {
   const parked = (): InboxItem => ({
     id: "i9",
