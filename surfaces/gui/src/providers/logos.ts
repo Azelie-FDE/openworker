@@ -1,9 +1,9 @@
 // Provider logo registry (UX-DECISIONS §39): official brand marks for the onboarding
-// provider gallery, vendored from the MIT-licensed lobe-icons set (same
-// bundled-asset posture as the connector registry — no CDN at runtime). Keys are
-// /v1/providers names; unknown names get no mark (the gallery falls back to a
-// neutral monogram). PROVIDER_ORDER is the gallery order — recognition first,
-// long tail behind the scroll fold.
+// provider gallery. Most are vendored from the MIT-licensed lobe-icons set; BytePlus is
+// its official website mark, used with permission. All stay bundled like connector assets
+// (no CDN at runtime). Keys are /v1/providers names; unknown names get no mark (the gallery
+// falls back to a neutral monogram). PROVIDER_ORDER is the gallery order — recognition
+// first, long tail behind the scroll fold.
 
 import anthropic from "./logos/anthropic.svg";
 import openai from "./logos/openai.svg";
