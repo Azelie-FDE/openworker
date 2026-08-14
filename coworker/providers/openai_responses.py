@@ -291,6 +291,7 @@ class OpenAIResponsesProvider(ProviderClient):
         api_key: Optional[str] = None,
         secrets: Any = None,
         base_url: Optional[str] = None,
+        reasoning_summary: bool = True,
     ):
         # Same deferred-client contract as OpenAIProvider: built lazily so an engine can be
         # assembled before any key exists; key resolves at call time (explicit → env →
@@ -300,6 +301,9 @@ class OpenAIResponsesProvider(ProviderClient):
         self._api_key = api_key
         self._secrets = secrets
         self._base_url = (base_url or "").strip().rstrip("/") or None
+        if not isinstance(reasoning_summary, bool):
+            raise TypeError("reasoning_summary must be a bool")
+        self._reasoning_summary = reasoning_summary
         self.default_model = default_model
 
     def _ensure_client(self) -> Any:
@@ -337,9 +341,10 @@ class OpenAIResponsesProvider(ProviderClient):
             # `_openai` sidecar instead, and summaries feed the GUI's thinking display.
             "store": False,
             "include": ["reasoning.encrypted_content"],
-            "reasoning": {"summary": "auto"},
             **{k: v for k, v in settings.items() if k in _SETTINGS_WHITELIST},
         }
+        if self._reasoning_summary:
+            kwargs["reasoning"] = {"summary": "auto"}
         if instructions:
             kwargs["instructions"] = instructions
         if tools:

@@ -291,7 +291,7 @@ def test_convert_tools_flattens_function_schemas():
 # -- complete() ----------------------------------------------------------------------
 
 
-def test_complete_text_turn_and_request_shape():
+def test_complete_default_request_shape_PathsUnchanged():
     fake = _FakeClient(response=_response([_message_item("hello")]))
     provider = OpenAIResponsesProvider(client=fake)
     turn = provider.complete(
@@ -308,6 +308,22 @@ def test_complete_text_turn_and_request_shape():
     assert fake.kwargs["store"] is False
     assert fake.kwargs["include"] == ["reasoning.encrypted_content"]
     assert fake.kwargs["reasoning"] == {"summary": "auto"}
+
+
+def test_complete_can_omit_reasoning_summary_but_keep_encrypted_content():
+    """BytePlus accepts encrypted reasoning output but rejects reasoning.summary."""
+    fake = _FakeClient(response=_response([_message_item("hello")]))
+    provider = OpenAIResponsesProvider(client=fake, reasoning_summary=False)
+
+    provider.complete(model="m", messages=[{"role": "user", "content": "hi"}])
+
+    assert "reasoning" not in fake.kwargs
+    assert fake.kwargs["include"] == ["reasoning.encrypted_content"]
+
+
+def test_reasoning_summary_capability_rejects_unknown_mode():
+    with pytest.raises(TypeError, match="reasoning_summary must be a bool"):
+        OpenAIResponsesProvider(client=SimpleNamespace(), reasoning_summary="auto")
 
 
 def test_complete_parses_function_calls_with_call_ids():
