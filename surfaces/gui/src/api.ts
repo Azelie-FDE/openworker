@@ -2124,6 +2124,11 @@ export class Session {
     this.send({ type: "directory_response", granted, ...(path ? { path } : {}), writable: !!writable });
   }
 
+  // Reply to a `request_tool` prompt: install the pinned build, or skip the check.
+  respondTool(approved: boolean) {
+    this.send({ type: "tool_response", approved });
+  }
+
   // Reply to a `propose_plan` prompt: approve (choosing the execution mode) or reject with feedback.
   respondPlan(approved: boolean, mode?: string, feedback?: string) {
     this.send({

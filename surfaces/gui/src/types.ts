@@ -8,6 +8,7 @@ export type EventType =
   | "tool_proposed"
   | "permission_required"
   | "directory_requested"
+  | "tool_requested"
   | "question_requested"
   | "plan_proposed"
   | "tool_started"
@@ -127,6 +128,15 @@ export type Item =
       path?: string;
       writable?: boolean;
       resolved?: "granted" | "denied";
+    }
+  | {
+      kind: "toolreq";
+      tool: string;
+      reason: string;
+      installable?: boolean;
+      version?: string;
+      summary?: string;
+      resolved?: "installed" | "skipped";
     }
   | {
       kind: "planreq";

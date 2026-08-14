@@ -85,6 +85,9 @@ class TurnEngine:
         question_asker: Optional[
             Callable[[dict[str, Any]], "Awaitable[dict[str, Any]]"]
         ] = None,
+        tool_requester: Optional[
+            Callable[[dict[str, Any]], "Awaitable[dict[str, Any]]"]
+        ] = None,
         # Called (thread-safe, best-effort) when the user stops the turn — e.g. the
         # executor's kill for a running shell command.
         interrupt_hooks: Optional[list[Callable[[], None]]] = None,
@@ -107,6 +110,10 @@ class TurnEngine:
         # user to grant/decline a folder out-of-band, applies the grant to this live session, and
         # returns the outcome. None on surfaces that can't prompt (the tool then no-ops).
         self.directory_requester = directory_requester
+        # Handles the `request_tool` tool: emits TOOL_REQUESTED, waits for the user to install
+        # the pinned build or decline. None on surfaces that can't prompt (the tool then
+        # no-ops, and the agent is told so it can fall back openly rather than skip silently).
+        self.tool_requester = tool_requester
         # Handles the `propose_plan` tool: emits PLAN_PROPOSED, waits for the user's decision.
         # An approving result flips the live PermissionEngine out of plan mode (same session,
         # context kept). None on surfaces that can't prompt (the tool then no-ops).
@@ -616,6 +623,10 @@ class TurnEngine:
                 async for event in self._handle_directory_request(tool_call):
                     yield event
                 continue
+            if tool_call.name == "request_tool":
+                async for event in self._handle_tool_request(tool_call):
+                    yield event
+                continue
             if tool_call.name == "propose_plan":
                 async for event in self._handle_plan_proposal(tool_call):
                     yield event
@@ -914,6 +925,58 @@ class TurnEngine:
             }
 
         status = "ok" if result.get("approved") else "denied"
+        self.messages.append(_tool_result_message(tool_call, result))
+        self._audit(
+            tool_call,
+            stage="finished",
+            status=status,
+            result=result,
+            result_preview=_preview(result),
+        )
+        yield Event(
+            EventType.TOOL_FINISHED,
+            {
+                "name": tool_call.name,
+                "status": status,
+                "result_preview": _preview(result),
+            },
+        )
+
+    async def _handle_tool_request(self, tool_call: ToolCall) -> AsyncIterator[Event]:
+        """Emit the install prompt, await the user's decision, hand the outcome back.
+
+        Declining is a normal outcome, not an error: the result tells the agent to fall back
+        and disclose the gap, because a security report that quietly loses a check is worse
+        than one that says which checks it couldn't run.
+        """
+        args = tool_call.arguments or {}
+        name = str(args.get("name", "")).strip()
+        reason = str(args.get("reason", ""))
+
+        if self.tool_requester is None or not name:
+            result: dict[str, Any] = {
+                "installed": False,
+                "error": "tool requests aren't available here",
+                "guidance": (
+                    "Continue without it: use a fallback check if you have one, and say in "
+                    "your report which checks were degraded."
+                ),
+            }
+        else:
+            yield Event(EventType.TOOL_REQUESTED, {"name": name, "reason": reason})
+            self._audit(tool_call, stage="tool_requested", reason=reason)
+            result = await self._interruptible(
+                self.tool_requester(dict(args), tool_call.id),
+                interrupted={"installed": False, "error": "interrupted by user"},
+            ) or {"installed": False, "error": "no response"}
+            if not result.get("installed"):
+                result.setdefault(
+                    "guidance",
+                    "Continue without it: use a fallback check if you have one, and say in "
+                    "your report which checks were degraded.",
+                )
+
+        status = "ok" if result.get("installed") else "denied"
         self.messages.append(_tool_result_message(tool_call, result))
         self._audit(
             tool_call,

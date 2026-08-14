@@ -610,6 +610,17 @@ export async function mockApi(page: import("@playwright/test").Page) {
           });
           return; // suspended on the approval
         }
+        // OPE-85: the agent hits a missing scanner and asks instead of skipping the check.
+        if (/scan for secrets/i.test(msg.text)) {
+          send("tool_requested", {
+            name: "gitleaks",
+            reason: "scan the git history for committed secrets",
+            installable: true,
+            version: "8.30.1",
+            summary: "scans git history and the working tree for committed secrets",
+          });
+          return; // suspended on the tool request
+        }
         // §35 compact row: a routine workspace write (content rides in the args).
         if (/write a file/i.test(msg.text)) {
           pendingTool = "write_file";
@@ -765,6 +776,19 @@ export async function mockApi(page: import("@playwright/test").Page) {
           send("tool_finished", { name: pendingTool, status: "done", result_preview: "ok" });
           // The decision echoes back so specs can pin what rode the wire (e.g. always_task).
           send("assistant_message", { text: `Done via ${pendingTool} [decision=${msg.decision}]` });
+        }
+        send("turn_done");
+      } else if (msg.type === "tool_response") {
+        // Either way the turn continues — the point of the contract is that declining
+        // degrades the report openly instead of dropping the check.
+        if (msg.approved) {
+          send("assistant_message", {
+            text: "Installed gitleaks 8.30.1 — scanned history, no secrets found.",
+          });
+        } else {
+          send("assistant_message", {
+            text: "Skipped gitleaks. Coverage: history secret sweep done by hand instead.",
+          });
         }
         send("turn_done");
       } else if (msg.type === "interrupt") {

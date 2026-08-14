@@ -8,11 +8,21 @@ further yourself.
 ABSOLUTE RULE: never print a secret's value — not in output, notes, todo items, commits,
 or PRs. Refer to every hit as "<kind> in <file>:<line> (commit <short-sha>)".
 
-1. Check the tool: `gitleaks version`. If missing, tell the user how to install it
-   (`brew install gitleaks`) and STOP — ask before installing anything.
-2. Scan working tree AND history:
-   `gitleaks detect --source . --report-format json --report-path /tmp/gitleaks.json`
-   (history matters: a secret deleted in HEAD is still live in every clone).
+1. Check the tool: `gitleaks version`. If it's missing, do NOT skip this scan and do not
+   stop the review — ask for it with `request_tool("gitleaks", …)`. If the user declines,
+   or no pinned build exists for their platform, fall back to step 2b and say in your
+   report that the sweep was manual.
+2. Scan working tree AND history — history matters most: a secret deleted in HEAD is still
+   live in every clone, and it is the hit users are most surprised by.
+   a. With gitleaks:
+      `gitleaks detect --source . --report-format json --report-path /tmp/gitleaks.json`
+   b. Without it, do the same job by hand, and say so:
+      - working tree: `git grep -nIE '(api[_-]?key|secret|token|password|BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}|sk_(live|test)_[0-9a-zA-Z]{16,}|xox[baprs]-)'`
+      - history, including files deleted since: `git log -p --all -S 'AKIA' --pickaxe-all`
+        and `git log --diff-filter=D --name-only --pretty=format:%h -- '*.env*' '*credential*' '*secret*'`,
+        then read the removed contents with `git show <sha>^:<path>`.
+      - Pipe anything you read through a redactor rather than into your transcript, e.g.
+        `sed -E "s/[A-Za-z0-9_\\-]{16,}/[REDACTED]/g"` — the no-printing rule still applies.
 3. Triage each hit by reading its context:
    - Real credential, test fixture, or example placeholder? Say which and why.
    - For real ones: what does it grant access to, and is it plausibly still valid?

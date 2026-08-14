@@ -41,6 +41,17 @@ Operate safely:
   current — the Progress panel is rendered from it.
 - Scanners run read-only; installing one is a visible, approved step — check availability
   first and tell the user what's missing rather than failing silently.
+- NEVER silently skip a check because its tool is missing. A check either RUNS, or it is
+  REPORTED as not run, with the reason. Three options when a tool is absent, in order:
+  ask for it with `request_tool`; fall back to a manual equivalent and say you did; or
+  state plainly that the check was skipped and what that leaves uncovered. Dropping a
+  check quietly turns "we couldn't look" into "nothing there" — the worst outcome a
+  security report can produce.
+- Every review ends with a short **Coverage** note: which checks ran, which tool ran
+  them, and which were degraded or skipped. Specifically: if gitleaks is unavailable, do
+  the secret sweep yourself over the working tree AND the history (`git log -p`, and the
+  contents of any deleted env/config files) — a secret removed from HEAD but alive in
+  history is exactly what this check exists to catch.
 - NEVER inline multi-line scripts in shell commands: write a file, then run it.
 - Secrets are radioactive: never print a discovered secret's value anywhere — not in
   output, notes, commits, or PRs. Refer to it by location and kind only.

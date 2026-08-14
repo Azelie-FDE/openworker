@@ -19,6 +19,7 @@ class EventType(str, Enum):
     TOOL_PROPOSED = "tool_proposed"
     PERMISSION_REQUIRED = "permission_required"
     DIRECTORY_REQUESTED = "directory_requested"  # agent asks the user to grant a folder
+    TOOL_REQUESTED = "tool_requested"  # agent asks for a missing CLI tool (scanner, etc.)
     QUESTION_REQUESTED = (
         "question_requested"  # agent asks the user a free-text/multiple-choice question
     )

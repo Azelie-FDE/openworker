@@ -161,6 +161,7 @@ from ..engine import ApprovalOutcome
 from ..inbox import VIS_INBOX, VIS_INLINE, args_preview
 from ..permissions import Mode
 from ..providers import AssistantTurn
+from .. import toolchain
 from .manager import SessionManager
 
 
@@ -1694,6 +1695,52 @@ def create_app(manager: SessionManager) -> FastAPI:
                     )
             return answer_result(item.questions, await manager.inbox.wait(item.id))
 
+        async def tool_requester(args: dict, tool_call_id=None) -> dict:
+            """Park a TOOL_REQUESTED prompt, then install the PINNED build if approved.
+
+            Declining is a first-class outcome: the agent is told to fall back and disclose
+            the gap rather than drop the check (OPE-85). Installs only ever come from the
+            pinned registry with its digest verified — an approval is consent to install
+            THAT artifact, not licence to fetch whatever a prompt asked for.
+            """
+            name = str(args.get("name", "")).strip()
+            info = toolchain.describe(name)
+            item = manager.inbox.add_tool_request(
+                session_id,
+                f"Install {name}?" if name else "Install a tool?",
+                body=str(args.get("reason", "")),
+                inbox=_route(),
+                visibility=_visibility(),
+                data={
+                    "tool": name,
+                    "installable": bool(info),
+                    "version": (info or {}).get("version", ""),
+                    "summary": (info or {}).get("summary", ""),
+                    "url": (info or {}).get("url", ""),
+                },
+                tool_call_id=tool_call_id,
+            )
+            if item.state == "pending":
+                manager.persist_session(session_id)
+                if item.visibility == VIS_INBOX:
+                    await _mirror(item)
+            resp = _parse_json(await manager.inbox.wait(item.id))  # {approved}
+            if not resp.get("approved"):
+                return {
+                    "installed": False,
+                    "reason": "the user declined to install it",
+                }
+            if not info:
+                return {
+                    "installed": False,
+                    "error": f"no pinned build of {name} is available for this platform",
+                }
+            try:
+                path = await asyncio.to_thread(toolchain.install, name)
+            except Exception as exc:  # noqa: BLE001 - surfaced to the agent verbatim
+                return {"installed": False, "error": str(exc)}
+            return {"installed": True, "path": path, "version": info["version"]}
+
         async def directory_requester(args: dict, tool_call_id=None) -> dict:
             # The engine has already emitted DIRECTORY_REQUESTED. Park, await, then apply the grant.
             item = manager.inbox.add_directory(
@@ -1805,6 +1852,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             directory_requester=directory_requester,
             plan_approver=plan_approver,
             question_asker=question_asker,
+            tool_requester=tool_requester,
         )
         if engine is None:
             await ws.send_json(
@@ -1940,6 +1988,10 @@ def create_app(manager: SessionManager) -> FastAPI:
                                 "writable": bool(message.get("writable", False)),
                             }
                         )
+                    )
+                elif kind == "tool_response":
+                    _resolve_pending(
+                        json.dumps({"approved": bool(message.get("approved"))})
                     )
                 elif kind == "plan_response":
                     _resolve_pending(

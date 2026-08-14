@@ -466,6 +466,7 @@ class SessionManager:
         directory_requester: Optional[Any] = None,
         plan_approver: Optional[Any] = None,
         question_asker: Optional[Any] = None,
+        tool_requester: Optional[Any] = None,
     ) -> Optional[TurnEngine]:
         engine = self._engines.get(session_id)
         if engine is not None:
@@ -477,6 +478,8 @@ class SessionManager:
                 engine.plan_approver = plan_approver
             if question_asker is not None:
                 engine.question_asker = question_asker
+            if tool_requester is not None:
+                engine.tool_requester = tool_requester
             return engine
 
         record = self.session_store.load(session_id)
@@ -548,6 +551,7 @@ class SessionManager:
             plan_approver=plan_approver or self.inbox_plan_approver(session_id, agent),
             question_asker=question_asker
             or self.inbox_question_asker(session_id, agent),
+            tool_requester=tool_requester,
             subscription_store=self.subscriptions,
             channel_buffer=self.channel_buffer,
             routing_targets=self._routing_targets(session_id, agent),

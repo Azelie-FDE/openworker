@@ -69,6 +69,7 @@ import { PersonaView } from "./components/PersonaView";
 import { AuditView } from "./components/AuditView";
 import { InboxView } from "./components/InboxView";
 import { ApprovalCard } from "./components/ApprovalCard";
+import { ToolRequestCard } from "./components/ToolRequestCard";
 import { DirectoryRequestCard } from "./components/DirectoryRequestCard";
 import { PlanCard } from "./components/PlanCard";
 import { WorkspaceTrustPrompt } from "./components/WorkspaceTrustPrompt";
@@ -728,6 +729,20 @@ export function App() {
             { kind: "dirreq", reason: d.reason || "", path: d.path || "", writable: !!d.writable },
           ]);
           break;
+        case "tool_requested":
+          if (unattendedRef.current) break;
+          setItems((p) => [
+            ...p,
+            {
+              kind: "toolreq",
+              tool: d.name || "",
+              reason: d.reason || "",
+              installable: d.installable !== false,
+              version: d.version || "",
+              summary: d.summary || "",
+            },
+          ]);
+          break;
         case "plan_proposed":
           if (unattendedRef.current) break;
           setItems((p) => [...p, { kind: "planreq", plan: d.plan || "" }]);
@@ -979,6 +994,11 @@ export function App() {
     setItems((p) => resolveLastDirReq(p, granted ? "granted" : "denied"));
     dropSessionInbox("directory");
     sessionRef.current?.respondDirectory(granted, path, writable);
+  };
+  const respondTool = (approved: boolean) => {
+    setItems((p) => resolveLastToolReq(p, approved ? "installed" : "skipped"));
+    dropSessionInbox("tool");
+    sessionRef.current?.respondTool(approved);
   };
   const answerQuestion = (answer: string) => {
     setItems((p) => resolveLastQuestion(p, answer));
@@ -1341,6 +1361,7 @@ export function App() {
   const idle = items.length === 0 && !streaming;
   const pendingApproval = [...items].reverse().find((i) => i.kind === "approval" && !i.resolved);
   const pendingDirReq = [...items].reverse().find((i) => i.kind === "dirreq" && !i.resolved);
+  const pendingToolReq = [...items].reverse().find((i) => i.kind === "toolreq" && !i.resolved);
   const pendingPlan = [...items].reverse().find((i) => i.kind === "planreq" && !i.resolved);
   const pendingQuestion = [...items].reverse().find((i) => i.kind === "question" && !i.resolved);
   // Facts subtitle (§22): the session's FIXED facts, not controls — model (+ the
@@ -1857,6 +1878,8 @@ export function App() {
                 // parked in the Inbox and surfaced via the answer-in-context card below.
                 !unattended && pendingPlan?.kind === "planreq" ? (
                   <PlanCard item={pendingPlan} onRespond={respondPlan} />
+                ) : !unattended && pendingToolReq?.kind === "toolreq" ? (
+                  <ToolRequestCard item={pendingToolReq} onRespond={respondTool} />
                 ) : !unattended && pendingDirReq?.kind === "dirreq" ? (
                   <DirectoryRequestCard item={pendingDirReq} onRespond={respondDirectory} />
                 ) : !unattended && pendingApproval?.kind === "approval" ? (
@@ -2022,6 +2045,18 @@ function resolveLastDirReq(items: Item[], resolved: "granted" | "denied"): Item[
   for (let i = copy.length - 1; i >= 0; i--) {
     const it = copy[i];
     if (it.kind === "dirreq" && !it.resolved) {
+      copy[i] = { ...it, resolved };
+      break;
+    }
+  }
+  return copy;
+}
+
+function resolveLastToolReq(items: Item[], resolved: "installed" | "skipped"): Item[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i >= 0; i--) {
+    const it = copy[i];
+    if (it.kind === "toolreq" && !it.resolved) {
       copy[i] = { ...it, resolved };
       break;
     }

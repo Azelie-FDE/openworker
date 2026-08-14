@@ -4,9 +4,14 @@ description: Run a semgrep scan and turn findings into triaged, contextual fixes
 ---
 Run a static-analysis pass with semgrep and own the findings end to end.
 
-1. Check the tool: `semgrep --version`. If missing, tell the user how to install it
-   (`pip install semgrep` or `brew install semgrep`) and STOP — ask before installing
-   anything yourself.
+1. Check the tool: `semgrep --version`. If it's missing, ask for it with
+   `request_tool("semgrep", …)` rather than skipping the pass. If the user declines,
+   continue with a targeted manual review — read the routes/handlers, the auth and
+   session code, every query built by string concatenation, deserialization, and
+   outbound requests built from user input — and say in your report that the static
+   pass was manual, so the user knows the coverage is narrower than a full scan.
+   Note that community semgrep rules miss whole classes (e.g. SQL built through a
+   project's own DB wrapper), so reading the code is worth doing even when it runs.
 2. Scan the repo (from its root):
    `semgrep scan --config auto --json --quiet -o /tmp/semgrep.json`
    Use `--config auto` unless the repo carries its own rules (`.semgrep.yml`,

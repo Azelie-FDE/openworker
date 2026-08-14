@@ -41,6 +41,7 @@ from .tools import ToolRegistry
 from .tools.ask import ask_user_tool
 from .tools.directories import request_directory_tool
 from .tools.plan import propose_plan_tool
+from .tools.toolreq import request_tool_tool
 from .tools.subagent import explorer_tools
 from .web import make_web_fetch_tool, make_web_search_tool
 from .workspace_trust import WorkspaceTrustStore
@@ -211,6 +212,7 @@ def build_engine(
     directory_requester: Optional[Any] = None,
     plan_approver: Optional[Any] = None,
     question_asker: Optional[Any] = None,
+    tool_requester: Optional[Any] = None,
     subscription_store: Optional[Any] = None,
     channel_buffer: Optional[Any] = None,
     routing_targets: Optional[list[str]] = None,
@@ -274,6 +276,10 @@ def build_engine(
     # Knowledge surfaces with a multi-root workspace can ask the user mid-task for another folder.
     if agent.family == "knowledge" and root_list:
         registry.register(request_directory_tool())
+    # Anything with a shell can hit a missing CLI (a scanner, aws, kubectl). Give it a way to
+    # ask instead of silently dropping the check that needed it (OPE-85).
+    if executor is not None:
+        registry.register(request_tool_tool())
     if agent.connectors:
         enabled_connectors, enabled_tools = _enabled_connector_tools(secrets)
         # Per-session connection hierarchy (UI-REFRESH §4.3): when the caller supplies the session's
@@ -489,6 +495,7 @@ def build_engine(
         directory_requester=directory_requester,
         plan_approver=plan_approver,
         question_asker=question_asker,
+        tool_requester=tool_requester,
     )
     engine.executor = executor  # type: ignore[attr-defined]
     engine.todo = todo  # type: ignore[attr-defined]

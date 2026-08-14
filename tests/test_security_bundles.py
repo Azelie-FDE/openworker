@@ -80,3 +80,35 @@ def test_prompts_carry_the_positioning_guardrails(tmp_path):
         assert "drive" in prompt  # drives scanners; value is judgment/remediation
     assert "read-only" in reg.get("cloud-posture").manifest.system_prompt.lower()
     assert "never print a discovered secret" in reg.get("security").manifest.system_prompt.lower()
+
+
+def test_security_prompt_forbids_silently_skipping_a_check(tmp_path):
+    """OPE-85, owner-hit 2026-08-13: with gitleaks unavailable the review silently dropped
+    its git-history secret scan — the check didn't fail, it vanished. For a security tool,
+    "no tool" rendering as "clean" is the worst possible outcome, so the contract lives in
+    the prompt and is pinned here."""
+    reg = _reg(tmp_path)
+    prompt = reg.get("security").manifest.system_prompt.lower()
+    assert "never silently skip" in prompt
+    assert "coverage" in prompt  # every review reports what ran and what didn't
+    assert "request_tool" in prompt  # asking is the first option, not skipping
+
+
+def test_scanner_skills_offer_a_fallback_instead_of_stopping(tmp_path):
+    """The skills used to say "if missing … and STOP", which is precisely the instruction
+    that produced the vanished check. A missing tool must lead to request_tool or a manual
+    equivalent — never to a dropped step."""
+    import coworker.personas as personas_pkg
+
+    root = Path(personas_pkg.__file__).parent / "builtin" / "security" / "skills"
+    secret_scan = (root / "secret-scan" / "SKILL.md").read_text()
+    semgrep = (root / "semgrep-review" / "SKILL.md").read_text()
+
+    for body in (secret_scan, semgrep):
+        assert "request_tool" in body
+        assert "STOP" not in body
+
+    # The history sweep is the check that actually went missing — it must survive without
+    # gitleaks, and the no-printing rule must survive the manual path too.
+    assert "git log -p" in secret_scan
+    assert "REDACTED" in secret_scan
