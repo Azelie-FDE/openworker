@@ -8,6 +8,8 @@
 import anthropic from "./logos/anthropic.svg";
 import openai from "./logos/openai.svg";
 import gemini from "./logos/gemini.svg";
+import byteplus from "./logos/byteplus.svg";
+import volcengine from "./logos/volcengine.svg";
 import ollama from "./logos/ollama.svg";
 import bedrock from "./logos/bedrock.svg";
 import vertex from "./logos/vertex.svg";
@@ -27,6 +29,8 @@ export const PROVIDER_LOGOS: Record<string, string> = {
   anthropic,
   openai,
   gemini,
+  ark: byteplus,
+  "ark-agent-plan-cn": volcengine,
   meta,
   ollama,
   bedrock,
@@ -47,6 +51,8 @@ export const PROVIDER_ORDER = [
   "anthropic",
   "openai",
   "gemini",
+  "ark",
+  "ark-agent-plan-cn",
   "meta",
   "ollama",
   "bedrock",
