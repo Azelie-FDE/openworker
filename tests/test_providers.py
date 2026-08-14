@@ -343,11 +343,13 @@ ARK_RESPONSES_VENDORS = {
         "base_url": "https://ark.ap-southeast.bytepluses.com/api/v3",
         "env_key": "ARK_API_KEY",
         "recommended_model": "dola-seed-evolving-latest-version",
+        "reasoning_summary": False,
     },
     "ark-agent-plan-cn": {
         "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
         "env_key": "ARK_AGENT_PLAN_CN_API_KEY",
         "recommended_model": "doubao-seed-evolving",
+        "reasoning_summary": True,
     },
 }
 
@@ -366,7 +368,7 @@ def test_ark_responses_descriptors_are_separate():
         assert not base.required
 
 
-def test_ark_responses_builders_use_their_own_keys_and_endpoints(monkeypatch):
+def test_ark_responses_builder_capabilities_PathsUnchanged(monkeypatch):
     from coworker.providers.openai_responses import OpenAIResponsesProvider
     from coworker.providers.registry import build_provider_client
 
@@ -384,6 +386,10 @@ def test_ark_responses_builders_use_their_own_keys_and_endpoints(monkeypatch):
         "plan-key",
         ARK_RESPONSES_VENDORS["ark-agent-plan-cn"]["base_url"],
     )
+    assert bp._reasoning_summary is ARK_RESPONSES_VENDORS["ark"]["reasoning_summary"]
+    assert plan._reasoning_summary is ARK_RESPONSES_VENDORS["ark-agent-plan-cn"][
+        "reasoning_summary"
+    ]
 
 
 def test_ark_responses_never_leak_the_openai_key(monkeypatch):

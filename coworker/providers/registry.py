@@ -211,7 +211,11 @@ def _openai_compat(vendor: str, default_base_url: str, env_key: Optional[str] = 
 
 
 def _openai_responses_compat(
-    vendor: str, default_base_url: str, env_key: Optional[str] = None
+    vendor: str,
+    default_base_url: str,
+    env_key: Optional[str] = None,
+    *,
+    reasoning_summary: bool = True,
 ):
     """Builder factory for vendors that explicitly implement the OpenAI Responses API.
 
@@ -228,7 +232,11 @@ def _openai_responses_compat(
             raise RuntimeError(
                 f"No {vendor} API key configured — add it in Settings ▸ Models."
             )
-        return OpenAIResponsesProvider(api_key=api_key, base_url=base_url)
+        return OpenAIResponsesProvider(
+            api_key=api_key,
+            base_url=base_url,
+            reasoning_summary=reasoning_summary,
+        )
 
     return build
 
@@ -279,6 +287,7 @@ def _responses_compat(
     recommended_model: str,
     env_key: str,
     endpoint_help: str = "",
+    reasoning_summary: bool = True,
 ) -> ProviderDescriptor:
     """Descriptor for a vendor exposing the OpenAI Responses API."""
     return ProviderDescriptor(
@@ -301,7 +310,12 @@ def _responses_compat(
                 or f"Prefilled with {title}'s official Responses endpoint.",
             ),
         ],
-        build=_openai_responses_compat(title, base_url, env_key),
+        build=_openai_responses_compat(
+            title,
+            base_url,
+            env_key,
+            reasoning_summary=reasoning_summary,
+        ),
         recommended_model=recommended_model,
         env_key=env_key,
         blurb=f"Uses {title}'s OpenAI-compatible Responses API — the endpoint is prefilled, just add your key.",
@@ -532,6 +546,7 @@ DESCRIPTORS: list[ProviderDescriptor] = [
         recommended_model="dola-seed-evolving-latest-version",
         env_key="ARK_API_KEY",
         endpoint_help="BytePlus Ark's Asia Pacific endpoint. This provider is separate from Volcengine Ark Agent Plan.",
+        reasoning_summary=False,
     ),
     _responses_compat(
         "ark-agent-plan-cn",
