@@ -17,6 +17,43 @@ from coworker.providers.openai_responses import (
     convert_tools,
 )
 
+
+def test_responses_custom_base_url_reaches_sdk(monkeypatch):
+    captured: dict = {}
+
+    def fake_openai(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr("openai.OpenAI", fake_openai)
+    provider = OpenAIResponsesProvider(
+        api_key="ark-key",
+        base_url="https://ark.example/api/v3/",
+    )
+
+    provider._ensure_client()
+
+    assert captured == {
+        "api_key": "ark-key",
+        "base_url": "https://ark.example/api/v3",
+    }
+
+
+def test_stock_openai_responses_path_unchanged(monkeypatch):
+    """Lockdown: stock OpenAI must not receive a vendor base URL."""
+    captured: dict = {}
+
+    def fake_openai(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setattr("openai.OpenAI", fake_openai)
+    provider = OpenAIResponsesProvider(api_key="openai-key")
+
+    provider._ensure_client()
+
+    assert captured == {"api_key": "openai-key"}
+
 # -- fakes ------------------------------------------------------------------------
 
 
