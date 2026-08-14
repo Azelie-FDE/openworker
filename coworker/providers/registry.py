@@ -882,9 +882,11 @@ def verify_provider_key(
     fields: Optional[dict[str, Any]] = None,
     timeout: float = 10.0,
 ) -> dict[str, Any]:
-    """Validate a provider's credentials with one cheap, read-only call (list models) — the same
-    pattern connectors use to validate tokens. Transient: callers pass the key directly so a user
-    can Test before saving. Never raises; returns {ok, error?}. Multi-field cloud providers
+    """Validate a provider's credentials with one cheap call — usually list models.
+
+    Ark's Responses-compatible data plane does not document a `/models` probe, so its Test button
+    sends a non-persisted one-token Responses request instead. Callers pass the key directly so a
+    user can Test before saving. Never raises; returns {ok, error?}. Multi-field cloud providers
     (Bedrock, Vertex) take their whole form via `fields`; everyone else uses api_key/base_url.
     """
     import httpx
@@ -911,6 +913,22 @@ def verify_provider_key(
         elif name == "ollama":
             base = _normalize_ollama_url(base_url)
             resp = httpx.get(base.rstrip("/") + "/models", timeout=timeout)
+        elif name in ("ark", "ark-agent-plan-cn"):
+            default_base = next(
+                (f.default for f in d.fields if f.key == "base_url" and f.default), ""
+            )
+            base = (base_url or "").strip().rstrip("/") or default_base.rstrip("/")
+            resp = httpx.post(
+                base + "/responses",
+                headers={"Authorization": f"Bearer {key}"},
+                json={
+                    "model": d.recommended_model,
+                    "input": "Reply with OK.",
+                    "max_output_tokens": 1,
+                    "store": False,
+                },
+                timeout=timeout,
+            )
         else:  # openai + any OpenAI-compatible endpoint (Azure, OpenRouter, vendors, vLLM…)
             default_base = next(
                 (f.default for f in d.fields if f.key == "base_url" and f.default), ""
