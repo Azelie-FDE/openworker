@@ -406,6 +406,47 @@ def test_existing_chat_compat_paths_unchanged():
     assert provider._base_url == COMPAT_VENDORS["deepseek"]
 
 
+def test_ark_curated_models_are_strict_allowlists():
+    from coworker.providers.matrix import models_for_provider
+
+    assert models_for_provider("ark") == [
+        "dola-seed-evolving-latest-version",
+        "dola-seed-2-1-turbo-260628",
+    ]
+    assert models_for_provider("ark-agent-plan-cn") == [
+        "doubao-seed-evolving",
+        "doubao-seed-2.1-turbo",
+    ]
+
+
+def test_ark_models_route_and_get_verified_agent_capabilities():
+    from coworker.providers.router import ProviderRouter
+
+    models = (
+        "ark:dola-seed-evolving-latest-version",
+        "ark:dola-seed-2-1-turbo-260628",
+        "ark-agent-plan-cn:doubao-seed-evolving",
+        "ark-agent-plan-cn:doubao-seed-2.1-turbo",
+    )
+    router = ProviderRouter.__new__(ProviderRouter)
+    for model in models:
+        prefix, bare = model.split(":", 1)
+        assert router._provider_name(model) == prefix
+        assert ProviderRouter._bare(model) == bare
+        caps = capabilities_for(model)
+        assert caps.tools and caps.parallel_tool_calls and caps.streaming
+        assert not caps.vision
+
+
+def test_ark_recommended_models_are_curated():
+    from coworker.providers.matrix import models_for_provider
+    from coworker.providers.registry import get_descriptor
+
+    for name in ARK_RESPONSES_VENDORS:
+        d = get_descriptor(name)
+        assert d.recommended_model in models_for_provider(name)
+
+
 def test_compat_models_route_and_get_tool_capabilities():
     from coworker.providers.router import ProviderRouter
 
