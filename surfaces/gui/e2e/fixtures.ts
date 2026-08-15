@@ -628,6 +628,7 @@ export async function mockApi(page: import("@playwright/test").Page) {
             installable: true,
             version: "8.30.1",
             summary: "scans git history and the working tree for committed secrets",
+            source: "github.com/gitleaks",
           });
           return; // suspended on the tool request
         }

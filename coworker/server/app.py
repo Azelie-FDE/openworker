@@ -1717,6 +1717,7 @@ def create_app(manager: SessionManager) -> FastAPI:
                     "version": (info or {}).get("version", ""),
                     "summary": (info or {}).get("summary", ""),
                     "url": (info or {}).get("url", ""),
+                    "source": (info or {}).get("source", ""),
                 },
                 tool_call_id=tool_call_id,
             )

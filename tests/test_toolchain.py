@@ -87,6 +87,7 @@ def test_describe_surfaces_what_the_user_is_approving(monkeypatch):
     info = toolchain.describe("gitleaks")
     assert info and info["version"] and info["sha256"] and info["url"]
     assert "secret" in info["summary"].lower()
+    assert info["source"] == "github.com/gitleaks"  # publisher, human-readable
 
 
 def test_install_refuses_a_tampered_download(tmp_path, monkeypatch):
@@ -155,3 +156,7 @@ def test_install_writes_a_verified_binary(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", "")
     monkeypatch.setattr(toolchain, "_KNOWN_DIRS", ())
     assert toolchain.resolve("osv-scanner") == path
+    # And linked under the stable bin dir, so a shell with that dir on PATH picks the
+    # tool up by name the moment the install finishes — no respawn, no full paths.
+    linked = toolchain.bin_dir() / "osv-scanner"
+    assert linked.exists() and open(linked, "rb").read() == payload

@@ -741,6 +741,7 @@ export function App() {
               installable: d.installable === true,
               version: d.version || "",
               summary: d.summary || "",
+              source: d.source || "",
             },
           ]);
           break;

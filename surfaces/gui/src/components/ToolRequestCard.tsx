@@ -22,23 +22,30 @@ export function ToolRequestCard({
         </span>
       </div>
       {item.reason && <div className="dirreq-reason">“{item.reason}”</div>}
+      {/* The fact strip is the PRODUCT speaking (registry metadata), styled apart from the
+          coworker's quoted ask above — mixing the two voices is what made the card confusing. */}
       {item.installable ? (
-        <div className="dirreq-reason">
-          {item.summary ? `${item.summary}. ` : ""}
-          Installs {item.tool}
-          {item.version ? ` ${item.version}` : ""} — a pinned build, checksum-verified before
-          it runs.
+        <div className="toolreq-facts">
+          <code>
+            {item.tool}
+            {item.version ? ` ${item.version}` : ""}
+          </code>
+          {item.summary && <span className="toolreq-fact">{item.summary}</span>}
+          <span className="toolreq-fact">pinned &amp; checksum-verified</span>
+          {item.source && <span className="toolreq-fact">from {item.source}</span>}
         </div>
       ) : (
-        <div className="dirreq-reason">
-          No verified build is available for this machine — install it yourself if you want
-          this check, or skip and the coworker will note the gap.
+        <div className="toolreq-facts">
+          <span className="toolreq-fact">
+            No verified build is available for this machine — install it yourself if you want
+            this check, or continue and the coworker will note the gap.
+          </span>
         </div>
       )}
       <div className="dirreq-actions">
         <span className="spacer" />
         <button className="btn" data-testid="toolreq-skip" onClick={() => onRespond(false)}>
-          Skip this check
+          Continue without it
         </button>
         <button
           className="btn primary"

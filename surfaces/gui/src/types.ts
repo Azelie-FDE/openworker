@@ -136,6 +136,7 @@ export type Item =
       installable?: boolean;
       version?: string;
       summary?: string;
+      source?: string;
       resolved?: "installed" | "skipped";
     }
   | {

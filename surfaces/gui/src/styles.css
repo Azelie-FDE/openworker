@@ -794,6 +794,19 @@ button.btn.danger { color: var(--accent); }
 .dirreq-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; color: var(--ink); }
 .dirreq-head .ico { color: var(--accent); }
 .dirreq-reason { font-size: 13px; color: var(--muted); font-style: italic; margin: 6px 0 10px; }
+/* request_tool fact strip — the product's own metadata (version, publisher, checksum),
+   deliberately NOT italic so it can't be misread as the coworker still talking */
+.toolreq-facts {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+  font-size: 12.5px; color: var(--muted); font-style: normal;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 10px; margin: 2px 0 10px;
+}
+.toolreq-facts code { color: var(--ink); font-size: 12.5px; }
+.toolreq-fact + .toolreq-fact::before,
+.toolreq-facts code + .toolreq-fact::before { content: "· "; color: var(--muted); }
+/* a disabled Install must LOOK disabled — the whole card exists to not oversell */
+.dirreq-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .dirreq-pathrow { display: flex; gap: 8px; align-items: center; }
 .dirreq-path {
   flex: 1; font: inherit; font-size: 13px; color: var(--ink);

@@ -976,6 +976,7 @@ class TurnEngine:
                     "installable": info is not None,
                     "version": (info or {}).get("version", ""),
                     "summary": (info or {}).get("summary", ""),
+                    "source": (info or {}).get("source", ""),
                 },
             )
             self._audit(tool_call, stage="tool_requested", reason=reason)

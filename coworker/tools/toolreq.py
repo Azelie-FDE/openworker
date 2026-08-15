@@ -18,8 +18,11 @@ from aisuite.agents import ToolMetadata, tool
 def request_tool_tool() -> object:
     def request_tool(name: str, reason: str) -> dict:
         """Ask the user to install a command-line tool you need but can't find on this
-        machine (e.g. `gitleaks`, `osv-scanner`, `semgrep`). Say in `reason` what check it
-        unlocks, so the user can judge whether it's worth installing.
+        machine (e.g. `gitleaks`, `osv-scanner`, `semgrep`).
+
+        Keep `reason` to ONE sentence: which check needs the tool. The prompt the user
+        sees already explains what the install is (pinned version, publisher, checksum)
+        and what happens if they decline — don't restate any of that in `reason`.
 
         Use this INSTEAD of quietly skipping a check. If the user declines, carry on with a
         fallback (e.g. reading git history yourself instead of running gitleaks) and state
