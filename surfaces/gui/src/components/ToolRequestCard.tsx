@@ -21,7 +21,11 @@ export function ToolRequestCard({
           The coworker needs <code>{item.tool}</code>
         </span>
       </div>
-      {item.reason && <div className="dirreq-reason">“{item.reason}”</div>}
+      {item.reason && (
+        <div className="dirreq-reason">
+          <span className="toolreq-label">Reason:</span> “{item.reason}”
+        </div>
+      )}
       {/* The fact strip is the PRODUCT speaking (registry metadata), styled apart from the
           coworker's quoted ask above — mixing the two voices is what made the card confusing. */}
       {item.installable ? (

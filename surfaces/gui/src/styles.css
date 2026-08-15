@@ -794,6 +794,9 @@ button.btn.danger { color: var(--accent); }
 .dirreq-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; color: var(--ink); }
 .dirreq-head .ico { color: var(--accent); }
 .dirreq-reason { font-size: 13px; color: var(--muted); font-style: italic; margin: 6px 0 10px; }
+/* the coworker's justification gets an explicit label — the quote alone made readers
+   work out what the italic line was */
+.toolreq-label { font-style: normal; font-weight: 600; color: var(--ink); }
 /* request_tool fact strip — the product's own metadata (version, publisher, checksum),
    deliberately NOT italic so it can't be misread as the coworker still talking */
 .toolreq-facts {

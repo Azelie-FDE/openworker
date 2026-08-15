@@ -16,7 +16,8 @@ test("request_tool surfaces a card naming the tool, the reason and the pinned ve
   await ask(page);
   const card = page.locator(".dirreq-card");
   await expect(card).toContainText("gitleaks");
-  await expect(card).toContainText("scan the git history for committed secrets");
+  // The coworker's justification is labeled, not a bare floating quote.
+  await expect(card).toContainText("Reason: “scan the git history for committed secrets”");
   // The fact strip is the product's voice: version, publisher, checksum — kept apart from
   // the coworker's quoted reason (mixing them is what made the card confusing, 2026-08-14).
   const facts = card.locator(".toolreq-facts");
