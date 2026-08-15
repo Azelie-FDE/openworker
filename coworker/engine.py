@@ -20,6 +20,7 @@ from enum import Enum
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
 from . import compaction as _compaction
+from . import toolchain as _toolchain
 from .events import Event, EventType
 from .permissions import Mode, PermissionEngine
 from .providers import AssistantTurn, ProviderClient, ToolCall
@@ -963,7 +964,20 @@ class TurnEngine:
                 ),
             }
         else:
-            yield Event(EventType.TOOL_REQUESTED, {"name": name, "reason": reason})
+            # The prompt must say up front whether WE can install this (pinned build for
+            # this platform) — a card that offers Install for a tool we can't fetch turns
+            # the user's approval into a guaranteed error. Absence of metadata means NO.
+            info = _toolchain.describe(name)
+            yield Event(
+                EventType.TOOL_REQUESTED,
+                {
+                    "name": name,
+                    "reason": reason,
+                    "installable": info is not None,
+                    "version": (info or {}).get("version", ""),
+                    "summary": (info or {}).get("summary", ""),
+                },
+            )
             self._audit(tool_call, stage="tool_requested", reason=reason)
             result = await self._interruptible(
                 self.tool_requester(dict(args), tool_call.id),

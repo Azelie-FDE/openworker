@@ -610,6 +610,16 @@ export async function mockApi(page: import("@playwright/test").Page) {
           });
           return; // suspended on the approval
         }
+        // The pre-fix payload shape (owner-hit 2026-08-14): no installable/version/summary
+        // — an older sidecar, or any surface that forgets the field. Must render NOT
+        // installable, never a guessed Install offer.
+        if (/request an unpinned tool/i.test(msg.text)) {
+          send("tool_requested", {
+            name: "somescanner",
+            reason: "scan the Terraform for misconfigurations",
+          });
+          return; // suspended on the tool request
+        }
         // OPE-85: the agent hits a missing scanner and asks instead of skipping the check.
         if (/scan for secrets/i.test(msg.text)) {
           send("tool_requested", {

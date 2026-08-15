@@ -737,7 +737,8 @@ export function App() {
               kind: "toolreq",
               tool: d.name || "",
               reason: d.reason || "",
-              installable: d.installable !== false,
+              // Fail CLOSED: only offer Install when the event says a pinned build exists.
+              installable: d.installable === true,
               version: d.version || "",
               summary: d.summary || "",
             },

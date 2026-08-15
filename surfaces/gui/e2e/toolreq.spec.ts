@@ -23,6 +23,21 @@ test("request_tool surfaces a card naming the tool, the reason and the pinned ve
   await expect(card.getByTestId("toolreq-skip")).toBeVisible();
 });
 
+test("an event without install metadata fails CLOSED — Install disabled, skip offered", async ({
+  page,
+}) => {
+  // Owner-hit 2026-08-14: the card offered "pinned build, checksum-verified" for a tool
+  // with no pinned build; approval could only produce an error. Absence of metadata is NO.
+  await page.goto("/");
+  await page.getByPlaceholder(/Ask the coworker/).fill("request an unpinned tool");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.locator(".dirreq-card");
+  await expect(card).toContainText("somescanner");
+  await expect(card).toContainText(/no verified build/i);
+  await expect(card.getByTestId("toolreq-install")).toBeDisabled();
+  await expect(card.getByTestId("toolreq-skip")).toBeEnabled();
+});
+
 test("installing runs the check; skipping still reports coverage", async ({ page }) => {
   await ask(page);
   await page.getByTestId("toolreq-install").click();

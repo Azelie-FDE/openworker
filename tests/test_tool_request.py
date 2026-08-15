@@ -17,8 +17,9 @@ from coworker.tools import ToolRegistry
 class ScriptedProvider(ProviderClient):
     """One turn that calls request_tool, then a plain reply."""
 
-    def __init__(self):
+    def __init__(self, tool: str = "gitleaks"):
         self.calls = 0
+        self.tool = tool
 
     def complete(self, *, model, messages, tools=None, **settings):
         self.calls += 1
@@ -29,7 +30,7 @@ class ScriptedProvider(ProviderClient):
                     ToolCall(
                         id="t1",
                         name="request_tool",
-                        arguments={"name": "gitleaks", "reason": "scan history for secrets"},
+                        arguments={"name": self.tool, "reason": "scan history for secrets"},
                     )
                 ],
             )
@@ -39,9 +40,9 @@ class ScriptedProvider(ProviderClient):
         return ModelCapabilities(tools=True)
 
 
-def _engine(tmp_path, requester):
+def _engine(tmp_path, requester, tool: str = "gitleaks"):
     return TurnEngine(
-        provider=ScriptedProvider(),
+        provider=ScriptedProvider(tool),
         registry=ToolRegistry(),
         permissions=PermissionEngine(workspace_root=tmp_path, mode=Mode.INTERACTIVE),
         model="m",
@@ -83,6 +84,30 @@ async def test_declining_tells_the_agent_to_fall_back_openly(tmp_path):
     tool_msg = [m for m in engine.messages if m.get("role") == "tool"][-1]
     body = str(tool_msg["content"]).lower()
     assert "degraded" in body or "fallback" in body
+
+
+@pytest.mark.asyncio
+async def test_event_tells_the_truth_about_installability(tmp_path, monkeypatch):
+    """Owner-hit 2026-08-14: the card offered Install for a tool with no pinned build —
+    the surface guessed because the event said nothing. The event must carry the
+    registry's verdict, and no metadata means NO."""
+    from coworker import toolchain
+
+    monkeypatch.setattr(toolchain, "_platform_key", lambda: "darwin_arm64")
+
+    async def requester(args, tool_call_id=None):
+        return {"installed": False, "reason": "declined"}
+
+    events = await _run(_engine(tmp_path, requester, tool="gitleaks"))
+    data = [e for e in events if e.type is EventType.TOOL_REQUESTED][0].data
+    assert data["installable"] is True
+    assert data["version"] == toolchain.MANAGED["gitleaks"].version
+    assert data["summary"]
+
+    events = await _run(_engine(tmp_path, requester, tool="not-a-managed-tool"))
+    data = [e for e in events if e.type is EventType.TOOL_REQUESTED][0].data
+    assert data["installable"] is False
+    assert data["version"] == "" and data["summary"] == ""
 
 
 @pytest.mark.asyncio
