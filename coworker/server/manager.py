@@ -643,11 +643,27 @@ class SessionManager:
         record = self.session_store.load(session_id)
         return (record.agent if record else None) or self.personas.default_id()
 
+    def _persona_connector_grant(self, persona_id: str) -> Optional[set[str]]:
+        """The persona's declared connector allowlist (OPE-93). None = unrestricted (the
+        `all` sentinel of general builtins); a set = only these ids can ever be effective
+        for its sessions — the empty set means no connector access at all."""
+        entry = self.personas.get(persona_id)
+        if entry is None or entry.manifest is None:
+            # Builder-based builtins (Chat/Code/Cowork/Ops) predate the allowlist: their
+            # `connectors` trait gates TOOLS only, while their sessions legitimately use
+            # the drawer/inbound path (channel bindings). No manifest → no restriction.
+            return None
+        declared = entry.manifest.connectors
+        if declared is True:
+            return None
+        return set(declared or ())
+
     def effective_connectors(
         self, session_id: str, persona_id: Optional[str] = None
     ) -> set[str]:
         """The connectors effectively enabled for this session (§4.1): connected AND not muted by
-        the session override / persona default. Drives the engine's connector-tool gating; seeds the
+        the session override / persona default AND within the persona's declared grant (OPE-93).
+        Drives the engine's connector-tool gating and the inbound delivery gate; seeds the
         persona defaults from the manifest on first read using the full connected set.
         """
         persona = self._persona_of(session_id, persona_id)
@@ -658,13 +674,15 @@ class SessionManager:
             persona, manifest, connected=connected
         )
         session_overrides = self.session_connections.get(session_id)
-        return set(
+        effective = set(
             effective_connections(
                 connected=connected,
                 persona_defaults=persona_defaults,
                 session_overrides=session_overrides,
             )
         )
+        grant = self._persona_connector_grant(persona)
+        return effective if grant is None else effective & grant
 
     def _inbound_connector_allowed(self, session_id: str, connector: str) -> bool:
         """Whether an inbound message on `connector` should be DELIVERED to `session_id` (§4.3).
@@ -823,6 +841,12 @@ class SessionManager:
         connectors = connector_list(self.secrets)
         by_name = {c["name"]: c for c in connectors}
         connected_names = {c["name"] for c in connectors if c["connected"]}
+        # OPE-93 (owner-hit 2026-08-15): the drawer must show the persona's world, not the
+        # account's. An undeclared connector is not a mutable source of this session — it
+        # was rendering as toggled-ON while the engine (correctly) refused its tools.
+        grant = self._persona_connector_grant(persona)
+        if grant is not None:
+            connected_names &= grant
         effective = self.effective_connectors(session_id, persona)
         connected = [
             {

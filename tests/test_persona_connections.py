@@ -283,3 +283,41 @@ def test_declared_connector_allowlist_gates_session_tools(tmp_path):
 
     none = names_for(False)
     assert not any(n.startswith(("linear_", "box_")) for n in none)
+
+
+def test_allowlist_persona_drawer_and_effective_set_exclude_undeclared(
+    tmp_path, monkeypatch
+):
+    """OPE-93, owner-hit 2026-08-15: a fresh Cloud Posture session rendered Browser and
+    Slack as toggled-ON sources while the engine (correctly) refused their tools — the
+    drawer and the inbound gate read the pre-allowlist hierarchy. All three surfaces now
+    share the persona grant, so an undeclared connector neither renders nor delivers."""
+    mgr = _mgr(tmp_path, monkeypatch)
+    _connect_github(mgr)
+    _connect_slack(mgr)
+    mgr.session_store.save(
+        SessionRecord(
+            session_id="sp",
+            workspace=str(mgr.default_workspace),
+            model="m",
+            mode="interactive",
+            agent="security",  # manifest declares connectors: [github]
+        )
+    )
+
+    assert mgr.effective_connectors("sp", "security") <= {"github"}
+    assert mgr._inbound_connector_allowed("sp", "slack") is False
+
+    names = {
+        c["connector"]
+        for c in mgr.session_connections_view("sp", "security")["connected"]
+    }
+    assert names <= {"github"}  # browser (always connected) and slack are absent
+
+    # Builder-based personas keep the unrestricted view — their sessions use the
+    # drawer/inbound path (channel bindings) even though they expose no connector tools.
+    _ops_session(mgr, "sg")
+    ops_names = {
+        c["connector"] for c in mgr.session_connections_view("sg", "ops")["connected"]
+    }
+    assert "slack" in ops_names  # undeclared for security, present for ops
