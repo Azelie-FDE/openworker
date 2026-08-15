@@ -789,7 +789,10 @@ button.btn.danger { color: var(--accent); }
 /* request_directory prompt (agent-initiated) */
 .dirreq-card {
   background: var(--panel); border: 1px solid var(--accent); border-radius: 12px;
-  padding: 12px 14px; margin-bottom: 9px; box-shadow: 0 0 0 3px var(--accent-soft);
+  padding: 12px 14px; box-shadow: 0 0 0 3px var(--accent-soft);
+  /* Same column as the composer/approval dock — full-bleed on wide monitors read
+     broken (owner catch 2026-08-15 on the tool-request card). */
+  max-width: 760px; margin: 0 auto 9px;
 }
 .dirreq-head { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; color: var(--ink); }
 .dirreq-head .ico { color: var(--accent); }
