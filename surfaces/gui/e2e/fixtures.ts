@@ -863,6 +863,42 @@ export async function mockApi(page: import("@playwright/test").Page) {
       }
       return json({ roots });
     }
+    // Artifacts (OPE-91): one HTML report whose content actively probes the sandbox —
+    // an inline script that renders proof-of-execution, a parent-window escape attempt,
+    // and an external subresource that must be CSP-blocked.
+    if (/\/v1\/sessions\/[^/]+\/artifacts\/read$/.test(p)) {
+      return json({
+        ok: true,
+        path: "reports/security-review.html",
+        kind: "html",
+        content: [
+          "<h1>Security review</h1>",
+          '<div id="probe">script did not run</div>',
+          "<script>",
+          '  document.getElementById("probe").textContent = "script ran in sandbox";',
+          "  try { window.parent.document.title = 'ESCAPED'; } catch (e) {",
+          '    document.getElementById("probe").textContent += " · parent blocked";',
+          "  }",
+          "</script>",
+          '<img src="https://evil.example/exfil.png" onerror="document.getElementById(\'probe\').textContent += \' · network blocked\'">',
+        ].join("\n"),
+      });
+    }
+    if (/\/v1\/sessions\/[^/]+\/artifacts\/reveal$/.test(p)) return json({ ok: true });
+    if (/\/v1\/sessions\/[^/]+\/artifacts$/.test(p)) {
+      return json({
+        artifacts: [
+          {
+            path: "reports/security-review.html",
+            abs_path: "/Users/test/OpenWorker/launch-note/reports/security-review.html",
+            name: "security-review.html",
+            kind: "html",
+            size: 2048,
+            modified_at: Math.floor(Date.now() / 1000) - 60,
+          },
+        ],
+      });
+    }
     if (/\/v1\/sessions\/[^/]+\/messages$/.test(p)) return json({ messages: [] });
     if (/\/v1\/sessions\/[^/]+\/unattended$/.test(p)) {
       const id = decodeURIComponent(p.split("/").slice(-2)[0]);

