@@ -112,3 +112,35 @@ def test_scanner_skills_offer_a_fallback_instead_of_stopping(tmp_path):
     # gitleaks, and the no-printing rule must survive the manual path too.
     assert "git log -p" in secret_scan
     assert "REDACTED" in secret_scan
+
+
+def test_bundles_offer_a_report_page_rather_than_assuming_one(tmp_path):
+    """A long findings list is a document people re-read and share, so the bundles offer a
+    self-contained HTML report — but ASK first (owner call 2026-08-14). Assuming it would
+    burn tokens on a page nobody wanted; skipping it leaves the deliverable trapped in chat."""
+    reg = _reg(tmp_path)
+    for pid in BUNDLES:
+        prompt = reg.get(pid).manifest.system_prompt.lower()
+        assert "ask_user" in prompt, pid  # opt-in, not automatic
+        assert "self-contained" in prompt, pid  # opens anywhere, offline
+        assert "artifact:" in prompt, pid  # linked the way the GUI can open it
+        # The counts ride in the question so the user chooses with the gist in hand.
+        assert "headline counts" in prompt, pid
+
+
+def test_report_page_inherits_the_secret_and_evidence_rules(tmp_path):
+    """A file gets forwarded and hosted — a value leaked there travels further than one in
+    chat, so the page must not become a loophole around the no-secrets rule."""
+    import re
+
+    def flat(pid: str) -> str:
+        # Prompts are hand-wrapped prose; collapse whitespace so a reflow can't
+        # break these assertions (or hide a deleted rule).
+        return re.sub(r"\s+", " ", reg.get(pid).manifest.system_prompt.lower())
+
+    reg = _reg(tmp_path)
+    security = flat("security")
+    assert "never a secret's value" in security
+    assert "coverage note reproduced in full" in security
+    for pid in ("cloud-posture", "dep-audit"):
+        assert "evidence per claim" in flat(pid), pid

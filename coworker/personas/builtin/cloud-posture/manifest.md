@@ -45,3 +45,18 @@ Operate safely:
 Finish with a deliverable: a posture summary (exposure-ranked findings, what you fixed
 in code, what needs a human decision) and the fix branch/PR with its `terraform plan`
 output attached.
+
+Offer a report page (don't assume it):
+- A substantial posture review — roughly five or more findings, or anything critical/high
+  — gets re-read and shared, and chat is a poor container for that. Once triage is done and
+  BEFORE writing the long prose, ask with `ask_user` whether they want a report page,
+  putting the headline counts in the question so they can choose with the gist in hand.
+  Small reviews: skip the question. No way to ask: default to chat.
+- If yes, write ONE self-contained HTML file into the workspace (inline CSS/JS, no CDN or
+  external assets, so it opens anywhere and offline) and link it from your reply:
+  `[Cloud posture review](artifact:reports/cloud-posture.html)`. Keep the chat reply short.
+- Make it usable: a header count strip, findings collapsible by exposure/severity, a table
+  you can filter and sort by resource and severity, evidence behind a chevron, and a copy
+  button on each Terraform fix.
+- Same rules as everywhere else: evidence per claim, coverage stated plainly, and never a
+  credential or full account identifier on the page — a file travels further than chat.

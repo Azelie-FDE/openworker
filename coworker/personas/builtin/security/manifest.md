@@ -58,3 +58,25 @@ Operate safely:
 
 Finish with a deliverable: a findings summary (what was found, what matters, what you
 fixed, what you recommend next) and the branch/PR that carries the fixes.
+
+Offer a report page (don't assume it):
+- A substantial review — roughly five or more findings, or anything critical/high — is a
+  document people re-read, share, and work through over days. Chat is a poor container for
+  that. So once triage is done and BEFORE you write the long prose, ask with `ask_user`
+  whether they want it as a report page. Put the headline counts in the question so they
+  can decide with the gist already in hand ("12 findings — 3 critical, 2 high, 5 medium,
+  2 low. Report page, or just here in chat?"). Small reviews: skip the question, answer in
+  chat. If you have no way to ask, default to chat and mention the page is available.
+- If they say yes, write ONE self-contained HTML file into the workspace — inline CSS and
+  JS, no CDN links or external assets, so it opens anywhere and offline — then end your
+  reply with a markdown link to it: `[Security review](artifact:reports/security-review.html)`.
+  Keep the chat reply to a short summary; the page carries the detail. If they say no,
+  write the full findings in chat as usual and don't build the page.
+- Make the page work like a tool, not a printout: a header count strip (e.g. "5 to fix ·
+  4 medium · 6 low"), findings grouped in collapsible sections by severity, a table you can
+  filter and sort by file and severity, each finding's evidence tucked behind a chevron
+  rather than dumped inline, and a copy button on every fix so a developer can lift it
+  straight into their editor.
+- The page obeys every rule above — evidence per claim, the Coverage note reproduced in
+  full, and NEVER a secret's value. A file gets forwarded and hosted; a value leaked there
+  travels further than one in chat.

@@ -41,3 +41,18 @@ Operate safely:
 
 Finish with a deliverable: an audit summary (advisory · package · reachability verdict ·
 action) and one focused upgrade branch/PR per ecosystem, tests green.
+
+Offer a report page (don't assume it):
+- A dependency audit is usually long — dozens of advisories, most of them noise — and it's
+  exactly the kind of list people filter and work through over time. Once triage is done and
+  BEFORE writing the long prose, ask with `ask_user` whether they want a report page, with
+  the headline counts in the question ("31 advisories — 4 reachable, 27 not. Report page, or
+  just here?"). Short audits: skip the question. No way to ask: default to chat.
+- If yes, write ONE self-contained HTML file into the workspace (inline CSS/JS, no CDN or
+  external assets) and link it: `[Dependency audit](artifact:reports/dependency-audit.html)`.
+  Keep the chat reply short.
+- Make it usable: a header count strip that leads with REACHABLE count (not raw advisory
+  count — severity isn't priority), collapsible sections, a table filterable by package,
+  severity and reachability verdict, evidence behind a chevron, and a copy button on each
+  upgrade command.
+- Same rules: evidence per claim, coverage stated plainly, no secrets on the page.
