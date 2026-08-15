@@ -33,6 +33,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
+from urllib.parse import urlparse
 
 from .secrets import state_dir
 
@@ -53,6 +54,13 @@ _KNOWN_DIRS: tuple[str, ...] = (
 def managed_dir() -> Path:
     """Where we keep tools we installed ourselves (never the user's own copies)."""
     return state_dir() / "tools"
+
+
+def bin_dir() -> Path:
+    """One stable dir of links to the current pinned binaries. Binaries themselves live
+    in versioned dirs; this is what goes on a shell's PATH, so a tool installed mid-
+    session is picked up by the already-running shell without a respawn."""
+    return managed_dir() / "bin"
 
 
 def _platform_key() -> str:
@@ -203,12 +211,16 @@ def describe(name: str) -> Optional[dict[str, str]]:
     dl = tool.downloads.get(_platform_key())
     if not dl:
         return None
+    parsed = urlparse(dl.url)
+    path_parts = [p for p in parsed.path.split("/") if p]
     return {
         "name": tool.name,
         "version": tool.version,
         "summary": tool.summary,
         "url": dl.url,
         "sha256": dl.sha256,
+        # Publisher, human-readable ("github.com/aquasecurity") — for the consent card.
+        "source": parsed.netloc + (f"/{path_parts[0]}" if path_parts else ""),
     }
 
 
@@ -261,4 +273,18 @@ def install(name: str, *, timeout: int = 120) -> str:
         staged.chmod(staged.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
         shutil.move(str(staged), str(target))
 
+    _link_into_bin(tool, target)
     return str(target)
+
+
+def _link_into_bin(tool: ManagedTool, target: Path) -> None:
+    """Expose the versioned binary under the stable bin dir (PATH-friendly name)."""
+    link = bin_dir() / target.name
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(target)
+    except OSError:
+        # Filesystems without symlinks (some Windows setups): a copy serves the same role.
+        shutil.copy2(target, link)
