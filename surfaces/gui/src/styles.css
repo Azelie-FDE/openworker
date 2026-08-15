@@ -800,14 +800,15 @@ button.btn.danger { color: var(--accent); }
 /* request_tool fact strip — the product's own metadata (version, publisher, checksum),
    deliberately NOT italic so it can't be misread as the coworker still talking */
 .toolreq-facts {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
   font-size: 12.5px; color: var(--muted); font-style: normal;
   background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
   padding: 7px 10px; margin: 2px 0 10px;
 }
 .toolreq-facts code { color: var(--ink); font-size: 12.5px; }
-.toolreq-fact + .toolreq-fact::before,
-.toolreq-facts code + .toolreq-fact::before { content: "· "; color: var(--muted); }
+.toolreq-factrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.toolreq-factrow code + .toolreq-fact::before { content: "· "; color: var(--muted); }
+.toolreq-explain { margin-top: 4px; }
+.toolreq-factrow + .toolreq-explain { margin-top: 5px; }
 /* a disabled Install must LOOK disabled — the whole card exists to not oversell */
 .dirreq-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .dirreq-pathrow { display: flex; gap: 8px; align-items: center; }

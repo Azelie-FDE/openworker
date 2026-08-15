@@ -985,6 +985,20 @@ class TurnEngine:
                 interrupted={"installed": False, "error": "interrupted by user"},
             ) or {"installed": False, "error": "no response"}
             if not result.get("installed"):
+                # The card says "or install it yourself and continue" — honor it. A user
+                # who brewed the tool mid-prompt and clicked Continue has PROVIDED it,
+                # not declined it; find their copy before treating this as a refusal.
+                found = _toolchain.resolve(name)
+                if found:
+                    result = {
+                        "installed": True,
+                        "path": found,
+                        "note": (
+                            "the user provided their own copy instead of the managed "
+                            "install — use it from this path"
+                        ),
+                    }
+            if not result.get("installed"):
                 result.setdefault(
                     "guidance",
                     "Continue without it: use a fallback check if you have one, and say in "

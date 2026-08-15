@@ -68,9 +68,14 @@ async def test_emits_tool_requested_and_reports_install(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_declining_tells_the_agent_to_fall_back_openly(tmp_path):
+async def test_declining_tells_the_agent_to_fall_back_openly(tmp_path, monkeypatch):
     """A refusal must not read as 'check done'. The tool result has to push the agent
     toward a disclosed fallback, which is the whole point of the contract."""
+    from coworker import toolchain
+
+    # Truly absent — otherwise the decline-time re-check (below) would find the dev
+    # machine's real gitleaks and turn this into the user-provided-copy path.
+    monkeypatch.setattr(toolchain, "resolve", lambda name: None)
 
     async def requester(args, tool_call_id=None):
         return {"installed": False, "reason": "the user declined to install it"}
@@ -84,6 +89,29 @@ async def test_declining_tells_the_agent_to_fall_back_openly(tmp_path):
     tool_msg = [m for m in engine.messages if m.get("role") == "tool"][-1]
     body = str(tool_msg["content"]).lower()
     assert "degraded" in body or "fallback" in body
+
+
+@pytest.mark.asyncio
+async def test_decline_recheck_finds_a_copy_the_user_installed_themselves(tmp_path, monkeypatch):
+    """The card says "or install it yourself and continue" — that has to be real. A user
+    who brews the tool while the prompt is up and clicks Continue has PROVIDED the tool;
+    the agent must be handed their copy's path, not a refusal."""
+    from coworker import toolchain
+
+    monkeypatch.setattr(toolchain, "resolve", lambda name: "/opt/homebrew/bin/gitleaks")
+
+    async def requester(args, tool_call_id=None):
+        return {"installed": False, "reason": "the user declined to install it"}
+
+    engine = _engine(tmp_path, requester)
+    events = await _run(engine)
+    finished = [e for e in events if e.type is EventType.TOOL_FINISHED]
+    assert finished[0].data["status"] == "ok"
+
+    tool_msg = [m for m in engine.messages if m.get("role") == "tool"][-1]
+    body = str(tool_msg["content"])
+    assert "/opt/homebrew/bin/gitleaks" in body
+    assert "own copy" in body  # attributed to the user, not to a managed install
 
 
 @pytest.mark.asyncio

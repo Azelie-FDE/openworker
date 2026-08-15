@@ -30,20 +30,25 @@ export function ToolRequestCard({
           coworker's quoted ask above — mixing the two voices is what made the card confusing. */}
       {item.installable ? (
         <div className="toolreq-facts">
-          <code>
-            {item.tool}
-            {item.version ? ` ${item.version}` : ""}
-          </code>
-          {item.summary && <span className="toolreq-fact">{item.summary}</span>}
-          <span className="toolreq-fact">pinned &amp; checksum-verified</span>
-          {item.source && <span className="toolreq-fact">from {item.source}</span>}
+          <div className="toolreq-factrow">
+            <code>
+              {item.tool}
+              {item.version ? ` ${item.version}` : ""}
+            </code>
+            {item.summary && <span className="toolreq-fact">{item.summary}</span>}
+          </div>
+          <div className="toolreq-explain">
+            OpenWorker installs its own verified copy
+            {item.source ? ` from ${item.source}` : ""} — or install it yourself and
+            continue.
+          </div>
         </div>
       ) : (
         <div className="toolreq-facts">
-          <span className="toolreq-fact">
-            No verified build is available for this machine — install it yourself if you want
-            this check, or continue and the coworker will note the gap.
-          </span>
+          <div className="toolreq-explain">
+            OpenWorker has no verified build for this machine — install it yourself if you
+            want this check, or continue and the coworker will note the gap.
+          </div>
         </div>
       )}
       <div className="dirreq-actions">
