@@ -114,6 +114,23 @@ def test_scanner_skills_offer_a_fallback_instead_of_stopping(tmp_path):
     assert "REDACTED" in secret_scan
 
 
+def test_cloud_posture_drives_trivy_config_not_deprecated_tfsec(tmp_path):
+    """tfsec was folded into trivy upstream and is maintenance-only; recommending it
+    sends request_tool (and users) after a dead tool. `trivy config` is the successor.
+    The only tfsec mention allowed in the bundle is the deprecation ban itself."""
+    import coworker.personas as personas_pkg
+
+    root = Path(personas_pkg.__file__).parent / "builtin" / "cloud-posture"
+    assert "tfsec" not in (root / "manifest.md").read_text()
+
+    skill = (root / "skills" / "iac-scan" / "SKILL.md").read_text()
+    assert "trivy config" in skill
+    assert "request_tool" in skill  # missing scanner → ask, never a dropped scan
+    for line in skill.splitlines():
+        if "tfsec" in line:
+            assert "deprecated" in line, f"stray tfsec mention: {line!r}"
+
+
 def test_bundles_offer_a_report_page_rather_than_assuming_one(tmp_path):
     """A long findings list is a document people re-read and share, so the bundles offer a
     self-contained HTML report — but ASK first (owner call 2026-08-14). Assuming it would

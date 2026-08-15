@@ -1,14 +1,17 @@
 ---
 name: iac-scan
-description: Scan Terraform/IaC with trivy or tfsec and fix what matters in code
+description: Scan Terraform/IaC with trivy config and fix what matters in code
 ---
 Scan the repo's infrastructure-as-code and turn findings into minimal, safe Terraform
 changes.
 
-1. Pick the scanner that's present (check in this order, ask before installing):
+1. Pick the scanner (in this order — do NOT skip the scan if none is present):
    - `trivy config . --format json -o /tmp/iac.json` (also covers Dockerfiles/k8s)
-   - `tfsec . --format json --out /tmp/iac.json`
-   - `checkov -d . -o json > /tmp/iac.json`
+   - `checkov -d . -o json > /tmp/iac.json` if the repo already uses it
+   - Neither installed: ask for trivy with `request_tool("trivy", …)`. If the user
+     declines, review the Terraform by hand against the exposure checklist in step 2
+     and say in your report that the scan was manual.
+   Do not suggest tfsec — it is deprecated; `trivy config` is its successor.
 2. Triage by real exposure, reading the surrounding Terraform for each finding:
    - Internet-reachable (0.0.0.0/0 ingress, public buckets/ALBs) first.
    - Then identity blast radius (wildcard IAM, broad assume-role trust).

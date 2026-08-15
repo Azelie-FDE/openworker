@@ -86,8 +86,8 @@ class ManagedTool:
 # own checksum manifest; bumping a tool means bumping the digest in the same commit.
 #
 # Not every scanner belongs here: semgrep is distributed as a Python package (pip/brew),
-# and trivy/tfsec ship per-distro packaging — for those we resolve the user's install
-# rather than half-managing a copy. That's a deliberate line, not an omission.
+# so we resolve the user's install rather than half-managing a copy. tfsec is absent on
+# purpose — it's deprecated upstream and `trivy config` is its successor.
 MANAGED: dict[str, ManagedTool] = {
     "gitleaks": ManagedTool(
         name="gitleaks",
@@ -108,6 +108,28 @@ MANAGED: dict[str, ManagedTool] = {
                 url="https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
                 sha256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
                 member="gitleaks",
+            ),
+        },
+    ),
+    "trivy": ManagedTool(
+        name="trivy",
+        version="0.74.0",
+        summary="scans IaC/config, container images, and filesystems for misconfigurations and vulnerabilities",
+        downloads={
+            "darwin_arm64": Download(
+                url="https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_macOS-ARM64.tar.gz",
+                sha256="1caada5e0e2091909357c7525d3aa76f4b660b13821bc143b190c7483e31cc11",
+                member="trivy",
+            ),
+            "darwin_amd64": Download(
+                url="https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_macOS-64bit.tar.gz",
+                sha256="472816f6888dda689d075c30254d4210b4d1035acf365aa72332f584c2f60485",
+                member="trivy",
+            ),
+            "linux_amd64": Download(
+                url="https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz",
+                sha256="2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a",
+                member="trivy",
             ),
         },
     ),
