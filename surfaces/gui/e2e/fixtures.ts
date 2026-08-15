@@ -610,6 +610,14 @@ export async function mockApi(page: import("@playwright/test").Page) {
           });
           return; // suspended on the approval
         }
+        // A deliverable turn ending in an artifact chip (§34) — for the chip-open flow.
+        if (/show the report/i.test(msg.text)) {
+          send("assistant_message", {
+            text: "Done — [Security review](artifact:reports/security-review.html)",
+          });
+          send("turn_done");
+          return;
+        }
         // The pre-fix payload shape (owner-hit 2026-08-14): no installable/version/summary
         // — an older sidecar, or any surface that forgets the field. Must render NOT
         // installable, never a guessed Install offer.

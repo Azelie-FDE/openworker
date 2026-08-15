@@ -36,3 +36,18 @@ test("HTML artifact offers Open in browser as the unsandboxed escape hatch", asy
   await openReport(page);
   await expect(page.getByTestId("artifact-open-browser")).toBeVisible();
 });
+
+test("a transcript chip opens the viewer on the FIRST click even with the rail hidden", async ({
+  page,
+}) => {
+  // Owner-hit 2026-08-15: the chip fires one event; the rail's select-listener was only
+  // registered while the rail was visible, so click #1 unhid an empty rail and the
+  // selection was lost — the viewer appeared only on a later click.
+  await page.goto("/");
+  await page.getByPlaceholder(/Ask the coworker/).fill("show the report");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Hide side panel" }).click();
+
+  await page.getByTestId("artifact-chip").click();
+  await expect(page.getByTestId("artifact-frame")).toBeVisible();
+});
