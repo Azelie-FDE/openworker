@@ -58,7 +58,11 @@ class PersonaManifest:
     # "deliverable". Builtins registered via builders may still carry "none" (Chat).
     workspace: str = "deliverable"
     messaging: bool = False
-    connectors: bool = False
+    # Connector grant (OPE-93): False = none, a tuple = allowlist of connector ids
+    # (session exposes declared ∩ connected), True = every connected connector — the
+    # `all` sentinel, reserved for built-in general personas. Coarser grants leaked
+    # undeclared tools (browser, email) into security sessions; undeclared = absent.
+    connectors: bool | tuple[str, ...] = False
     default_permission_mode: str = "interactive"
     recommended_models: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
@@ -94,6 +98,59 @@ class PersonaManifest:
             messaging=self.messaging,
             connectors=self.connectors,
         )
+
+
+def _connectors(
+    persona_id: str,
+    raw: Any,
+    recommends: list[Recommendation],
+    builtin: bool,
+) -> bool | tuple[str, ...]:
+    """Parse the connector grant (OPE-93). Fail closed at every ambiguity.
+
+    - list → explicit allowlist (the normal case).
+    - "all" → every connected connector; reserved for BUILT-IN general personas — a
+      shared bundle claiming it is exactly the trust violation the allowlist exists
+      to prevent, so third-party loads reject it.
+    - legacy `true` (pre-allowlist manifests) → the connector refs the manifest already
+      recommends (author intent); no recommends → no grant.
+    - recommends must stay within the grant: a recommendation the coworker can't use is
+      author drift, surfaced at load rather than at the user's consent screen.
+    """
+    if raw is None or raw is False:
+        declared: bool | tuple[str, ...] = False
+    elif raw is True:
+        refs = {r.ref for r in recommends if r.kind == "connector"}
+        declared = tuple(sorted(refs)) if refs else False
+    elif isinstance(raw, str):
+        if raw.strip().lower() != "all":
+            raise ManifestError(
+                f"{persona_id}: `connectors` must be a list of connector ids or 'all'"
+            )
+        if not builtin:
+            raise ManifestError(
+                f"{persona_id}: `connectors: all` is reserved for built-in coworkers — "
+                "declare the specific connectors this coworker uses"
+            )
+        declared = True
+    elif isinstance(raw, list):
+        declared = tuple(
+            dict.fromkeys(s for s in (str(x).strip() for x in raw) if s)
+        )
+    else:
+        raise ManifestError(
+            f"{persona_id}: `connectors` must be a list of connector ids or 'all'"
+        )
+
+    if declared is not True:
+        granted = set(declared or ())
+        for r in recommends:
+            if r.kind == "connector" and r.ref not in granted:
+                raise ManifestError(
+                    f"{persona_id}: recommends connector '{r.ref}' but does not declare "
+                    "it in `connectors` — a recommendation must stay within the grant"
+                )
+    return declared
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
@@ -224,6 +281,8 @@ def parse_manifest(
 
     tools = _strlist(meta, "tools")
     _validate_tools(persona_id, tools)
+    recommends = _recommends(persona_id, meta)
+    connectors = _connectors(persona_id, meta.get("connectors"), recommends, builtin)
 
     return PersonaManifest(
         id=persona_id,
@@ -236,13 +295,13 @@ def parse_manifest(
         family=family,
         workspace=workspace,
         messaging=bool(meta.get("messaging", False)),
-        connectors=bool(meta.get("connectors", False)),
+        connectors=connectors,
         default_permission_mode=mode,
         recommended_models=_strlist(meta, "recommended_models"),
         skills=_strlist(meta, "skills"),
         mcp=_strlist(meta, "mcp"),
         version=str(meta.get("version", "") or "").strip(),
-        recommends=_recommends(persona_id, meta),
+        recommends=recommends,
         builtin=builtin,
         source=source,
     )

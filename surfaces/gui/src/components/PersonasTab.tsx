@@ -376,7 +376,11 @@ function ConsentCard({
       )}
       <div className="text-[12.5px] text-ink mt-2">
         Can {summary}
-        {c.connectors ? " · use your connected services" : ""}
+        {c.connectors === "all"
+          ? " · use ALL your connected services"
+          : c.connectors.length
+            ? ` · use connectors: ${c.connectors.join(", ")}`
+            : ""}
         {c.messaging ? " · send messages" : ""}
         {c.mcp.length ? ` · use MCP: ${c.mcp.join(", ")}` : ""}
         <button

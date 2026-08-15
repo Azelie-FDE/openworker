@@ -26,7 +26,9 @@ def consent_summary(m: PersonaManifest) -> dict:
         "description": m.description,
         "tools": list(m.tools),
         "risk": sorted(rc.value for rc in risk_summary(m.tools)),
-        "connectors": m.connectors,
+        # "all" | [connector ids] | [] — the consent screen shows the actual names,
+        # never a bare "uses connectors" bit (OPE-93).
+        "connectors": "all" if m.connectors is True else list(m.connectors or ()),
         "mcp": list(m.mcp),
         "messaging": m.messaging,
         "recommended_mode": m.default_permission_mode,
@@ -49,8 +51,12 @@ def capability_set(m: PersonaManifest) -> set[str]:
     update keeps the user's enabled state)."""
     caps = {f"tool:{t}" for t in m.tools}
     caps |= {f"mcp:{s}" for s in m.mcp}
-    if m.connectors:
-        caps.add("connectors")
+    # Per-connector caps (OPE-93): an update that ADDS a connector must grow the set and
+    # re-trigger consent — the old single "connectors" bit hid exactly that change.
+    if m.connectors is True:
+        caps.add("connectors:all")
+    else:
+        caps |= {f"connector:{c}" for c in m.connectors or ()}
     if m.messaging:
         caps.add("messaging")
     return caps

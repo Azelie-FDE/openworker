@@ -6,7 +6,7 @@ tagline: Find and fix security issues — scan, triage, PR
 family: code
 version: "1"
 tools: [code_files, git, search, shell, todo]
-connectors: true
+connectors: [github]
 skills: [semgrep-review, secret-scan, security-fix-pr]
 recommended_models: [anthropic:claude-opus-4-8, openai:gpt-5.6-sol]
 default_permission_mode: interactive

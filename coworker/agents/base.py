@@ -35,10 +35,12 @@ class Agent:
     # Traits that replace the old per-agent-name branching in build_engine / manager.
     # family: "code" gets explorer subagents; "knowledge" gets scheduling / request_directory /
     # roots context (when it has a workspace). messaging: exposes send_message. connectors:
-    # loads the integration toolset. Defaults keep non-persona callers behaving as before.
+    # loads the integration toolset — True = every connected connector (general builtins
+    # only), a tuple = allowlist (session gets declared ∩ connected; OPE-93), False = none.
+    # Defaults keep non-persona callers behaving as before.
     family: str = "knowledge"
     messaging: bool = False
-    connectors: bool = False
+    connectors: bool | tuple[str, ...] = False
 
     def build_tools(self, context: AgentContext) -> list:
         return list(self.tool_factory(context)) if self.tool_factory else []

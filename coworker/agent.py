@@ -282,6 +282,12 @@ def build_engine(
         registry.register(request_tool_tool())
     if agent.connectors:
         enabled_connectors, enabled_tools = _enabled_connector_tools(secrets)
+        # Least-privilege grant (OPE-93): a persona with an allowlist gets ONLY the
+        # connectors it declared — an undeclared connector's tools never enter the
+        # session, no matter what the user has connected. True = general personas
+        # (Cowork) that legitimately drive whatever is connected.
+        if agent.connectors is not True:
+            enabled_connectors = enabled_connectors & set(agent.connectors)
         # Per-session connection hierarchy (UI-REFRESH §4.3): when the caller supplies the session's
         # effective connector set, intersect it so only effective-enabled connectors expose tools.
         # Default None preserves CLI / direct callers (no per-session restriction).

@@ -15,7 +15,7 @@ family: knowledge
 workspace: deliverable
 tools: [files, search, shell, todo]
 messaging: true
-connectors: true
+connectors: [github]
 recommended_models: [anthropic:claude-opus-4-8]
 default_permission_mode: interactive
 ---
@@ -28,10 +28,52 @@ def test_parse_valid():
     assert m.id == "demo" and m.name == "Demo Coworker"
     assert m.tools == ["files", "search", "shell", "todo"]
     assert m.family == "knowledge" and m.workspace == "deliverable"
-    assert m.messaging is True and m.connectors is True
+    assert m.messaging is True and m.connectors == ("github",)
     assert m.recommended_models == ["anthropic:claude-opus-4-8"]
     assert m.needs_workspace is True
     assert m.system_prompt.startswith("You are a demo coworker")
+
+
+def _with_connectors(value: str, extra: str = "") -> str:
+    return VALID.replace("connectors: [github]", f"connectors: {value}{extra}")
+
+
+def test_connector_allowlist_dedupes_and_orders():
+    m = parse_manifest(_with_connectors("[github, slack, github]"))
+    assert m.connectors == ("github", "slack")
+
+
+def test_legacy_true_migrates_to_the_recommended_connectors():
+    """Pre-allowlist manifests said `connectors: true` — author intent lives in
+    `recommends`, so the grant falls back to those refs (OPE-93)."""
+    text = _with_connectors(
+        "true",
+        "\nrecommends:\n  - connector: github\n    reason: open PRs\n    tier: core",
+    )
+    assert parse_manifest(text).connectors == ("github",)
+
+
+def test_legacy_true_without_recommends_grants_nothing():
+    """No list, no recommends → nothing. Fail closed, never 'everything'."""
+    assert parse_manifest(_with_connectors("true")).connectors is False
+
+
+def test_connectors_all_is_builtin_only():
+    """`all` is the trust violation the allowlist exists to prevent when a SHARED
+    bundle claims it — reserved for the general built-in personas."""
+    text = _with_connectors("all")
+    with pytest.raises(ManifestError, match="reserved for built-in"):
+        parse_manifest(text)
+    assert parse_manifest(text, builtin=True).connectors is True
+
+
+def test_recommending_an_undeclared_connector_is_author_drift():
+    text = _with_connectors(
+        "[github]",
+        "\nrecommends:\n  - connector: slack\n    reason: post digests\n    tier: optional",
+    )
+    with pytest.raises(ManifestError, match="does not declare"):
+        parse_manifest(text)
 
 
 def test_to_agent_carries_traits_and_tools(tmp_path):
@@ -122,6 +164,7 @@ def test_fallback_id_is_slugified_not_rejected():
 REC = """---
 id: ops
 tools: []
+connectors: [github]
 recommends:
   - connector: github
     reason: confirm deploys
@@ -143,9 +186,11 @@ def test_recommends_parsed():
 
 
 def test_recommends_not_validated_against_shipped_connectors():
-    # A persona may recommend a connector we don't ship yet — structure only, no catalog check.
+    # A persona may recommend (and declare) a connector we don't ship yet — structure
+    # only, no catalog check. An unshipped id simply never intersects with connected.
     recs = parse_manifest(
-        "---\nid: x\ntools: []\nrecommends:\n  - connector: not_a_real_connector\n---\nbody"
+        "---\nid: x\ntools: []\nconnectors: [not_a_real_connector]\n"
+        "recommends:\n  - connector: not_a_real_connector\n---\nbody"
     ).recommends
     assert recs[0].ref == "not_a_real_connector"
 

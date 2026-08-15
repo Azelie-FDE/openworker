@@ -247,3 +247,39 @@ def test_session_set_override(tmp_path, monkeypatch):
     assert mgr.session_connections.get("s1") == {}
     assert "slack" in mgr.effective_connectors("s1", "ops")
     assert "slack" in {c["connector"] for c in resp2["connections"]["connected"]}
+
+
+def test_declared_connector_allowlist_gates_session_tools(tmp_path):
+    """OPE-93, owner-hit 2026-08-15: a security coworker declaring only [code tools]
+    had browser_snapshot in-session, because `connectors: true` exposed EVERY connected
+    connector. The grant is now declared ∩ connected — an undeclared connector's tools
+    never enter the session, regardless of what the user has connected."""
+    from coworker.agent import build_engine
+    from coworker.agents.base import Agent
+    from coworker.connectors import connect_connector
+    from coworker.secrets import SecretStore
+
+    secrets = SecretStore(tmp_path / "secrets.json")
+    for name, fields in (
+        ("linear", {"api_key": "lin_api_x"}),
+        ("box", {"access_token": "boxtok"}),
+    ):
+        assert connect_connector(secrets, name, fields, validate=False)["ok"] is True
+
+    def names_for(connectors):
+        agent = Agent(
+            name="p", title="P", system_prompt="x", connectors=connectors
+        )
+        engine = build_engine(agent=agent, workspace=tmp_path, secrets=secrets)
+        return set(engine.registry.names())
+
+    scoped = names_for(("linear",))
+    assert any(n.startswith("linear_") for n in scoped)
+    assert not any(n.startswith("box_") for n in scoped)
+
+    general = names_for(True)  # the `all` sentinel: general builtins only
+    assert any(n.startswith("linear_") for n in general)
+    assert any(n.startswith("box_") for n in general)
+
+    none = names_for(False)
+    assert not any(n.startswith(("linear_", "box_")) for n in none)

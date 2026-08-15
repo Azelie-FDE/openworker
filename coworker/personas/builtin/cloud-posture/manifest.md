@@ -6,7 +6,7 @@ tagline: Review Terraform & cloud config — read-only, evidence first
 family: code
 version: "1"
 tools: [code_files, git, search, shell, todo]
-connectors: true
+connectors: [github]
 skills: [iac-scan, aws-posture]
 recommended_models: [anthropic:claude-opus-4-8, openai:gpt-5.6-sol]
 default_permission_mode: interactive

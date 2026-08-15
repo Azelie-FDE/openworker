@@ -898,7 +898,8 @@ export interface PersonaConsent {
   description: string;
   tools: string[];
   risk: string[];
-  connectors: boolean;
+  // "all" (general builtins) or the declared allowlist — [] means no connector access.
+  connectors: "all" | string[];
   mcp: string[];
   messaging: boolean;
   recommended_mode: string;

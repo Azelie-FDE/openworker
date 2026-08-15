@@ -6,7 +6,7 @@ tagline: Vulnerable dependencies — audit, minimal upgrades, PRs
 family: code
 version: "1"
 tools: [code_files, git, search, shell, todo]
-connectors: true
+connectors: [github]
 skills: [dependency-audit, safe-upgrade-pr]
 recommended_models: [anthropic:claude-opus-4-8, openai:gpt-5.6-sol]
 default_permission_mode: interactive
