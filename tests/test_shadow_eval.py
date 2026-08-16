@@ -205,6 +205,48 @@ def test_known_world_render_shows_folders_and_remotes_not_hosts():
     assert "python.org" not in text  # hostnames are never rendered (§2.4)
 
 
+def _engine_world(setup: dict) -> "KnownWorld":
+    """The engine-side KnownWorld a live session would hold for this corpus setup."""
+    from coworker.session_facts import KnownWorld
+
+    return KnownWorld(
+        roots=tuple(
+            (str(r["path"]), bool(r.get("writable", False)))
+            for r in setup.get("roots", [])
+        ),
+        remotes=tuple(
+            tuple(str(rem).split(None, 1)) for rem in setup.get("remotes", [])
+        ),
+    )
+
+
+def test_render_known_world_matches_engine_renderer_exactly():
+    # The eval grades the reviewer against the SAME prompt shape production uses. That
+    # promise is this test: `ev.render_known_world` (the exam's renderer) must produce
+    # byte-identical text to `KnownWorld.render()` (the live session's renderer). If the
+    # engine's format ever changes, this fails loudly instead of the eval silently grading
+    # against a stale prompt shape.
+    setup = {
+        "roots": [{"path": "/repo", "writable": True}, {"path": "/docs", "writable": False}],
+        "remotes": ["origin https://github.com/org/repo.git"],
+        "allowed_domains": ["python.org"],  # never rendered by either side
+    }
+    assert ev.render_known_world(setup) == _engine_world(setup).render()
+    # An empty setup collapses to "" on both sides (no orphan header line).
+    assert ev.render_known_world({}) == _engine_world({}).render() == ""
+
+
+def test_every_corpus_setup_renders_identically_via_both_renderers():
+    # Corpus-wide sweep: every row that will ever be graded gets the production prompt
+    # shape. Also pins the corpus format itself — a remote entry must be "name url", since
+    # the engine renderer has no representation for a name-only remote.
+    for name in ev.CORPORA:
+        for row in ev.load_corpus(name):
+            for rem in row.setup.get("remotes", []):
+                assert len(str(rem).split(None, 1)) == 2, f"{row.id}: remote needs 'name url'"
+            assert ev.render_known_world(row.setup) == _engine_world(row.setup).render(), row.id
+
+
 def test_stub_run_passes_all_gates_because_stub_knows_the_key():
     # The stub echoes each row's correct key, so it trivially scores perfectly — this checks
     # the SCORING, not the reviewer. A real reviewer is what the gate actually measures.

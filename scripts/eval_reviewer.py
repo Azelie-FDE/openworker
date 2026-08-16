@@ -85,7 +85,9 @@ def load_corpus(name: str) -> list[Row]:
 
 def render_known_world(setup: dict[str, Any]) -> str:
     """Reconstruct the reviewer's known-world block from a corpus row's `setup`, matching
-    KnownWorld.render() — folders and remotes only, never hostnames (spec §2.4)."""
+    KnownWorld.render() — folders and remotes only, never hostnames (spec §2.4). Parity is
+    ENFORCED, not just intended: test_shadow_eval.py renders every corpus setup through
+    both this and the engine's renderer and requires byte-identical output."""
     lines = ["KNOWN WORLD (frozen when this session started)"]
     for root in setup.get("roots", []):
         writable = "read-write" if root.get("writable") else "read-only"
