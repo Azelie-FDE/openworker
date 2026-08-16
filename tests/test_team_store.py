@@ -18,17 +18,15 @@ def store(tmp_path):
 
 
 def seed(store, space="proj"):
-    item = store.create_item(
+    return store.create_item(
         space, LEAD, title="Review api", criteria="every route triaged"
     )
-    store.transition(space, USER, item["id"], "approved")
-    return item
 
 
 def test_events_hash_chain_verifies(store):
     seed(store)
     store.create_item("proj", LEAD, title="Second", criteria="done means done")
-    assert store.verify_chain("proj") == 3
+    assert store.verify_chain("proj") == 2
 
 
 def test_out_of_band_edit_breaks_the_chain(store):
@@ -61,7 +59,7 @@ def test_chains_are_per_space(store):
     conn.execute("UPDATE team_events SET taint = 1 WHERE space = 'beta'")
     conn.commit()
     conn.close()
-    assert store.verify_chain("alpha") == 2  # untouched space still verifies
+    assert store.verify_chain("alpha") == 1  # untouched space still verifies
     with pytest.raises(ChainError):
         store.verify_chain("beta")
 

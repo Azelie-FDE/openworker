@@ -750,10 +750,6 @@ def create_app(manager: SessionManager) -> FastAPI:
             comment=str(body.get("comment", "")),
         )
 
-    @app.post("/v1/sessions/{session_id}/board/approve")
-    def session_board_approve(session_id: str) -> dict[str, Any]:
-        return manager.board_approve(session_id)
-
     @app.get("/v1/teams/journal")
     def teams_journal() -> dict[str, Any]:
         return {"cases": manager.journal_overview()}

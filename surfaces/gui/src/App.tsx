@@ -3,7 +3,6 @@ import {
   announceInboxUnlock,
   createTempWorkspace,
   finalizeAutomationRun,
-  boardApprove,
   boardTransition,
   getArtifacts,
   getBoard,
@@ -76,7 +75,7 @@ import { ApprovalCard } from "./components/ApprovalCard";
 import { ToolRequestCard } from "./components/ToolRequestCard";
 import { DirectoryRequestCard } from "./components/DirectoryRequestCard";
 import { PlanCard } from "./components/PlanCard";
-import { BoardOverlay, PlanGateCard } from "./components/BoardPanel";
+import { BoardOverlay } from "./components/BoardPanel";
 import { WorkspaceTrustPrompt } from "./components/WorkspaceTrustPrompt";
 
 const newId = () =>
@@ -275,7 +274,6 @@ export function App() {
   // Agent teams (OPE-96): board for the current session's workspace space.
   const [board, setBoard] = useState<Board | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
-  const [planBusy, setPlanBusy] = useState(false);
   const [railHidden, setRailHidden] = useState(false);
   // Left-nav collapse (⌘B): when collapsed the sidebar leaves the grid so content reclaims the
   // width; hovering the left edge peeks it back as a floating overlay. Persisted per-device.
@@ -966,15 +964,6 @@ export function App() {
   }, [agent, surface, sessionId, browserRefreshKey, running]);
 
   const refreshBoard = () => getBoard(sessionId).then(setBoard).catch(() => {});
-  const approvePlan = async () => {
-    setPlanBusy(true);
-    try {
-      await boardApprove(sessionId);
-      await refreshBoard();
-    } finally {
-      setPlanBusy(false);
-    }
-  };
   const moveBoardItem = async (item: number, to: string) => {
     await boardTransition(sessionId, item, to);
     await refreshBoard();
@@ -1947,9 +1936,6 @@ export function App() {
                 ) : sessionInbox[0] ? (
                   // Unattended session blocked on an Inbox item — answer it in context.
                   <InboxItemCard item={sessionInbox[0]} onResolve={resolveSessionInbox} compact />
-                ) : board && board.items.some((i) => i.state === "proposed") ? (
-                  // Agent teams: the decomposition gate — proposed items awaiting approval.
-                  <PlanGateCard board={board} onApprove={approvePlan} busy={planBusy} />
                 ) : undefined
               }
             />

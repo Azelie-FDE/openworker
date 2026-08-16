@@ -21,7 +21,7 @@ from .store import TeamStore
 
 LEAD_VERBS = ("create_item", "list_items", "transition", "comment", "assign", "link")
 # Workers file items too (a bug spotted in passing, a follow-up) — new items land
-# in `proposed`, so the approval gate catches everything a worker proposes.
+# `open` and unassigned; nothing runs until the lead/user assigns them.
 WORKER_VERBS = ("create_item", "list_items", "transition", "comment")
 JOURNAL_VERBS = ("journal_append", "journal_read")
 
@@ -33,10 +33,11 @@ _CREATE_ITEM_SCHEMA = {
     "function": {
         "name": "create_item",
         "description": (
-            "Create a work item in the proposed state. `criteria` is the acceptance"
-            " criteria — what gets verified before the item can be done; required."
-            " `parent` links it under another item; `case` names its journal case"
-            " (children inherit the parent's case by default)."
+            "Create a work item (open, unassigned — work starts when it is"
+            " assigned). `criteria` is the acceptance criteria — what gets verified"
+            " before the item can be done; required. `parent` links it under"
+            " another item; `case` names its journal case (children inherit the"
+            " parent's case by default)."
         ),
         "parameters": {
             "type": "object",
@@ -74,10 +75,11 @@ def board_tools(
         parent: Optional[int] = None,
         case: str = "",
     ) -> dict:
-        """Create a work item in the proposed state. `criteria` is the acceptance
-        criteria — what gets verified before the item can be done; required.
-        `parent` links it under another item; `case` names its journal case
-        (children inherit the parent's case by default)."""
+        """Create a work item (open, unassigned — work starts when it is
+        assigned). `criteria` is the acceptance criteria — what gets verified
+        before the item can be done; required. `parent` links it under another
+        item; `case` names its journal case (children inherit the parent's case
+        by default)."""
         return _call(
             store.create_item,
             space,
@@ -91,7 +93,7 @@ def board_tools(
 
     def list_items(state: str = "", assignee: str = "") -> dict:
         """List work items on the board, optionally filtered by state
-        (proposed/approved/in_progress/blocked/review/done/canceled) or assignee."""
+        (open/in_progress/blocked/review/done/canceled) or assignee."""
         try:
             return {"items": store.list_items(space, actor, state=state or None, assignee=assignee or None)}
         except (BoardError, ValueError) as error:

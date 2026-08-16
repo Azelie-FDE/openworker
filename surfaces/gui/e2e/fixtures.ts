@@ -562,16 +562,15 @@ export async function mockApi(page: import("@playwright/test").Page) {
   let stagedSkill: any = null;
 
   // Agent teams (OPE-96): the session's board — empty until a test opts in by sending
-  // "plan the work" (the fake agent then files items into the proposed gate). Mutable
-  // so approve/transition round-trip through the real endpoints.
+  // "plan the work" (the fake agent then files items; no draft state — the board only
+  // holds accepted work). Mutable so transitions round-trip through the real endpoints.
   const boardItems: any[] = [];
   const seedBoard = () => {
     if (boardItems.length) return;
     boardItems.push(
-      { id: 1, title: "Code security review — api", description: "", criteria: "every finding triaged with file:line evidence", state: "proposed", assignee: "", creator: "lead", refs: [], links: [] },
-      { id: 2, title: "Secrets — git history, both repos", description: "", criteria: "every hit dismissed-with-reason or rotation-instructed", state: "proposed", assignee: "", creator: "lead", refs: [], links: [] },
-      { id: 3, title: "Dependency audit — lockfiles", description: "", criteria: "reachable vs theoretical separated; upgrade branch green", state: "proposed", assignee: "", creator: "lead", refs: [], links: [] },
-      { id: 6, title: "Rate-limit audit — public endpoints", description: "", criteria: "every unauthenticated route has a limit or a reason", state: "proposed", assignee: "", creator: "lead", refs: [], links: [] },
+      { id: 1, title: "Code security review — api", description: "", criteria: "every finding triaged with file:line evidence", state: "open", assignee: "", creator: "lead", refs: [], links: [] },
+      { id: 2, title: "Secrets — git history, both repos", description: "", criteria: "every hit dismissed-with-reason or rotation-instructed", state: "open", assignee: "", creator: "lead", refs: [], links: [] },
+      { id: 3, title: "Dependency audit — lockfiles", description: "", criteria: "reachable vs theoretical separated; upgrade branch green", state: "in_progress", assignee: "dep-audit", creator: "lead", refs: [], links: [] },
       { id: 4, title: "Cloud posture — infra", description: "", criteria: "trivy config clean or findings triaged", state: "blocked", assignee: "cloud-posture", creator: "lead", refs: [], links: [] },
       { id: 5, title: "Report rollup", description: "", criteria: "one report, all sections", state: "review", assignee: "security", creator: "lead", refs: [], links: [] },
     );
@@ -630,12 +629,13 @@ export async function mockApi(page: import("@playwright/test").Page) {
           });
           return; // suspended on the approval
         }
-        // Agent teams (OPE-96): a decomposition turn — the agent files work items and
-        // the board (rail section + plan gate) appears on the next board fetch.
+        // Agent teams (OPE-96): a decomposition turn — the plan was approved in
+        // conversation (plan-approval flow); the agent files the items and the
+        // board rail appears on the next board fetch.
         if (/plan the work/i.test(msg.text)) {
           seedBoard();
           send("assistant_message", {
-            text: "Split it into 5 work items — approve the plan and I'll get started.",
+            text: "Plan approved — filed 5 work items on the board.",
           });
           send("turn_done");
           return;
@@ -924,16 +924,6 @@ export async function mockApi(page: import("@playwright/test").Page) {
     }
     if (/\/v1\/sessions\/[^/]+\/artifacts\/reveal$/.test(p)) return json({ ok: true });
     // Agent teams (OPE-96): board reads + the user-side mutations.
-    if (/\/v1\/sessions\/[^/]+\/board\/approve$/.test(p)) {
-      let approved = 0;
-      for (const item of boardItems) {
-        if (item.state === "proposed") {
-          item.state = "approved";
-          approved += 1;
-        }
-      }
-      return json({ approved, ...boardPayload() });
-    }
     if (/\/v1\/sessions\/[^/]+\/board\/transition$/.test(p)) {
       const b = req.postDataJSON() || {};
       const item = boardItems.find((i) => i.id === Number(b.item));

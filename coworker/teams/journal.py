@@ -368,6 +368,9 @@ class JournalStore:
             if _hash(record, fields=_HASHED_FIELDS) != row["hash"]:
                 raise ChainError(f"entry {row['seq']}: content does not match hash")
             prev = row["hash"]
+        # Tail truncation is invisible to the chain itself; the stored head sees it.
+        if rows and prev != self._head_hash(case):
+            raise ChainError("case log ends before the recorded head — tail deleted")
         return len(rows)
 
     def close(self) -> None:

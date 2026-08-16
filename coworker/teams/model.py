@@ -14,8 +14,7 @@ from pathlib import Path
 
 
 class ItemState(str, Enum):
-    PROPOSED = "proposed"
-    APPROVED = "approved"
+    OPEN = "open"
     IN_PROGRESS = "in_progress"
     BLOCKED = "blocked"
     REVIEW = "review"
@@ -23,17 +22,19 @@ class ItemState(str, Enum):
     CANCELED = "canceled"
 
 
-# Legal edges of the state machine. Approval and done carry extra authority rules
-# (see TeamStore.transition): proposed→approved is the human decomposition gate,
-# review→done is the lead's verification gate. canceled→approved is reopen.
+# Legal edges of the state machine. There is NO draft/proposed state (decided
+# 2026-08-16): a plan proposal lives in the conversation (plan-approval flow) and
+# the board only ever contains accepted work — items are created `open`, and the
+# control point for work starting is ASSIGNMENT (a granted, revocable authority),
+# not a per-item approval. review→done stays the verification gate; canceled→open
+# is reopen.
 EDGES: dict[ItemState, set[ItemState]] = {
-    ItemState.PROPOSED: {ItemState.APPROVED, ItemState.CANCELED},
-    ItemState.APPROVED: {ItemState.IN_PROGRESS, ItemState.CANCELED},
+    ItemState.OPEN: {ItemState.IN_PROGRESS, ItemState.CANCELED},
     ItemState.IN_PROGRESS: {ItemState.BLOCKED, ItemState.REVIEW, ItemState.CANCELED},
     ItemState.BLOCKED: {ItemState.IN_PROGRESS, ItemState.CANCELED},
     ItemState.REVIEW: {ItemState.DONE, ItemState.IN_PROGRESS, ItemState.CANCELED},
     ItemState.DONE: set(),
-    ItemState.CANCELED: {ItemState.APPROVED},
+    ItemState.CANCELED: {ItemState.OPEN},
 }
 
 # Targets a worker may move its OWN item to. Workers never approve, never close:

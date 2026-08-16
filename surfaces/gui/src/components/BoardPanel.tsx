@@ -1,10 +1,11 @@
-// Agent teams (OPE-96): the board in three shapes —
+// Agent teams (OPE-96): the board in two shapes —
 //  - BoardSection: the right-rail summary (grouped by state, blocked on top)
 //  - BoardOverlay: the expanded, Linear-shaped view covering the chat column
-//  - PlanGateCard: the decomposition gate (proposed items awaiting the user)
-// All three render the same Board data App owns; mutations go through the
-// /board endpoints and act as the USER — the human side of the gates.
-import { useEffect, useMemo, useState } from "react";
+// Both render the same Board data App owns; mutations go through the /board
+// endpoints and act as the USER. There is NO proposed/draft state: a plan
+// proposal lives in the conversation (plan-approval flow); the board only ever
+// contains accepted work, and work starts at ASSIGNMENT.
+import { useEffect } from "react";
 import type { Board, BoardItem } from "../api";
 import { Icon } from "./Icon";
 
@@ -13,8 +14,7 @@ const GROUPS: { state: string; label: string }[] = [
   { state: "blocked", label: "Blocked" },
   { state: "review", label: "Review" },
   { state: "in_progress", label: "In progress" },
-  { state: "approved", label: "Approved" },
-  { state: "proposed", label: "Proposed" },
+  { state: "open", label: "Open" },
   { state: "done", label: "Done" },
   { state: "canceled", label: "Canceled" },
 ];
@@ -34,21 +34,15 @@ export function boardSummary(board: Board): string {
   if (counts.blocked) parts.push(`${counts.blocked} blocked`);
   if (counts.review) parts.push(`${counts.review} review`);
   if (counts.in_progress) parts.push(`${counts.in_progress} in progress`);
-  if (counts.proposed) parts.push(`${counts.proposed} proposed`);
+  if (counts.open) parts.push(`${counts.open} open`);
   return parts.join(" · ");
 }
 
 export function BoardSection({ board, onExpand }: { board: Board; onExpand: () => void }) {
-  // Proposed items are the plan gate's content — the rail collapses them to one
-  // line (mock UX-030 state 1: "4 items awaiting your approval") instead of
-  // listing the same items twice on screen.
-  const proposed = board.items.filter((i) => i.state === "proposed");
-  const groups = GROUPS.filter((g) => g.state !== "proposed")
-    .map((g) => ({
-      ...g,
-      items: board.items.filter((i) => i.state === g.state),
-    }))
-    .filter((g) => g.items.length > 0);
+  const groups = GROUPS.map((g) => ({
+    ...g,
+    items: board.items.filter((i) => i.state === g.state),
+  })).filter((g) => g.items.length > 0);
   return (
     <div className="board-rail" data-testid="board-rail">
       {groups.map((group) => (
@@ -67,11 +61,6 @@ export function BoardSection({ board, onExpand }: { board: Board; onExpand: () =
           ))}
         </div>
       ))}
-      {proposed.length > 0 && (
-        <div className="board-proposed-note" data-testid="board-proposed-note">
-          {proposed.length} item{proposed.length === 1 ? "" : "s"} awaiting your approval.
-        </div>
-      )}
     </div>
   );
 }
@@ -99,7 +88,7 @@ export function BoardOverlay({
   const columns = GROUPS.map((g) => ({
     ...g,
     items: board.items.filter((i) => i.state === g.state),
-  })).filter((g) => g.items.length > 0 || ["in_progress", "approved", "review"].includes(g.state));
+  })).filter((g) => g.items.length > 0 || ["in_progress", "open", "review"].includes(g.state));
 
   return (
     <div className="board-overlay" data-testid="board-overlay" onClick={onClose}>
@@ -145,13 +134,13 @@ function BoardCard({
 }) {
   // The user can always act; offer the obvious next moves for the state.
   const moves: { to: string; label: string }[] =
-    item.state === "proposed"
-      ? [{ to: "approved", label: "Approve" }, { to: "canceled", label: "Cancel" }]
-      : item.state === "review"
-        ? [{ to: "done", label: "Mark done" }, { to: "in_progress", label: "Send back" }]
-        : item.state === "done" || item.state === "canceled"
+    item.state === "review"
+      ? [{ to: "done", label: "Mark done" }, { to: "in_progress", label: "Send back" }]
+      : item.state === "canceled"
+        ? [{ to: "open", label: "Reopen" }]
+        : item.state === "done"
           ? []
-          : [{ to: "canceled", label: "Cancel" }];
+          : [{ to: "canceled", label: "Remove" }];
   return (
     <div className="board-card" data-testid={`board-item-${item.id}`}>
       <div className="board-card-title">
@@ -178,58 +167,3 @@ function BoardCard({
   );
 }
 
-// The decomposition gate: proposed items awaiting the user's approval, rendered in
-// the composer head like the other request cards. Visible layer = the decisions
-// (items + criteria); editing happens by replying — no in-card reply surface.
-export function PlanGateCard({
-  board,
-  onApprove,
-  busy,
-}: {
-  board: Board;
-  onApprove: () => void;
-  busy?: boolean;
-}) {
-  const proposed = useMemo(() => board.items.filter((i) => i.state === "proposed"), [board.items]);
-  const [expanded, setExpanded] = useState(false);
-  if (proposed.length === 0) return null;
-  const visible = expanded ? proposed : proposed.slice(0, 3);
-  const hidden = proposed.length - visible.length;
-  return (
-    <div className="dirreq-card plangate-card" data-testid="plangate-card">
-      <div className="plangate-head">
-        <Icon name="table" size={15} />
-        <span className="plangate-title">
-          Proposed plan — {proposed.length} work item{proposed.length === 1 ? "" : "s"}
-        </span>
-        <span className="plangate-board">board: {board.name}</span>
-      </div>
-      {visible.map((item) => (
-        <div className="plangate-item" key={item.id}>
-          <span className="plangate-num">#{item.id}</span>
-          <span className="plangate-body">
-            <span className="plangate-item-title">{item.title}</span>
-            {item.criteria && (
-              <span className="plangate-ac">
-                <b>Done when:</b> {item.criteria}
-              </span>
-            )}
-          </span>
-        </div>
-      ))}
-      {hidden > 0 && (
-        <button className="plangate-more" onClick={() => setExpanded(true)}>
-          ＋ {hidden} more item{hidden === 1 ? "" : "s"}
-          <Icon name="chevronDown" size={12} />
-        </button>
-      )}
-      <div className="dirreq-actions">
-        <span className="plangate-note">Reply to edit the plan; nothing runs until you approve.</span>
-        <span className="spacer" />
-        <button className="btn primary" data-testid="plangate-approve" disabled={busy} onClick={onApprove}>
-          Approve plan
-        </button>
-      </div>
-    </div>
-  );
-}

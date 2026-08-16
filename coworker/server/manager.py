@@ -1412,19 +1412,6 @@ class SessionManager:
         except (TeamsBoardError, ValueError) as error:
             return {"error": str(error)}
 
-    def board_approve(self, session_id: str) -> dict[str, Any]:
-        """The plan gate's action: approve every proposed item on the session's board."""
-        space = self._board_space(session_id)
-        if space is None:
-            return {"error": "this session has no board"}
-        approved = 0
-        for entry in self.team_store.list_items(
-            space, self._user_actor(), state="proposed"
-        ):
-            self.team_store.transition(space, self._user_actor(), entry["id"], "approved")
-            approved += 1
-        return {"approved": approved, **self.session_board(session_id)}
-
     def journal_overview(self) -> list[dict[str, Any]]:
         return self.journal_store.overview(self._user_actor())
 

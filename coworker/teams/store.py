@@ -301,6 +301,10 @@ class TeamStore:
             if _hash(record) != row["hash"]:
                 raise ChainError(f"event {row['seq']}: content does not match hash")
             prev = row["hash"]
+        # The chain alone can't see TAIL truncation (a shortened log still links);
+        # the stored head can.
+        if rows and prev != self._head_hash(space):
+            raise ChainError("log ends before the recorded head — tail deleted")
         return len(rows)
 
     def rebuild(self, space: str) -> None:
@@ -342,11 +346,13 @@ class TeamStore:
         parent: Optional[int] = None,
         case: Optional[str] = None,
     ) -> dict[str, Any]:
-        """New item in `proposed`. Acceptance criteria are load-bearing — required.
+        """New item, `open` and unassigned. Acceptance criteria are load-bearing —
+        required.
 
         Workers may create too — a bug spotted in passing, a follow-up — because
-        proposing is harmless: nothing runs until the item crosses the approval
-        gate."""
+        filing is harmless: nothing runs until the item is ASSIGNED, and assign
+        authority stays with the lead/user (the lead triages worker filings:
+        assign or cancel)."""
         self._require(actor, {Role.USER, Role.LEAD, Role.WORKER}, "create_item")
         if not (title or "").strip():
             raise BoardError("title is required")
@@ -501,10 +507,9 @@ class TeamStore:
         with self._lock:
             item = self._item(space, item_id)
             state = ItemState(item["state"])
-            if state in (ItemState.PROPOSED, ItemState.DONE, ItemState.CANCELED):
+            if state in (ItemState.DONE, ItemState.CANCELED):
                 raise BoardError(
-                    f"cannot assign an item in state {state.value} — items are"
-                    " assigned after approval"
+                    f"cannot assign an item in state {state.value} — reopen it first"
                 )
             event = self.append_event(
                 space,
@@ -603,7 +608,7 @@ class TeamStore:
                     payload.get("title") or "",
                     payload.get("description") or "",
                     payload.get("criteria") or "",
-                    ItemState.PROPOSED.value,
+                    ItemState.OPEN.value,
                     actor_id,
                     payload.get("case") or "",
                     ts,
@@ -664,13 +669,6 @@ class TeamStore:
     ) -> None:
         if actor.role == Role.SYSTEM:
             raise AuthorityError("system events cannot transition items")
-        if current == ItemState.PROPOSED and target == ItemState.APPROVED:
-            if actor.role != Role.USER:
-                raise AuthorityError(
-                    "only the user approves proposed items — that is the"
-                    " decomposition gate"
-                )
-            return
         if target == ItemState.DONE and actor.role == Role.WORKER:
             raise AuthorityError(
                 "workers finish by moving to review — done is the verdict after"

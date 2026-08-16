@@ -21,7 +21,6 @@ def store(tmp_path):
 
 def assigned_item(store, assignee="worker-1"):
     item = store.create_item(SPACE, LEAD, title="Task", criteria="tests pass")
-    store.transition(SPACE, USER, item["id"], "approved")
     store.assign(SPACE, LEAD, item["id"], assignee)
     return item["id"]
 
@@ -33,19 +32,21 @@ def test_acceptance_criteria_are_required(store):
         store.create_item(SPACE, LEAD, title="Vague hope", criteria="  ")
 
 
-def test_workers_file_items_into_the_proposed_gate(store):
+def test_workers_file_items_open_and_unassigned(store):
     mine = assigned_item(store)
     filed = store.create_item(
         SPACE, WORKER, title="Rounding bug in invoices", criteria="repro + fix",
         parent=mine,
     )
-    assert filed["state"] == "proposed"
+    assert filed["state"] == "open"
+    assert filed["assignee"] == ""
     assert filed["creator"] == "worker-1"
-    # the worker sees its own filing; nothing runs until the user approves it
+    # the worker sees its own filing; nothing runs until the lead/user assigns it,
+    # and the filer can't assign it to itself
     visible = {item["id"] for item in store.list_items(SPACE, WORKER)}
     assert filed["id"] in visible
-    with pytest.raises(AuthorityError, match="decomposition gate"):
-        store.transition(SPACE, WORKER, filed["id"], "approved")
+    with pytest.raises(AuthorityError):
+        store.assign(SPACE, WORKER, filed["id"], "worker-1")
     other_worker = {item["id"] for item in store.list_items(SPACE, OTHER)}
     assert filed["id"] not in other_worker
 
@@ -76,15 +77,7 @@ def test_illegal_edges_rejected(store):
     with pytest.raises(BoardError, match="illegal transition"):
         store.transition(SPACE, USER, item["id"], "done")
     with pytest.raises(BoardError, match="illegal transition"):
-        store.transition(SPACE, USER, item["id"], "in_progress")
-
-
-def test_only_the_user_approves(store):
-    item = store.create_item(SPACE, LEAD, title="T", criteria="c")
-    with pytest.raises(AuthorityError, match="decomposition gate"):
-        store.transition(SPACE, LEAD, item["id"], "approved")
-    approved = store.transition(SPACE, USER, item["id"], "approved")
-    assert approved["state"] == "approved"
+        store.transition(SPACE, USER, item["id"], "review")
 
 
 def test_workers_never_mark_done(store):
@@ -110,8 +103,8 @@ def test_worker_cannot_cancel(store):
 def test_cancel_is_a_board_verb_and_reopen_works(store):
     item_id = assigned_item(store)
     store.transition(SPACE, LEAD, item_id, "canceled")
-    reopened = store.transition(SPACE, LEAD, item_id, "approved")
-    assert reopened["state"] == "approved"
+    reopened = store.transition(SPACE, LEAD, item_id, "open")
+    assert reopened["state"] == "open"
     assert reopened["assignee"] == "worker-1"  # reassignable — assignment survives
 
 
@@ -136,10 +129,11 @@ def test_rework_loop(store):
 
 # ---------------------------------------------------------------- assign / link
 
-def test_cannot_assign_before_approval(store):
-    item = store.create_item(SPACE, LEAD, title="T", criteria="c")
-    with pytest.raises(BoardError, match="after approval"):
-        store.assign(SPACE, LEAD, item["id"], "worker-1")
+def test_cannot_assign_closed_items(store):
+    item_id = assigned_item(store)
+    store.transition(SPACE, LEAD, item_id, "canceled")
+    with pytest.raises(BoardError, match="reopen"):
+        store.assign(SPACE, LEAD, item_id, "worker-2")
 
 
 def test_workers_cannot_assign_or_link(store):

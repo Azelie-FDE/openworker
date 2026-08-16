@@ -38,7 +38,6 @@ def board(tmp_path, journal):
 
 def case_item(board, case="findings", assignee="worker-1", space=SPACE):
     item = board.create_item(space, LEAD, title="Task", criteria="c", case=case)
-    board.transition(space, USER, item["id"], "approved")
     board.assign(space, LEAD, item["id"], assignee)
     return item["id"]
 

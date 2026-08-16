@@ -215,7 +215,7 @@ export interface BoardItem {
   title: string;
   description: string;
   criteria: string;
-  state: "proposed" | "approved" | "in_progress" | "blocked" | "review" | "done" | "canceled" | string;
+  state: "open" | "in_progress" | "blocked" | "review" | "done" | "canceled" | string;
   assignee: string;
   creator: string;
   refs: string[];
@@ -236,11 +236,6 @@ export interface JournalCase {
 
 export async function getBoard(sessionId: string): Promise<Board> {
   const res = await fetch(`${httpBase()}/v1/sessions/${encodeURIComponent(sessionId)}/board`);
-  return res.json();
-}
-
-export async function boardApprove(sessionId: string): Promise<Board & { approved: number }> {
-  const res = await fetch(`${httpBase()}/v1/sessions/${encodeURIComponent(sessionId)}/board/approve`, { method: "POST" });
   return res.json();
 }
 
