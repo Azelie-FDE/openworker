@@ -39,10 +39,16 @@ export function boardSummary(board: Board): string {
 }
 
 export function BoardSection({ board, onExpand }: { board: Board; onExpand: () => void }) {
-  const groups = GROUPS.map((g) => ({
-    ...g,
-    items: board.items.filter((i) => i.state === g.state),
-  })).filter((g) => g.items.length > 0);
+  // Proposed items are the plan gate's content — the rail collapses them to one
+  // line (mock UX-030 state 1: "4 items awaiting your approval") instead of
+  // listing the same items twice on screen.
+  const proposed = board.items.filter((i) => i.state === "proposed");
+  const groups = GROUPS.filter((g) => g.state !== "proposed")
+    .map((g) => ({
+      ...g,
+      items: board.items.filter((i) => i.state === g.state),
+    }))
+    .filter((g) => g.items.length > 0);
   return (
     <div className="board-rail" data-testid="board-rail">
       {groups.map((group) => (
@@ -61,6 +67,11 @@ export function BoardSection({ board, onExpand }: { board: Board; onExpand: () =
           ))}
         </div>
       ))}
+      {proposed.length > 0 && (
+        <div className="board-proposed-note" data-testid="board-proposed-note">
+          {proposed.length} item{proposed.length === 1 ? "" : "s"} awaiting your approval.
+        </div>
+      )}
     </div>
   );
 }

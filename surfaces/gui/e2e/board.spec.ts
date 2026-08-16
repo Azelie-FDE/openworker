@@ -35,15 +35,20 @@ test("a decomposition turn raises the plan gate; approving moves items to Approv
   await gate.getByRole("button", { name: /1 more item/ }).click();
   await expect(gate.getByText("Rate-limit audit — public endpoints")).toBeVisible();
 
-  // Blocked renders on top in the rail; proposed items are listed under Proposed.
+  // Blocked renders on top in the rail; proposed items collapse to ONE line —
+  // the gate card is the only place the plan renders in full (no double listing).
   const rail = page.getByTestId("board-rail");
   await expect(rail).toBeVisible();
   const groups = rail.locator(".board-group");
   await expect(groups.first()).toHaveText("Blocked");
+  await expect(page.getByTestId("board-proposed-note")).toHaveText("4 items awaiting your approval.");
+  await expect(rail.getByText("Dependency audit — lockfiles")).toHaveCount(0);
 
   await page.getByTestId("plangate-approve").click();
   await expect(page.getByTestId("plangate-card")).toHaveCount(0);
+  await expect(page.getByTestId("board-proposed-note")).toHaveCount(0);
   await expect(rail).toContainText("Approved");
+  await expect(rail.getByText("Dependency audit — lockfiles")).toBeVisible();
 });
 
 test("expand opens the overlay board; Esc closes; the user can act on a review item", async ({
