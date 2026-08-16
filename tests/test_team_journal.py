@@ -130,15 +130,15 @@ def test_raw_captures_are_opt_in_on_read(journal):
     journal.append(LEAD, "ops", "deploy finished 14:01", kind="note")
     journal.append(
         LEAD, "ops", "nginx 5xx burst 14:02-14:04 (2,400 lines)", kind="raw",
-        refs=["artifact:sha256:ab12...:nginx-error.log"],
+        refs=["logs/nginx-error-1402.log"],
     )
     assert len(journal.read(LEAD, "ops")) == 1  # raw skipped by default
     assert len(journal.read(LEAD, "ops", include_raw=True)) == 2
-    assert journal.read(LEAD, "ops", kind="raw")[0]["refs"][0].startswith("artifact:")
+    assert journal.read(LEAD, "ops", kind="raw")[0]["refs"] == ["logs/nginx-error-1402.log"]
 
 
-def test_oversized_bodies_are_refused_with_the_artifact_pattern(journal):
-    with pytest.raises(BoardError, match="artifact"):
+def test_oversized_bodies_are_refused_with_the_excerpt_pattern(journal):
+    with pytest.raises(BoardError, match="excerpt"):
         journal.append(LEAD, "ops", "x" * (JOURNAL_BODY_LIMIT + 1), kind="raw")
 
 

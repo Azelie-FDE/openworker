@@ -123,9 +123,8 @@ class JournalStore:
             raise BoardError(f"unknown entry kind: {kind} (use one of {JOURNAL_KINDS})")
         if len(body) > JOURNAL_BODY_LIMIT:
             raise BoardError(
-                f"entry body over {JOURNAL_BODY_LIMIT} chars — store the full"
-                " payload as an artifact and journal an excerpt with a"
-                " sha256-qualified ref"
+                f"entry body over {JOURNAL_BODY_LIMIT} chars — save the full"
+                " capture to a file and journal an excerpt that references it"
             )
         with self._lock:
             exists = self._case_exists(case)

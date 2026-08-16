@@ -64,11 +64,11 @@ LINK_KINDS = ("parent", "blocks")  # link(src, "parent", dst): dst is src's pare
 
 # `note` is any observation — the journal is not only for investigations. `raw` is
 # a capture (log excerpt, command output); reads skip raw unless asked, and large
-# payloads belong in the artifact store with a sha256-qualified ref on the entry.
+# payloads belong in a file the entry references.
 JOURNAL_KINDS = ("finding", "evidence", "decision", "note", "raw")
 
 # An entry body is an excerpt/summary, never a blob: oversized payloads make every
-# chain-verify and unfiltered read drag. Full captures go to the artifact store.
+# read (and replay) drag. Full captures live as files the entry points at.
 JOURNAL_BODY_LIMIT = 16_000
 
 

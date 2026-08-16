@@ -166,11 +166,11 @@ def journal_tools(
         refs: Optional[list] = None,
     ) -> dict:
         """Append an entry to a journal case as you work: kind is finding,
-        evidence, decision, note (any observation), or raw (a capture — put an
-        excerpt here and store the full payload as an artifact, referenced with
-        a sha256-qualified ref). `entities` are the concrete things it is about
-        (file paths, resource names, CVE ids) — they power later recall;
-        `refs` are pointers (file:line, commit, url, artifact)."""
+        evidence, decision, note (any observation), or raw (a capture like a log
+        excerpt — for large captures, save the full output to a file and journal
+        an excerpt that references it). `entities` are the concrete things it is
+        about (file paths, resource names, CVE ids) — they power later recall;
+        `refs` are pointers (file:line, commit, url)."""
         return _call(
             journal.append,
             actor,
