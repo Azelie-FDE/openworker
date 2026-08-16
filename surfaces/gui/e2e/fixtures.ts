@@ -629,6 +629,20 @@ export async function mockApi(page: import("@playwright/test").Page) {
           });
           return; // suspended on the approval
         }
+        // Agent teams: the decomposition gate — the lead proposes work items and
+        // SUSPENDS until the items_response verdict arrives (approval creates them).
+        if (/propose the split/i.test(msg.text)) {
+          send("items_proposed", {
+            items: [
+              { title: "Statement API endpoint", criteria: "returns opening/closing balances; 8 endpoint tests green" },
+              { title: "Statements dashboard page", criteria: "renders seeded data for Ada / Northgate; empty + error states covered" },
+              { title: "Statement totals reconcile", criteria: "running balance matches invoices minus payments for the range" },
+              { title: "Verification pass", criteria: "tester confirms page renders with live API data" },
+            ],
+            note: "Shared journal case: statements.",
+          });
+          return; // suspended on the items decision
+        }
         // Agent teams (OPE-97): the staffing gate — the lead proposes a roster and
         // SUSPENDS until the team_response verdict arrives.
         if (/staff the team/i.test(msg.text)) {
@@ -839,6 +853,16 @@ export async function mockApi(page: import("@playwright/test").Page) {
           send("tool_finished", { name: pendingTool, status: "done", result_preview: "ok" });
           // The decision echoes back so specs can pin what rode the wire (e.g. always_task).
           send("assistant_message", { text: `Done via ${pendingTool} [decision=${msg.decision}]` });
+        }
+        send("turn_done");
+      } else if (msg.type === "items_response") {
+        if (msg.approved) {
+          seedBoard(); // "created on the board" — the board fetch now shows them
+          send("assistant_message", {
+            text: "Items created on the board — staffing next.",
+          });
+        } else {
+          send("assistant_message", { text: "Understood — reworking the split." });
         }
         send("turn_done");
       } else if (msg.type === "team_response") {

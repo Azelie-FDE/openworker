@@ -231,3 +231,38 @@ def test_team_options_lists_only_enabled_workers(manager):
     assert {"swe-worker", "design-worker", "test-worker"} <= workers
     assert "swe-lead" not in workers  # leads staff, they aren't staffed
     assert "security" not in workers  # solo coworkers are not team-eligible
+
+
+def test_turn_saves_never_detach_a_worker_from_its_team(manager, monkeypatch):
+    from coworker.agents.base import Agent
+    from coworker.sessions import SessionRecord
+
+    worker_agent = Agent(name="swe-worker", title="SWE", system_prompt="p", team="worker")
+    monkeypatch.setattr("coworker.server.manager.get_agent", lambda name: worker_agent)
+    manager.session_store.save(
+        SessionRecord(
+            session_id="lead-sid",
+            workspace=manager.default_workspace,
+            model="m",
+            mode="interactive",
+            messages=[],
+            agent="swe-lead",
+        )
+    )
+    result = manager.create_team("lead-sid", [{"persona": "swe-worker"}])
+    wid = result["workers"][0]["session_id"]
+    # A per-turn save rebuilds the record WITHOUT the team field (the engine doesn't
+    # carry it) — owner-hit 2026-08-16: this detached workers from the lead's entry.
+    record = manager.session_store.load(wid)
+    manager.session_store.save(
+        SessionRecord(
+            session_id=wid,
+            workspace=record.workspace,
+            model=record.model,
+            mode=record.mode,
+            messages=[{"role": "user", "content": "hi"}],
+            agent=record.agent,
+        )
+    )
+    assert manager.session_store.load(wid).team["lead_session"] == "lead-sid"
+    assert manager.session_store.load("lead-sid").team["role"] == "lead"

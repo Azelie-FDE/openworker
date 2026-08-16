@@ -77,6 +77,7 @@ import { DirectoryRequestCard } from "./components/DirectoryRequestCard";
 import { PlanCard } from "./components/PlanCard";
 import { BoardOverlay } from "./components/BoardPanel";
 import { TeamRequestCard } from "./components/TeamRequestCard";
+import { WorkItemsCard } from "./components/WorkItemsCard";
 import { WorkspaceTrustPrompt } from "./components/WorkspaceTrustPrompt";
 
 const newId = () =>
@@ -770,6 +771,18 @@ export function App() {
             },
           ]);
           break;
+        case "items_proposed":
+          // The decomposition gate — approval creates the items on the board.
+          if (unattendedRef.current) break;
+          setItems((p) => [
+            ...p,
+            {
+              kind: "itemsreq",
+              items: Array.isArray(d.items) ? d.items : [],
+              note: d.note || "",
+            },
+          ]);
+          break;
         case "question_requested":
           // ask_user in an attended session — answered inline (not routed to the Inbox).
           setItems((p) => [
@@ -1034,6 +1047,12 @@ export function App() {
     setItems((p) => resolveLastTeam(p, approved ? "approved" : "rejected"));
     dropSessionInbox("plan"); // the gate parks as a plan-kind Inbox item
     sessionRef.current?.respondTeam(approved, feedback);
+  };
+  const respondItemsReq = (approved: boolean, feedback?: string) => {
+    setItems((p) => resolveLastItemsReq(p, approved ? "approved" : "rejected"));
+    dropSessionInbox("plan");
+    sessionRef.current?.respondItems(approved, feedback);
+    if (approved) setTimeout(refreshBoard, 400); // the items just landed
   };
   const respondDirectory = (granted: boolean, path?: string, writable?: boolean) => {
     setItems((p) => resolveLastDirReq(p, granted ? "granted" : "denied"));
@@ -1409,6 +1428,7 @@ export function App() {
   const pendingToolReq = [...items].reverse().find((i) => i.kind === "toolreq" && !i.resolved);
   const pendingPlan = [...items].reverse().find((i) => i.kind === "planreq" && !i.resolved);
   const pendingTeam = [...items].reverse().find((i) => i.kind === "teamreq" && !i.resolved);
+  const pendingItemsReq = [...items].reverse().find((i) => i.kind === "itemsreq" && !i.resolved);
   const pendingQuestion = [...items].reverse().find((i) => i.kind === "question" && !i.resolved);
   // Facts subtitle (§22): the session's FIXED facts, not controls — model (+ the
   // workspace folder for project-scoped sessions). Renders only once the session has history;
@@ -1924,6 +1944,8 @@ export function App() {
                 // parked in the Inbox and surfaced via the answer-in-context card below.
                 !unattended && pendingPlan?.kind === "planreq" ? (
                   <PlanCard item={pendingPlan} onRespond={respondPlan} />
+                ) : !unattended && pendingItemsReq?.kind === "itemsreq" ? (
+                  <WorkItemsCard item={pendingItemsReq} onRespond={respondItemsReq} />
                 ) : !unattended && pendingTeam?.kind === "teamreq" ? (
                   <TeamRequestCard item={pendingTeam} onRespond={respondTeam} />
                 ) : !unattended && pendingToolReq?.kind === "toolreq" ? (
@@ -2134,6 +2156,18 @@ function resolveLastTeam(items: Item[], resolved: "approved" | "rejected"): Item
   for (let i = copy.length - 1; i >= 0; i--) {
     const it = copy[i];
     if (it.kind === "teamreq" && !it.resolved) {
+      copy[i] = { ...it, resolved };
+      break;
+    }
+  }
+  return copy;
+}
+
+function resolveLastItemsReq(items: Item[], resolved: "approved" | "rejected"): Item[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i >= 0; i--) {
+    const it = copy[i];
+    if (it.kind === "itemsreq" && !it.resolved) {
       copy[i] = { ...it, resolved };
       break;
     }

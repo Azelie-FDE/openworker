@@ -1872,6 +1872,37 @@ def create_app(manager: SessionManager) -> FastAPI:
                 enable_chat=bool(_args.get("enable_chat", False)),
             )
 
+        async def items_approver(_args: dict, tool_call_id=None) -> dict:
+            # The decomposition gate. TEAMS-flavored sibling of plan_approver:
+            # park a durable Inbox item, wait, and on approval create the items.
+            items = _args.get("items") or []
+            body = "\n".join(
+                f"- {i.get('title', '?')} — Done when: {i.get('criteria', '?')}"
+                for i in items
+                if isinstance(i, dict)
+            )
+            item = manager.inbox.add_plan(
+                session_id,
+                "Approve the proposed work items?",
+                body=body,
+                inbox=_route(),
+                visibility=_visibility(),
+                tool_call_id=tool_call_id,
+            )
+            if item.state == "pending":
+                manager.persist_session(session_id)
+                if item.visibility == VIS_INBOX:
+                    await _mirror(item)
+            resp = _parse_json(await manager.inbox.wait(item.id))
+            if not resp.get("approved"):
+                return {
+                    "approved": False,
+                    "feedback": resp.get("feedback") or "the user declined the split",
+                }
+            return manager.board_create_items(
+                session_id, [i for i in items if isinstance(i, dict)]
+            )
+
         async def _apply_model(model: Optional[str]) -> None:
             # Mid-session rebind is allowed (roadmap item 3, supersedes the 2026-07-04
             # lock): history is canonical and providers convert per call. A real switch
@@ -1912,6 +1943,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             question_asker=question_asker,
             tool_requester=tool_requester,
             team_approver=team_approver,
+            items_approver=items_approver,
         )
         if engine is None:
             await ws.send_json(
@@ -2062,7 +2094,7 @@ def create_app(manager: SessionManager) -> FastAPI:
                             }
                         )
                     )
-                elif kind == "team_response":
+                elif kind in ("team_response", "items_response"):
                     _resolve_pending(
                         json.dumps(
                             {

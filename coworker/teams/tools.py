@@ -256,6 +256,68 @@ _PROPOSE_TEAM_SCHEMA = {
 }
 
 
+# The decomposition gate's schema carrier — the board-flavored sibling of
+# propose_plan, usable in ANY permission mode (proposing costs nothing; the board
+# only ever holds accepted work). The engine intercepts it; approval creates the
+# items and returns their ids.
+_PROPOSE_ITEMS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "propose_work_items",
+        "description": (
+            "Present your decomposition to the user as proposed WORK ITEMS for the"
+            " team board. Approval creates them on the board (ids come back in the"
+            " result); rejection returns feedback to revise. Each item needs a"
+            " title and acceptance criteria — what gets verified before it can be"
+            " done. This is not propose_plan: it carries no implementation steps"
+            " and works in any mode — it is how a lead plans and coordinates via"
+            " the board."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "criteria": {"type": "string"},
+                            "description": {"type": "string"},
+                            "case": {"type": "string"},
+                        },
+                        "required": ["title", "criteria"],
+                    },
+                },
+                "note": {"type": "string"},
+            },
+            "required": ["items"],
+        },
+    },
+}
+
+
+def propose_work_items_tool() -> object:
+    def propose_work_items(items: Optional[list] = None, note: str = "") -> dict:
+        """Present proposed work items ({title, criteria, description?, case?})
+        for the user's approval; approval creates them on the board."""
+        return {
+            "approved": False,
+            "error": "item proposals aren't available in this surface",
+        }
+
+    wrapped = ai.tool(
+        propose_work_items,
+        metadata=ai.ToolMetadata(
+            category="team",
+            risk_level="low",
+            capabilities=["team"],
+        ),
+    )
+    wrapped.__coworker_schema__ = _PROPOSE_ITEMS_SCHEMA
+    return wrapped
+
+
 def propose_team_tool() -> object:
     def propose_team(
         members: Optional[list] = None, enable_chat: bool = False, note: str = ""

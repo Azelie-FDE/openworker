@@ -92,6 +92,9 @@ class TurnEngine:
         team_approver: Optional[
             Callable[[dict[str, Any]], "Awaitable[dict[str, Any]]"]
         ] = None,
+        items_approver: Optional[
+            Callable[[dict[str, Any]], "Awaitable[dict[str, Any]]"]
+        ] = None,
         # Called (thread-safe, best-effort) when the user stops the turn — e.g. the
         # executor's kill for a running shell command.
         interrupt_hooks: Optional[list[Callable[[], None]]] = None,
@@ -126,6 +129,12 @@ class TurnEngine:
         # for the user's decision; approval pre-spawns the worker sessions and the result
         # carries the roster (actor ids). None on surfaces that can't prompt.
         self.team_approver = team_approver
+        # Handles `propose_work_items` (the decomposition gate): emits ITEMS_PROPOSED,
+        # waits; approval creates the items on the board. Mode-independent by design —
+        # unlike propose_plan it carries no permission-mode semantics: propose_plan is
+        # an IMPLEMENTATION plan (steps/files, plan-mode exit); this is a team
+        # decomposition onto the board.
+        self.items_approver = items_approver
         # Handles the `ask_user` tool: turns a question into an Inbox item and waits for the answer
         # (answerable inline in a live session or from the Inbox when unattended). None on surfaces
         # that can't ask (the tool then no-ops).
@@ -655,6 +664,10 @@ class TurnEngine:
                 async for event in self._handle_team_proposal(tool_call):
                     yield event
                 continue
+            if tool_call.name == "propose_work_items":
+                async for event in self._handle_items_proposal(tool_call):
+                    yield event
+                continue
             if tool_call.name == "ask_user":
                 async for event in self._handle_ask_user(tool_call):
                     yield event
@@ -929,6 +942,58 @@ class TurnEngine:
             self.audit_sink(payload)
         except Exception:
             pass
+
+    async def _handle_items_proposal(self, tool_call: ToolCall) -> AsyncIterator[Event]:
+        """The decomposition gate: emit the proposed items, await the user's decision.
+        Approval creates them on the board (server-side, inside the approver) and the
+        result carries their ids; rejection returns feedback for a revised split."""
+        args = tool_call.arguments or {}
+        items = args.get("items") or []
+        valid = [
+            i
+            for i in items
+            if isinstance(i, dict)
+            and str(i.get("title", "")).strip()
+            and str(i.get("criteria", "")).strip()
+        ]
+        if not valid or len(valid) != len(items):
+            result: dict[str, Any] = {
+                "approved": False,
+                "error": "every proposed item needs a title and acceptance criteria",
+            }
+        elif self.items_approver is None:
+            result = {
+                "approved": False,
+                "error": "item proposals aren't available in this surface",
+            }
+        else:
+            yield Event(
+                EventType.ITEMS_PROPOSED,
+                {"items": valid, "note": str(args.get("note", ""))},
+            )
+            self._audit(tool_call, stage="items_proposed")
+            result = await self._interruptible(
+                self.items_approver(dict(args), tool_call.id),
+                interrupted={"approved": False, "error": "interrupted by user"},
+            ) or {"approved": False, "error": "no response"}
+
+        status = "ok" if result.get("approved") else "denied"
+        self.messages.append(_tool_result_message(tool_call, result))
+        self._audit(
+            tool_call,
+            stage="finished",
+            status=status,
+            result=result,
+            result_preview=_preview(result),
+        )
+        yield Event(
+            EventType.TOOL_FINISHED,
+            {
+                "name": tool_call.name,
+                "status": status,
+                "result_preview": _preview(result),
+            },
+        )
 
     async def _handle_team_proposal(self, tool_call: ToolCall) -> AsyncIterator[Event]:
         """The staffing gate: emit the proposed roster, await the user's out-of-band

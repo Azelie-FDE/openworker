@@ -214,6 +214,7 @@ def build_engine(
     question_asker: Optional[Any] = None,
     tool_requester: Optional[Any] = None,
     team_approver: Optional[Any] = None,
+    items_approver: Optional[Any] = None,
     subscription_store: Optional[Any] = None,
     channel_buffer: Optional[Any] = None,
     routing_targets: Optional[list[str]] = None,
@@ -424,16 +425,21 @@ def build_engine(
         roots=root_list or None,
         risk_overrides=risk_overrides,
     )
-    # The plan-mode exit door. Always registered (surfaces can flip a live session into
-    # plan mode via set_mode, and the registry is fixed at build); the engine rejects the
-    # call whenever the session isn't actually in plan mode.
-    registry.register(propose_plan_tool())
+    # The plan-mode exit door — mutually exclusive with the board's decomposition
+    # gate, DERIVED from the team trait (owner call 2026-08-16): a lead never
+    # implements, so plan mode is meaningless for it, and shipping both tools made
+    # the lead pick the wrong one (dogfood-hit: propose_plan denied outside plan
+    # mode). Solo/worker personas keep propose_plan as always (mode can flip
+    # mid-session; the engine rejects the call outside plan mode).
+    if agent.team != "lead":
+        registry.register(propose_plan_tool())
 
-    # The staffing gate — leads only. The engine intercepts it (out-of-band approval);
-    # approval pre-spawns the worker sessions and returns actor ids to assign to.
+    # The lead's gates: propose_work_items (decomposition → items on approval, any
+    # mode) and propose_team (staffing → pre-spawn on approval).
     if agent.team == "lead":
-        from .teams.tools import propose_team_tool
+        from .teams.tools import propose_team_tool, propose_work_items_tool
 
+        registry.register(propose_work_items_tool())
         registry.register(propose_team_tool())
 
     # Per-turn ephemeral context, appended to the latest user message since mid-thread system
@@ -511,6 +517,7 @@ def build_engine(
         question_asker=question_asker,
         tool_requester=tool_requester,
         team_approver=team_approver,
+        items_approver=items_approver,
     )
     engine.executor = executor  # type: ignore[attr-defined]
     engine.todo = todo  # type: ignore[attr-defined]

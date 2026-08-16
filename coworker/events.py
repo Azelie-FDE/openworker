@@ -29,6 +29,10 @@ class EventType(str, Enum):
     TEAM_PROPOSED = (
         "team_proposed"  # a lead proposes a worker roster (the staffing gate)
     )
+    ITEMS_PROPOSED = (
+        "items_proposed"  # a lead proposes work items (the decomposition gate);
+        # unlike propose_plan this is mode-independent — approval creates the items
+    )
     TOOL_STARTED = "tool_started"
     TOOL_FINISHED = "tool_finished"
     ITERATION_END = "iteration_end"

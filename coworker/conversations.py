@@ -200,7 +200,6 @@ class ConversationStore:
                     title = COALESCE(sessions.title, excluded.title), agent = excluded.agent,
                     n_msgs = excluded.n_msgs, messages = NULL, extra_roots = excluded.extra_roots,
                     grants = excluded.grants, compaction = excluded.compaction,
-                    team = excluded.team,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -257,6 +256,18 @@ class ConversationStore:
             origin_label=row["origin_label"],
             team=_load_grants(row["team"] if "team" in row.keys() else None),
         )
+
+    def set_team(self, session_id: str, team: dict) -> None:
+        """Persist the session's team tie independent of the turn-save path. The
+        upsert deliberately never touches `team` — a per-turn save rebuilds the
+        record without it, and letting the rebuild win detached workers from their
+        lead's sidebar entry the moment they ran a turn (owner-hit 2026-08-16)."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE sessions SET team = ? WHERE session_id = ?",
+                (json.dumps(team or {}), session_id),
+            )
+            self._conn.commit()
 
     def set_extra_roots(self, session_id: str, extra_roots: list[dict]) -> None:
         """Persist just the session's added folders, independent of its message log — used when

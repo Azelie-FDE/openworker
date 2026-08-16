@@ -484,6 +484,7 @@ class SessionManager:
         question_asker: Optional[Any] = None,
         tool_requester: Optional[Any] = None,
         team_approver: Optional[Any] = None,
+        items_approver: Optional[Any] = None,
     ) -> Optional[TurnEngine]:
         engine = self._engines.get(session_id)
         if engine is not None:
@@ -499,6 +500,8 @@ class SessionManager:
                 engine.tool_requester = tool_requester
             if team_approver is not None:
                 engine.team_approver = team_approver
+            if items_approver is not None:
+                engine.items_approver = items_approver
             return engine
 
         record = self.session_store.load(session_id)
@@ -576,6 +579,7 @@ class SessionManager:
             or self.inbox_question_asker(session_id, agent),
             tool_requester=tool_requester,
             team_approver=team_approver,
+            items_approver=items_approver,
             subscription_store=self.subscriptions,
             channel_buffer=self.channel_buffer,
             routing_targets=self._routing_targets(session_id, agent),
@@ -1422,6 +1426,47 @@ class SessionManager:
         except (TeamsBoardError, ValueError) as error:
             return {"error": str(error)}
 
+    def board_create_items(
+        self, session_id: str, items: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """The decomposition gate's approved action: create the proposed items as
+        the LEAD (its identity is the creator; the user's approval is the gate that
+        let this run). Validates everything up front so a bad batch creates nothing."""
+        record = self.session_store.load(session_id)
+        if record is None or not record.workspace:
+            return {"approved": False, "error": "the session has no workspace"}
+        space = space_for_workspace(record.workspace)
+        actor = TeamActor(
+            id=f"{record.agent}:{session_id[:8]}",
+            role=TeamRole.LEAD,
+            persona=record.agent,
+            session_id=session_id,
+        )
+        for entry in items:
+            if not str((entry or {}).get("title", "")).strip() or not str(
+                (entry or {}).get("criteria", "")
+            ).strip():
+                return {
+                    "approved": False,
+                    "error": "every item needs a title and acceptance criteria",
+                }
+        created = []
+        for entry in items:
+            item = self.team_store.create_item(
+                space,
+                actor,
+                title=str(entry["title"]),
+                criteria=str(entry["criteria"]),
+                description=str(entry.get("description", "")),
+                case=str(entry.get("case", "")) or None,
+            )
+            created.append({"id": item["id"], "title": item["title"]})
+        return {
+            "approved": True,
+            "items": created,
+            "note": "items created on the board — staff and assign to start work",
+        }
+
     def journal_overview(self) -> list[dict[str, Any]]:
         return self.journal_store.overview(self._user_actor())
 
@@ -1585,13 +1630,19 @@ class SessionManager:
                     mode=record.mode,
                     messages=[],
                     agent=pid,
-                    team={
-                        "role": "worker",
-                        "actor": actor,
-                        "lead_session": session_id,
-                        "space": space,
-                    },
                 )
+            )
+            # Written via the dedicated setter: the turn-save upsert never touches
+            # `team`, so a worker's first turn can't detach it from its lead.
+            self.session_store.set_team(
+                worker_sid,
+                {
+                    "team_id": "",  # patched below once the team exists
+                    "role": "worker",
+                    "actor": actor,
+                    "lead_session": session_id,
+                    "space": space,
+                },
             )
             workers.append(
                 TeamWorker(actor=actor, persona=pid, session_id=worker_sid, model=model)
@@ -1604,14 +1655,26 @@ class SessionManager:
             chat_enabled=enable_chat,
         )
         for worker in workers:
+            self.session_store.set_team(
+                worker.session_id,
+                {
+                    "team_id": team.team_id,
+                    "role": "worker",
+                    "actor": worker.actor,
+                    "lead_session": session_id,
+                    "space": space,
+                },
+            )
             self._emit_session_created(worker.session_id, worker.persona)
-        record.team = {
-            "team_id": team.team_id,
-            "role": "lead",
-            "actor": team.lead_actor,
-            "space": space,
-        }
-        self.session_store.save(record)
+        self.session_store.set_team(
+            session_id,
+            {
+                "team_id": team.team_id,
+                "role": "lead",
+                "actor": team.lead_actor,
+                "space": space,
+            },
+        )
         return {
             "approved": True,
             "team_id": team.team_id,
@@ -1665,10 +1728,11 @@ class SessionManager:
             return 0
         message = self._team_digest(team, directs, subs, is_lead=is_lead)
         self._team_inflight.add(session_id)
+        source = self._board_source(team, message)
 
         async def _deliver() -> None:
             try:
-                await self.deliver_to_session(session_id, message)
+                await self.deliver_to_session(session_id, message, source=source)
                 # Consume only after the turn dispatched: a crash before this replays
                 # the batch next tick (at-least-once, never silently lost).
                 if directs:
@@ -1733,6 +1797,23 @@ class SessionManager:
             " comment) if stuck; review with a hand-off comment when finished."
             " Journal evidence as you go."
         )
+
+    @staticmethod
+    def _board_source(team, message: str) -> dict[str, Any]:
+        """Display-only MessageSource sidecar for board deliveries — the same
+        mechanism connector messages use, so the GUI renders a structured card
+        instead of a fake user bubble (owner ask 2026-08-16). The framed message
+        stays the model-facing text; this only shapes presentation."""
+        return {
+            "connector": "board",
+            "kind": "channel",
+            "channel_id": team.space,
+            "channel_name": "Team board",
+            "sender_id": "board",
+            "sender_name": "Board",
+            "ts": time.time(),
+            "text": message,
+        }
 
     def team_staleness_digest(self, session_id: str) -> str:
         """Attached to a lead's TIMER wakes: pure code over the board — a

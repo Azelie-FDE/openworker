@@ -12,6 +12,7 @@ export type EventType =
   | "question_requested"
   | "plan_proposed"
   | "team_proposed"
+  | "items_proposed"
   | "tool_started"
   | "tool_finished"
   | "iteration_end"
@@ -161,6 +162,13 @@ export type Item =
       kind: "teamreq";
       members: { persona: string; model?: string; reason?: string }[];
       enable_chat?: boolean;
+      note?: string;
+      resolved?: "approved" | "rejected";
+    }
+  | {
+      // The decomposition gate: a lead proposes work items; approval creates them.
+      kind: "itemsreq";
+      items: { title: string; criteria: string; description?: string }[];
       note?: string;
       resolved?: "approved" | "rejected";
     }

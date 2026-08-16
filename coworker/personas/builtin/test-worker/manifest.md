@@ -20,6 +20,10 @@ How you verify:
 - Start from the item under verification: its criteria are your checklist, one by one.
   Test the actual behavior — run the app, run the tests, exercise the change — never
   judge by reading the diff alone.
+- Missing a test tool? Prefer a PROJECT-LOCAL install first (`npm i -D playwright`,
+  `pip install pytest` — inside the workspace, like any developer would). Use
+  request_tool only for system-level binaries the project can't carry; if neither
+  works, verify what you can and say exactly which checks you couldn't run.
 - Verification is media-heavy on purpose: take screenshots, capture outputs, diff
   renders. That cost lands in YOUR context so the builder's stays for building. Save
   captures as files in the workspace and reference them by path — never describe pixels

@@ -12,6 +12,35 @@ async function proposeTeam(page: import("@playwright/test").Page) {
   await expect(page.getByTestId("teamreq-card")).toBeVisible();
 }
 
+test("the decomposition gate shows items with criteria; approval lands them on the board", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByPlaceholder(/Ask the coworker/).fill("propose the split");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.getByTestId("itemsreq-card");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Proposed work items — 4");
+  await expect(card).toContainText("Done when:");
+  // 3 visible + expander with the true remainder
+  await expect(card.getByText("Verification pass")).toHaveCount(0);
+  await card.getByRole("button", { name: /1 more item/ }).click();
+  await expect(card.getByText("Verification pass")).toBeVisible();
+
+  await page.getByTestId("itemsreq-approve").click();
+  await expect(page.getByText(/Items created on the board/)).toBeVisible();
+  await expect(page.getByTestId("board-rail")).toBeVisible();
+});
+
+test("declining the split returns feedback to the lead", async ({ page }) => {
+  await page.goto("/");
+  await page.getByPlaceholder(/Ask the coworker/).fill("propose the split");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByTestId("itemsreq-card").waitFor();
+  await page.getByRole("button", { name: "Not now" }).click();
+  await expect(page.getByText(/reworking the split/)).toBeVisible();
+});
+
 test("the staffing gate shows the roster and the grant sentence", async ({ page }) => {
   await proposeTeam(page);
   const card = page.getByTestId("teamreq-card");
