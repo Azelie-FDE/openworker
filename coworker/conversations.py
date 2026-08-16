@@ -96,6 +96,7 @@ class ConversationStore:
             "ALTER TABLE sessions ADD COLUMN renamed INTEGER DEFAULT 0",
             "ALTER TABLE sessions ADD COLUMN grants TEXT",
             "ALTER TABLE sessions ADD COLUMN compaction TEXT",
+            "ALTER TABLE sessions ADD COLUMN team TEXT",
         ):
             try:
                 self._conn.execute(ddl)
@@ -192,13 +193,14 @@ class ConversationStore:
             title = record.title or title_from(record.messages)
             self._conn.execute(
                 """
-                INSERT INTO sessions (session_id, workspace, model, mode, title, agent, n_msgs, messages, extra_roots, grants, compaction, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO sessions (session_id, workspace, model, mode, title, agent, n_msgs, messages, extra_roots, grants, compaction, team, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(session_id) DO UPDATE SET
                     workspace = excluded.workspace, model = excluded.model, mode = excluded.mode,
                     title = COALESCE(sessions.title, excluded.title), agent = excluded.agent,
                     n_msgs = excluded.n_msgs, messages = NULL, extra_roots = excluded.extra_roots,
                     grants = excluded.grants, compaction = excluded.compaction,
+                    team = excluded.team,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -212,6 +214,7 @@ class ConversationStore:
                     json.dumps(record.extra_roots or []),
                     json.dumps(record.grants or {}),
                     json.dumps(record.compaction or {}),
+                    json.dumps(record.team or {}),
                 ),
             )
             self._conn.commit()
@@ -252,6 +255,7 @@ class ConversationStore:
             archived=bool(row["archived"]),
             origin=row["origin"],
             origin_label=row["origin_label"],
+            team=_load_grants(row["team"] if "team" in row.keys() else None),
         )
 
     def set_extra_roots(self, session_id: str, extra_roots: list[dict]) -> None:
@@ -290,6 +294,7 @@ class ConversationStore:
                 archived=bool(r["archived"]),
                 origin=r["origin"],
                 origin_label=r["origin_label"],
+                team=_load_grants(r["team"] if "team" in r.keys() else None),
             )
             for r in rows
         ]

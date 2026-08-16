@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -86,6 +87,7 @@ from ..teams import Actor as TeamActor
 from ..teams import BoardError as TeamsBoardError
 from ..teams import JournalStore, Role as TeamRole, TeamStore, board_tools, journal_tools
 from ..teams.model import space_for_workspace
+from ..teams.registry import TeamRegistry, TeamWorker
 from ..skills import (
     SessionSkillStore,
     SkillLoader,
@@ -198,14 +200,18 @@ class SessionManager:
         # The scheduler also resumes self-wake'd sessions each tick (extra_tick).
         self.task_store = TaskStore(base / "automation.db")
         self.scheduler = Scheduler(
-            self.task_store, self._run_scheduled_task, extra_tick=self.resume_due_wakes
+            self.task_store, self._run_scheduled_task, extra_tick=self._scheduler_tick
         )
         # Agent teams: two append-only stores, one record discipline. The journal is
         # case-keyed (knowledge outlives boards/teams); the board log is space-scoped,
         # and assignment feeds journal-case grants. Verbs register per-session behind
-        # the persona's `team:` trait (wake plumbing lands separately).
+        # the persona's `team:` trait; the registry holds rosters (lead/worker
+        # sessions per board) that the wake plumbing walks.
         self.journal_store = JournalStore(base / "journal.db")
         self.team_store = TeamStore(base / "teams.db", journal=self.journal_store)
+        self.teams = TeamRegistry(base / "teams.json")
+        self._team_inflight: set[str] = set()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         # Personas: registry + lifecycle state under this manager's data dir. Installed as the
         # process singleton so agents.get_agent resolves persona ids (incl. third-party) here.
         self.personas = PersonaRegistry(state_path=base / "personas.json")
@@ -477,6 +483,7 @@ class SessionManager:
         plan_approver: Optional[Any] = None,
         question_asker: Optional[Any] = None,
         tool_requester: Optional[Any] = None,
+        team_approver: Optional[Any] = None,
     ) -> Optional[TurnEngine]:
         engine = self._engines.get(session_id)
         if engine is not None:
@@ -490,6 +497,8 @@ class SessionManager:
                 engine.question_asker = question_asker
             if tool_requester is not None:
                 engine.tool_requester = tool_requester
+            if team_approver is not None:
+                engine.team_approver = team_approver
             return engine
 
         record = self.session_store.load(session_id)
@@ -546,7 +555,7 @@ class SessionManager:
             messages=messages,
             extra_tools=[
                 *(extra_tools or []),
-                *self._team_board_tools(session_id, agent_name, ws),
+                *self._team_tools_for(session_id, ag, record, ws),
             ]
             or None,
             secrets=self.secrets,
@@ -566,6 +575,7 @@ class SessionManager:
             question_asker=question_asker
             or self.inbox_question_asker(session_id, agent),
             tool_requester=tool_requester,
+            team_approver=team_approver,
             subscription_store=self.subscriptions,
             channel_buffer=self.channel_buffer,
             routing_targets=self._routing_targets(session_id, agent),
@@ -1415,23 +1425,308 @@ class SessionManager:
     def journal_overview(self) -> list[dict[str, Any]]:
         return self.journal_store.overview(self._user_actor())
 
-    def _team_board_tools(self, session_id: str, agent_name: str, ws: Optional[str]) -> list[Any]:
-        """Phase-1 experimental wiring (flag: OPENWORKER_TEAM_BOARD=1): every
-        workspace session gets the board+journal verbs as the LEAD of its
-        workspace's board. Registration moves behind the persona `team:` trait
-        with the wake plumbing."""
-        if not ws or os.environ.get("OPENWORKER_TEAM_BOARD") != "1":
+    TEAM_WAKE_CAP_PER_HOUR = 60  # budget gate at the wake gate: silent server cap
+
+    def _team_tools_for(
+        self, session_id: str, agent: Any, record: Any, ws: Optional[str]
+    ) -> list[Any]:
+        """Board/journal verbs, gated by the persona `team:` trait. Leads get the
+        coordination set (+ steer); workers get the worker set bound to their roster
+        actor id. OPENWORKER_TEAM_BOARD=1 keeps the phase-1 any-session-as-lead dev
+        mode."""
+        role = getattr(agent, "team", None)
+        if role is None and ws and os.environ.get("OPENWORKER_TEAM_BOARD") == "1":
+            role = "lead"
+        if role is None or not ws:
             return []
-        actor = TeamActor(
-            id=f"{agent_name}:{session_id[:8]}",
-            role=TeamRole.LEAD,
-            persona=agent_name,
-            session_id=session_id,
-        )
         space = space_for_workspace(ws)
-        return board_tools(self.team_store, space=space, actor=actor) + journal_tools(
+        if role == "worker":
+            info = (record.team if record is not None else {}) or {}
+            actor = TeamActor(
+                id=str(info.get("actor") or f"{agent.name}:{session_id[:8]}"),
+                role=TeamRole.WORKER,
+                persona=agent.name,
+                session_id=session_id,
+            )
+            space = str(info.get("space") or space)
+        else:
+            actor = TeamActor(
+                id=f"{agent.name}:{session_id[:8]}",
+                role=TeamRole.LEAD,
+                persona=agent.name,
+                session_id=session_id,
+            )
+        tools = board_tools(self.team_store, space=space, actor=actor) + journal_tools(
             self.journal_store, actor=actor, space=space
         )
+        if role == "lead":
+            tools.append(self._steer_tool(session_id))
+        return tools
+
+    def _steer_tool(self, lead_session_id: str) -> Any:
+        """The lead's downward steering verb. Text lands in the worker's session
+        attributed [Lead] — queued into a live turn, or a fresh background turn when
+        idle. Strictly downward: no worker ever gets this tool."""
+        import aisuite as ai
+
+        manager = self
+
+        def steer_worker(worker: str, message: str) -> dict:
+            """Send steering text to one of your workers (by actor id). Use for
+            exceptions — changed requirements, stop/redirect, unblock guidance;
+            routine status flows through the board, not steering."""
+            team = manager.teams.for_lead_session(lead_session_id)
+            if team is None:
+                return {"error": "no team yet — propose one with propose_team first"}
+            match = next((w for w in team.workers if w.actor == worker), None)
+            if match is None:
+                return {
+                    "error": f"no worker '{worker}' on this team",
+                    "workers": [w.actor for w in team.workers],
+                }
+            if manager._loop is None:
+                return {"error": "steering is unavailable in this surface"}
+            asyncio.run_coroutine_threadsafe(
+                manager.deliver_to_session(
+                    match.session_id, f"[Lead] {message}".strip()
+                ),
+                manager._loop,
+            )
+            return {"ok": True, "delivered_to": worker}
+
+        return ai.tool(
+            steer_worker,
+            metadata=ai.ToolMetadata(
+                category="team", risk_level="medium", capabilities=["team"]
+            ),
+        )
+
+    def create_team(
+        self, session_id: str, members: list[dict[str, Any]], *, enable_chat: bool = False
+    ) -> dict[str, Any]:
+        """The staffing gate's approved action: PRE-SPAWN worker sessions (state on
+        disk, zero tokens — the first model turn fires when the first assignment
+        lands) and register the team. Fails closed on personas without `team: worker`."""
+        record = self.session_store.load(session_id)
+        if record is None or not record.workspace:
+            return {"approved": False, "error": "the lead session has no workspace"}
+        if self.teams.for_lead_session(session_id) is not None:
+            return {"approved": False, "error": "this session already leads a team"}
+        space = space_for_workspace(record.workspace)
+        workers: list[TeamWorker] = []
+        used: set[str] = set()
+        for member in members:
+            pid = str((member or {}).get("persona", "")).strip()
+            try:
+                ag = get_agent(pid)
+            except Exception:
+                return {
+                    "approved": False,
+                    "error": f"unknown coworker '{pid}' — it must be installed and enabled",
+                }
+            if getattr(ag, "team", None) != "worker":
+                # Fail closed: solo personas are not team-eligible — their prompts
+                # are written at a human, not a lead.
+                return {
+                    "approved": False,
+                    "error": f"'{pid}' is not team-capable (needs `team: worker`)",
+                }
+            actor, n = pid, 2
+            while actor in used:
+                actor, n = f"{pid}-{n}", n + 1
+            used.add(actor)
+            worker_sid = uuid.uuid4().hex[:12]
+            model = str(member.get("model") or record.model)
+            self.session_store.save(
+                SessionRecord(
+                    session_id=worker_sid,
+                    workspace=record.workspace,
+                    model=model,
+                    mode=record.mode,
+                    messages=[],
+                    agent=pid,
+                    team={
+                        "role": "worker",
+                        "actor": actor,
+                        "lead_session": session_id,
+                        "space": space,
+                    },
+                )
+            )
+            workers.append(
+                TeamWorker(actor=actor, persona=pid, session_id=worker_sid, model=model)
+            )
+        team = self.teams.create(
+            space=space,
+            lead_session=session_id,
+            lead_actor=f"{record.agent}:{session_id[:8]}",
+            workers=workers,
+            chat_enabled=enable_chat,
+        )
+        for worker in workers:
+            self._emit_session_created(worker.session_id, worker.persona)
+        record.team = {
+            "team_id": team.team_id,
+            "role": "lead",
+            "actor": team.lead_actor,
+            "space": space,
+        }
+        self.session_store.save(record)
+        return {
+            "approved": True,
+            "team_id": team.team_id,
+            "workers": [
+                {"actor": w.actor, "persona": w.persona, "session_id": w.session_id}
+                for w in workers
+            ],
+            "note": (
+                "team created — workers are idle until you assign. Create work items"
+                " and assign them to the actor ids above; review-state items are"
+                " yours to verify."
+            ),
+        }
+
+    async def team_tick(self) -> int:
+        """Drain team queues (called each scheduler tick + kicked after team turns).
+        One wake consumes a burst as one digest; durable-until-consumed — the cursor
+        advances only after the delivery turn is dispatched."""
+        delivered = 0
+        for team in self.teams.all():
+            if team.paused:
+                continue
+            for worker in team.workers:
+                delivered += await self._drain_team_member(
+                    team,
+                    session_id=worker.session_id,
+                    actor=worker.actor,
+                    is_lead=False,
+                )
+            delivered += await self._drain_team_member(
+                team,
+                session_id=team.lead_session,
+                actor=team.lead_actor,
+                is_lead=True,
+            )
+        return delivered
+
+    async def _drain_team_member(
+        self, team, *, session_id: str, actor: str, is_lead: bool
+    ) -> int:
+        directs = self.team_store.pending_for(actor)
+        subs = (
+            self.team_store.subscribed_events(team.space, actor) if is_lead else []
+        )
+        if not directs and not subs:
+            return 0
+        if self.is_running(session_id) or session_id in self._team_inflight:
+            return 0  # it will drain on its next turn end / next tick
+        if not self.teams.count_wake(team.team_id, cap=self.TEAM_WAKE_CAP_PER_HOUR):
+            logger.warning("team %s paused for budget this hour", team.team_id)
+            return 0
+        message = self._team_digest(team, directs, subs, is_lead=is_lead)
+        self._team_inflight.add(session_id)
+
+        async def _deliver() -> None:
+            try:
+                await self.deliver_to_session(session_id, message)
+                # Consume only after the turn dispatched: a crash before this replays
+                # the batch next tick (at-least-once, never silently lost).
+                if directs:
+                    self.team_store.consume(actor, directs[-1]["seq"])
+                if subs:
+                    self.team_store.consume_subscription(
+                        team.space, actor, subs[-1]["seq"]
+                    )
+            finally:
+                self._team_inflight.discard(session_id)
+
+        asyncio.create_task(_deliver())
+        return 1
+
+    def _team_digest(
+        self, team, directs: list[dict], subs: list[dict], *, is_lead: bool
+    ) -> str:
+        """Coalesce one queue batch into one wake message. Deterministic, computed
+        by code — the model does judgment, not arithmetic."""
+        lines: list[str] = []
+        for event in directs + subs:
+            item_id = event.get("item_id")
+            payload = event.get("payload") or {}
+            item = None
+            if item_id is not None:
+                try:
+                    item = self.team_store.get_item(team.space, int(item_id))
+                except Exception:
+                    item = None
+            title = f"#{item_id} {item['title']}" if item else f"#{item_id}"
+            if event["kind"] == "item_assigned":
+                if item is None:
+                    continue
+                lines.append(
+                    f"You've been assigned work item {title}.\n"
+                    f"  Done when: {item['criteria']}"
+                    + (f"\n  Details: {item['description']}" if item["description"] else "")
+                )
+            elif event["kind"] == "item_transitioned":
+                to = payload.get("to", "?")
+                note = f" — “{payload.get('comment')}”" if payload.get("comment") else ""
+                lines.append(f"{title} moved to {to} by {event['actor']}{note}")
+            elif event["kind"] == "item_created":
+                lines.append(f"New item filed by {event['actor']}: {title}")
+            elif event["kind"] == "item_commented":
+                lines.append(
+                    f"Comment on {title} by {event['actor']}: {payload.get('body', '')}"
+                )
+        body = "\n".join(f"- {line}" for line in lines) or "- (no detail)"
+        if is_lead:
+            return (
+                "⏰ Board wake — your team needs decisions:\n"
+                + body
+                + "\n\nVerify review items against their acceptance criteria (then"
+                " done, or send back with a comment), unblock or reassign blocked"
+                " items, and triage new filings. Steer only where needed."
+            )
+        return (
+            "[Lead] Board update:\n"
+            + body
+            + "\n\nMove your item to in_progress when you start; blocked (with a"
+            " comment) if stuck; review with a hand-off comment when finished."
+            " Journal evidence as you go."
+        )
+
+    def team_staleness_digest(self, session_id: str) -> str:
+        """Attached to a lead's TIMER wakes: pure code over the board — a
+        nothing's-wrong wake is one cheap glance, never a re-survey. Scoped by
+        role membership: sessions with no team role get nothing."""
+        team = self.teams.for_lead_session(session_id)
+        if team is None:
+            return ""
+        try:
+            items = self.team_store.list_items(team.space, self._user_actor())
+        except Exception:
+            return ""
+        by_state: dict[str, int] = {}
+        for item in items:
+            by_state[item["state"]] = by_state.get(item["state"], 0) + 1
+        unassigned = sum(
+            1 for i in items if i["state"] == "open" and not i["assignee"]
+        )
+        parts = [f"{n} {state}" for state, n in sorted(by_state.items())]
+        lines = [f"Board: {', '.join(parts) or 'empty'}."]
+        if unassigned:
+            lines.append(f"{unassigned} open item(s) have no assignee.")
+        reviews = [i for i in items if i["state"] == "review"]
+        if reviews:
+            lines.append(
+                "Awaiting your review: "
+                + ", ".join(f"#{i['id']} {i['title']}" for i in reviews[:5])
+            )
+        blocked = [i for i in items if i["state"] == "blocked"]
+        if blocked:
+            lines.append(
+                "Blocked: " + ", ".join(f"#{i['id']} {i['title']}" for i in blocked[:5])
+            )
+        return "\n".join(lines)
 
     def list_artifacts(self, session_id: str) -> list[dict[str, Any]]:
         record = self.session_store.load(session_id)
@@ -2615,6 +2910,8 @@ class SessionManager:
         """Build the messaging gateway and start enabled listeners. Inbound messages route to
         durable sessions: a channel message to its subscribers, a DM to the designated DM session
         (else parked). Returns the platforms whose listeners came up."""
+        # Team steering/kicks are dispatched from tool threads; they need the app loop.
+        self._loop = asyncio.get_running_loop()
         self.scheduler.start()  # tick scheduler for automations (independent of connectors)
         return await self._build_and_start_gateway()
 
@@ -3069,6 +3366,16 @@ class SessionManager:
         return resolve_from_reply(text, _resolve) is not None
 
     # -- self-wake resumption ---------------------------------------------------
+    async def _scheduler_tick(self) -> None:
+        """The shared per-tick work: resume due self-wakes, then drain team queues.
+        Team deliveries dispatch as tasks (a long worker turn must not stall the
+        scheduler)."""
+        await self.resume_due_wakes()
+        try:
+            await self.team_tick()
+        except Exception:
+            logger.exception("team tick failed")
+
     async def resume_due_wakes(self) -> int:
         """Resume sessions whose self-wakes are due (called each scheduler tick). A suspended
         agent (it called sleep_for / wake_on / wake_on_event and ended its turn) is re-invoked on
@@ -3101,12 +3408,26 @@ class SessionManager:
         # finishes — the one shared post-turn moment, so auto-titling hooks in here and
         # can never add latency to the response itself.
         self._maybe_autotitle(session_id)
+        # Team sessions: a finished turn is the moment new board events exist (an
+        # assign, a review transition) — kick the queue drain now instead of waiting
+        # for the next scheduler tick. Cheap no-op for teamless sessions.
+        if self._loop is not None and (
+            self.teams.for_lead_session(session_id)
+            or self.teams.for_worker_session(session_id)
+        ):
+            asyncio.run_coroutine_threadsafe(self.team_tick(), self._loop)
 
     def is_running(self, session_id: str) -> bool:
         return session_id in self._running_sessions
 
     async def _resume_wake(self, wake) -> None:
-        await self.deliver_to_session(wake.session_id, self._wake_message(wake))
+        message = self._wake_message(wake)
+        # A lead's timer wake carries the staleness digest — pure code over the
+        # board, scoped by role membership (teamless sessions get a bare wake).
+        digest = self.team_staleness_digest(wake.session_id)
+        if digest:
+            message = f"{message}\n\n{digest}"
+        await self.deliver_to_session(wake.session_id, message)
 
     async def deliver_to_session(
         self, session_id: str, message: str, *, source: Optional[dict[str, Any]] = None
@@ -4004,10 +4325,46 @@ class SessionManager:
                 "subscriptions": [
                     s.channel for s in self.subscriptions.for_session(r.session_id)
                 ],
+                # Agent teams: {} for plain sessions. Workers carry role/lead_session
+                # (+ a computed current-item line); leads carry role/team_id — drives
+                # the sidebar's ONE expandable team entry.
+                "team": self._session_team_row(r),
             }
             for r in self.session_store.list(workspace=ws)
             if not r.session_id.startswith("__")  # hide internal threads
         ]
+
+    def _session_team_row(self, record: SessionRecord) -> dict[str, Any]:
+        info = record.team or {}
+        if not info:
+            return {}
+        row = {
+            "role": info.get("role", ""),
+            "team_id": info.get("team_id", ""),
+            "lead_session": info.get("lead_session", ""),
+        }
+        if info.get("role") == "worker" and info.get("space") and info.get("actor"):
+            try:
+                items = self.team_store.list_items(
+                    str(info["space"]), self._user_actor(), assignee=str(info["actor"])
+                )
+            except Exception:
+                items = []
+            active = next(
+                (
+                    i
+                    for state in ("blocked", "review", "in_progress", "open")
+                    for i in items
+                    if i["state"] == state
+                ),
+                None,
+            )
+            row["actor"] = info["actor"]
+            row["current_item"] = (
+                f"#{active['id']} {active['state'].replace('_', ' ')}" if active else "idle"
+            )
+            row["status"] = active["state"] if active else "idle"
+        return row
 
     def _session_liveness(self, session_id: str) -> str:
         if self.is_running(session_id):

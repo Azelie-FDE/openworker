@@ -133,6 +133,10 @@ class TeamStore:
                 head_hash TEXT NOT NULL,
                 watermark INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS team_cursors (
+                cursor_key TEXT PRIMARY KEY,
+                consumed_seq INTEGER NOT NULL
+            );
             """)
         self._conn.commit()
 
@@ -275,6 +279,70 @@ class TeamStore:
                 (recipient, since_seq, max(1, min(int(limit or 200), 2000))),
             ).fetchall()
         return [_row_to_event(row) for row in rows]
+
+    # -------------------------------------------------- delivery (durable queue)
+
+    # The per-agent durable queue is a PROJECTION over the one log, never a second
+    # write path: entries are events addressed to a recipient, "consumed" is a
+    # cursor. Durable-until-consumed (a crash before consume() replays on the next
+    # drain); coalescing happens at dequeue — the caller turns one batch into one
+    # digest. "Mailbox" is banned as a concept; this is internal plumbing.
+
+    def pending_for(self, recipient: str, *, limit: int = 200) -> list[dict[str, Any]]:
+        """Unconsumed events addressed to this agent, in order."""
+        return self.for_recipient(
+            recipient, since_seq=self._cursor(f"to:{recipient}"), limit=limit
+        )
+
+    def consume(self, recipient: str, upto_seq: int) -> None:
+        self._set_cursor(f"to:{recipient}", upto_seq)
+
+    # Lead subscriptions: an ALLOWLIST of decision-demanding event classes — a
+    # worker moving its item to review/blocked, or filing a new item. Journal
+    # appends and routine comments never wake anyone.
+    SUBSCRIBED_TRANSITIONS = ("review", "blocked")
+
+    def subscribed_events(
+        self, space: str, subscriber: str, *, limit: int = 200
+    ) -> list[dict[str, Any]]:
+        """Unconsumed subscription-worthy events on a space for one subscriber."""
+        key = f"sub:{subscriber}:{space}"
+        events = self.events(
+            space,
+            kinds=[ITEM_TRANSITIONED, ITEM_CREATED],
+            since_seq=self._cursor(key),
+            limit=limit,
+        )
+        out = []
+        for event in events:
+            if event["actor"] == subscriber:
+                continue  # your own verbs never wake you
+            if (
+                event["kind"] == ITEM_TRANSITIONED
+                and event["payload"].get("to") not in self.SUBSCRIBED_TRANSITIONS
+            ):
+                continue
+            out.append(event)
+        return out
+
+    def consume_subscription(self, space: str, subscriber: str, upto_seq: int) -> None:
+        self._set_cursor(f"sub:{subscriber}:{space}", upto_seq)
+
+    def _cursor(self, key: str) -> int:
+        row = self._conn.execute(
+            "SELECT consumed_seq FROM team_cursors WHERE cursor_key = ?", (key,)
+        ).fetchone()
+        return int(row["consumed_seq"]) if row else 0
+
+    def _set_cursor(self, key: str, seq: int) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO team_cursors (cursor_key, consumed_seq) VALUES (?, ?)"
+                " ON CONFLICT(cursor_key) DO UPDATE SET consumed_seq ="
+                " MAX(consumed_seq, ?)",
+                (key, int(seq), int(seq)),
+            )
+            self._conn.commit()
 
     def spaces(self) -> list[str]:
         with self._lock:

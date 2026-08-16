@@ -218,6 +218,68 @@ def journal_tools(
     return [_wrap(local[name]) for name in JOURNAL_VERBS]
 
 
+# The staffing gate's schema carrier. Like propose_plan, the real handling lives in
+# the TurnEngine (it needs the out-of-band approval round-trip): it emits
+# TEAM_PROPOSED and waits; approval PRE-SPAWNS the worker sessions and returns the
+# roster (actor ids) to the lead. This body only runs when no approver is wired.
+_PROPOSE_TEAM_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "propose_team",
+        "description": (
+            "Propose the worker coworkers you need for this board. The user sees the"
+            " roster and approves it; approval creates the worker sessions and"
+            " returns their actor ids so you can assign work items to them. Only"
+            " team-capable worker coworkers may be proposed."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "persona": {"type": "string"},
+                            "model": {"type": "string"},
+                            "reason": {"type": "string"},
+                        },
+                        "required": ["persona"],
+                    },
+                },
+                "enable_chat": {"type": "boolean"},
+                "note": {"type": "string"},
+            },
+            "required": ["members"],
+        },
+    },
+}
+
+
+def propose_team_tool() -> object:
+    def propose_team(
+        members: Optional[list] = None, enable_chat: bool = False, note: str = ""
+    ) -> dict:
+        """Propose the worker roster for this board (the staffing gate). Each member
+        is {persona, model?, reason?}. The user approves; approval creates the
+        worker sessions and returns their actor ids for assignment."""
+        return {
+            "approved": False,
+            "error": "team staffing isn't available in this surface",
+        }
+
+    wrapped = ai.tool(
+        propose_team,
+        metadata=ai.ToolMetadata(
+            category="team",
+            risk_level="medium",
+            capabilities=["team"],
+        ),
+    )
+    wrapped.__coworker_schema__ = _PROPOSE_TEAM_SCHEMA
+    return wrapped
+
+
 def _call(func, *args, **kwargs) -> dict:
     try:
         result = func(*args, **kwargs)

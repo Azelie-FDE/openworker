@@ -41,6 +41,9 @@ class Agent:
     family: str = "knowledge"
     messaging: bool = False
     connectors: bool | tuple[str, ...] = False
+    # Team identity: "lead" | "worker" | None (solo-only). Gates the board/journal
+    # toolsets and staffing eligibility — solo personas are never team-staffable.
+    team: Optional[str] = None
 
     def build_tools(self, context: AgentContext) -> list:
         return list(self.tool_factory(context)) if self.tool_factory else []

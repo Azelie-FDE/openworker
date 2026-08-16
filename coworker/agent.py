@@ -213,6 +213,7 @@ def build_engine(
     plan_approver: Optional[Any] = None,
     question_asker: Optional[Any] = None,
     tool_requester: Optional[Any] = None,
+    team_approver: Optional[Any] = None,
     subscription_store: Optional[Any] = None,
     channel_buffer: Optional[Any] = None,
     routing_targets: Optional[list[str]] = None,
@@ -428,6 +429,13 @@ def build_engine(
     # call whenever the session isn't actually in plan mode.
     registry.register(propose_plan_tool())
 
+    # The staffing gate — leads only. The engine intercepts it (out-of-band approval);
+    # approval pre-spawns the worker sessions and returns actor ids to assign to.
+    if agent.team == "lead":
+        from .teams.tools import propose_team_tool
+
+        registry.register(propose_team_tool())
+
     # Per-turn ephemeral context, appended to the latest user message since mid-thread system
     # messages aren't reliable across providers. Three producers: the plan-mode reminder (mode can
     # flip mid-session, so it's checked each turn, not baked into the instructions), the live
@@ -502,6 +510,7 @@ def build_engine(
         plan_approver=plan_approver,
         question_asker=question_asker,
         tool_requester=tool_requester,
+        team_approver=team_approver,
     )
     engine.executor = executor  # type: ignore[attr-defined]
     engine.todo = todo  # type: ignore[attr-defined]

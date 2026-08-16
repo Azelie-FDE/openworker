@@ -26,6 +26,9 @@ class EventType(str, Enum):
     PLAN_PROPOSED = (
         "plan_proposed"  # agent presents a plan for approval (plan mode exit)
     )
+    TEAM_PROPOSED = (
+        "team_proposed"  # a lead proposes a worker roster (the staffing gate)
+    )
     TOOL_STARTED = "tool_started"
     TOOL_FINISHED = "tool_finished"
     ITERATION_END = "iteration_end"

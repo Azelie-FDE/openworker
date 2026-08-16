@@ -1835,6 +1835,43 @@ def create_app(manager: SessionManager) -> FastAPI:
                 }
             return {"approved": True, "mode": resp.get("mode") or "interactive"}
 
+        async def team_approver(_args: dict, tool_call_id=None) -> dict:
+            # The staffing gate. The engine already emitted TEAM_PROPOSED; park an
+            # Inbox item as the durable resolution vehicle, wait for the verdict, and
+            # on approval PRE-SPAWN the team (create_team fails closed on non-worker
+            # personas, so a bad roster reads as a rejection with the reason).
+            members = _args.get("members") or []
+            roster = "\n".join(
+                f"- {m.get('persona', '?')}"
+                + (f" · {m['model']}" if m.get("model") else "")
+                + (f" — {m['reason']}" if m.get("reason") else "")
+                for m in members
+                if isinstance(m, dict)
+            )
+            item = manager.inbox.add_plan(
+                session_id,
+                "Create this team?",
+                body=roster,
+                inbox=_route(),
+                visibility=_visibility(),
+                tool_call_id=tool_call_id,
+            )
+            if item.state == "pending":
+                manager.persist_session(session_id)
+                if item.visibility == VIS_INBOX:
+                    await _mirror(item)
+            resp = _parse_json(await manager.inbox.wait(item.id))
+            if not resp.get("approved"):
+                return {
+                    "approved": False,
+                    "feedback": resp.get("feedback") or "the user declined this roster",
+                }
+            return manager.create_team(
+                session_id,
+                [m for m in members if isinstance(m, dict)],
+                enable_chat=bool(_args.get("enable_chat", False)),
+            )
+
         async def _apply_model(model: Optional[str]) -> None:
             # Mid-session rebind is allowed (roadmap item 3, supersedes the 2026-07-04
             # lock): history is canonical and providers convert per call. A real switch
@@ -1874,6 +1911,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             plan_approver=plan_approver,
             question_asker=question_asker,
             tool_requester=tool_requester,
+            team_approver=team_approver,
         )
         if engine is None:
             await ws.send_json(
@@ -2020,6 +2058,15 @@ def create_app(manager: SessionManager) -> FastAPI:
                             {
                                 "approved": bool(message.get("approved")),
                                 "mode": message.get("mode", "interactive"),
+                                "feedback": message.get("feedback", ""),
+                            }
+                        )
+                    )
+                elif kind == "team_response":
+                    _resolve_pending(
+                        json.dumps(
+                            {
+                                "approved": bool(message.get("approved")),
                                 "feedback": message.get("feedback", ""),
                             }
                         )

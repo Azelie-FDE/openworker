@@ -89,6 +89,9 @@ class TurnEngine:
         tool_requester: Optional[
             Callable[[dict[str, Any]], "Awaitable[dict[str, Any]]"]
         ] = None,
+        team_approver: Optional[
+            Callable[[dict[str, Any]], "Awaitable[dict[str, Any]]"]
+        ] = None,
         # Called (thread-safe, best-effort) when the user stops the turn — e.g. the
         # executor's kill for a running shell command.
         interrupt_hooks: Optional[list[Callable[[], None]]] = None,
@@ -119,6 +122,10 @@ class TurnEngine:
         # An approving result flips the live PermissionEngine out of plan mode (same session,
         # context kept). None on surfaces that can't prompt (the tool then no-ops).
         self.plan_approver = plan_approver
+        # Handles the `propose_team` tool (the staffing gate): emits TEAM_PROPOSED, waits
+        # for the user's decision; approval pre-spawns the worker sessions and the result
+        # carries the roster (actor ids). None on surfaces that can't prompt.
+        self.team_approver = team_approver
         # Handles the `ask_user` tool: turns a question into an Inbox item and waits for the answer
         # (answerable inline in a live session or from the Inbox when unattended). None on surfaces
         # that can't ask (the tool then no-ops).
@@ -644,6 +651,10 @@ class TurnEngine:
                 async for event in self._handle_plan_proposal(tool_call):
                     yield event
                 continue
+            if tool_call.name == "propose_team":
+                async for event in self._handle_team_proposal(tool_call):
+                    yield event
+                continue
             if tool_call.name == "ask_user":
                 async for event in self._handle_ask_user(tool_call):
                     yield event
@@ -918,6 +929,56 @@ class TurnEngine:
             self.audit_sink(payload)
         except Exception:
             pass
+
+    async def _handle_team_proposal(self, tool_call: ToolCall) -> AsyncIterator[Event]:
+        """The staffing gate: emit the proposed roster, await the user's out-of-band
+        decision. Approval PRE-SPAWNS the worker sessions (server-side, inside the
+        approver) and the result carries the roster with actor ids so the lead can
+        assign; rejection returns the user's feedback for a revised proposal."""
+        args = tool_call.arguments or {}
+        members = args.get("members") or []
+        if not isinstance(members, list) or not members:
+            result: dict[str, Any] = {
+                "approved": False,
+                "error": "propose at least one member ({persona, model?, reason?})",
+            }
+        elif self.team_approver is None:
+            result = {
+                "approved": False,
+                "error": "team staffing isn't available in this surface",
+            }
+        else:
+            yield Event(
+                EventType.TEAM_PROPOSED,
+                {
+                    "members": members,
+                    "enable_chat": bool(args.get("enable_chat", False)),
+                    "note": str(args.get("note", "")),
+                },
+            )
+            self._audit(tool_call, stage="team_proposed")
+            result = await self._interruptible(
+                self.team_approver(dict(args), tool_call.id),
+                interrupted={"approved": False, "error": "interrupted by user"},
+            ) or {"approved": False, "error": "no response"}
+
+        status = "ok" if result.get("approved") else "denied"
+        self.messages.append(_tool_result_message(tool_call, result))
+        self._audit(
+            tool_call,
+            stage="finished",
+            status=status,
+            result=result,
+            result_preview=_preview(result),
+        )
+        yield Event(
+            EventType.TOOL_FINISHED,
+            {
+                "name": tool_call.name,
+                "status": status,
+                "result_preview": _preview(result),
+            },
+        )
 
     async def _handle_plan_proposal(self, tool_call: ToolCall) -> AsyncIterator[Event]:
         """Emit the plan for review, await the user's out-of-band decision, and apply it:

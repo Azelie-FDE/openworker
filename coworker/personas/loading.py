@@ -31,6 +31,9 @@ def consent_summary(m: PersonaManifest) -> dict:
         "connectors": "all" if m.connectors is True else list(m.connectors or ()),
         "mcp": list(m.mcp),
         "messaging": m.messaging,
+        # "lead" personas can create and direct worker coworkers — the consent
+        # screen says that plainly (capability firebreak as a manifest fact).
+        "team": m.team,
         "recommended_mode": m.default_permission_mode,
         "recommended_models": list(m.recommended_models),
         # Recommended connectors/MCP with reasons + tiers — the consent screen shows
@@ -59,6 +62,10 @@ def capability_set(m: PersonaManifest) -> set[str]:
         caps |= {f"connector:{c}" for c in m.connectors or ()}
     if m.messaging:
         caps.add("messaging")
+    # An update that turns a solo persona into a lead/worker must re-consent —
+    # team capability changes who the coworker can direct or be directed by.
+    if m.team:
+        caps.add(f"team:{m.team}")
     return caps
 
 

@@ -21,6 +21,7 @@ import yaml
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 VALID_FAMILIES = {"code", "knowledge"}
+VALID_TEAM = {"lead", "worker"}
 VALID_WORKSPACES = {"git", "project", "deliverable", "none"}
 VALID_MODES = {"discuss", "plan", "interactive", "custom", "auto"}
 VALID_REC_KINDS = {"connector", "mcp"}
@@ -63,6 +64,13 @@ class PersonaManifest:
     # `all` sentinel, reserved for built-in general personas. Coarser grants leaked
     # undeclared tools (browser, email) into security sessions; undeclared = absent.
     connectors: bool | tuple[str, ...] = False
+    # Team identity (agent-teams design, third/fourth pass): "lead" = coordinates a
+    # team (gets the board coordination verbs + gates; consent copy says "can create
+    # and direct worker coworkers"); "worker" = purpose-built to work under a lead
+    # (board worker verbs, no ask_user-shaped prompt); None = solo-only. Solo
+    # personas are NOT team-eligible — team-awareness changes who the prompt talks
+    # to, so staffing fails closed on personas without the trait.
+    team: Optional[str] = None
     default_permission_mode: str = "interactive"
     recommended_models: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
@@ -97,6 +105,7 @@ class PersonaManifest:
             family=self.family,
             messaging=self.messaging,
             connectors=self.connectors,
+            team=self.team,
         )
 
 
@@ -279,6 +288,13 @@ def parse_manifest(
             f"persona {persona_id!r}: default_permission_mode must be one of {sorted(VALID_MODES)}"
         )
 
+    team_raw = str(meta.get("team", "") or "").strip().lower()
+    if team_raw and team_raw not in VALID_TEAM:
+        raise ManifestError(
+            f"persona {persona_id!r}: team must be one of {sorted(VALID_TEAM)}"
+            " (omit for a solo coworker)"
+        )
+
     tools = _strlist(meta, "tools")
     _validate_tools(persona_id, tools)
     recommends = _recommends(persona_id, meta)
@@ -296,6 +312,7 @@ def parse_manifest(
         workspace=workspace,
         messaging=bool(meta.get("messaging", False)),
         connectors=connectors,
+        team=team_raw or None,
         default_permission_mode=mode,
         recommended_models=_strlist(meta, "recommended_models"),
         skills=_strlist(meta, "skills"),
