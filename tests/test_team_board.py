@@ -155,6 +155,20 @@ def test_blocked_by_shows_on_the_other_side(store):
     ]
 
 
+def test_artifact_refs_accumulate_on_the_item(store):
+    item_id = assigned_item(store)
+    store.transition(SPACE, WORKER, item_id, "in_progress")
+    store.comment(SPACE, WORKER, item_id, "fix branch up", refs=["branch:fix/acl"])
+    store.transition(
+        SPACE, WORKER, item_id, "review",
+        comment="done", refs=["branch:fix/acl", "report:posture.html"],
+    )
+    item = store.get_item(SPACE, item_id)
+    assert item["refs"] == ["branch:fix/acl", "report:posture.html"]  # deduped, ordered
+    store.rebuild(SPACE)
+    assert store.get_item(SPACE, item_id)["refs"] == item["refs"]
+
+
 # ------------------------------------------------------------- worker visibility
 
 def test_worker_sees_only_its_slice(store):

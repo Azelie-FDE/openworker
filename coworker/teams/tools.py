@@ -94,18 +94,37 @@ def board_tools(
         except (BoardError, ValueError) as error:
             return {"error": str(error)}
 
-    def transition(item: int, to: str, comment: str = "") -> dict:
+    def transition(
+        item: int, to: str, comment: str = "", refs: Optional[list] = None
+    ) -> dict:
         """Move a work item to a new state. Workers move their own item to
         in_progress, blocked, or review (attach the blocker or a hand-off summary
-        as `comment`); done requires review verification first."""
+        as `comment`, and artifact pointers — branch, report, session — as
+        `refs`); done requires review verification first."""
         return _call(
-            store.transition, space, actor, item, to, comment=comment, taint=taint()
+            store.transition,
+            space,
+            actor,
+            item,
+            to,
+            comment=comment,
+            refs=[str(ref) for ref in refs or []],
+            taint=taint(),
         )
 
-    def comment(item: int, body: str) -> dict:
+    def comment(item: int, body: str, refs: Optional[list] = None) -> dict:
         """Add a comment to a work item. Comments are durable and attributed —
-        answers that matter belong here, not in chat."""
-        return _call(store.comment, space, actor, item, body, taint=taint())
+        answers that matter belong here, not in chat. `refs` attach artifact
+        pointers (branch, PR, report, file:line) to the item."""
+        return _call(
+            store.comment,
+            space,
+            actor,
+            item,
+            body,
+            refs=[str(ref) for ref in refs or []],
+            taint=taint(),
+        )
 
     def assign(item: int, assignee: str) -> dict:
         """Assign a work item to a worker coworker. The item itself becomes the

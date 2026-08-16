@@ -109,6 +109,7 @@ class TeamStore:
                 state TEXT NOT NULL,
                 assignee TEXT DEFAULT '',
                 case_id TEXT DEFAULT '',
+                refs TEXT NOT NULL DEFAULT '[]',
                 created_ts TEXT NOT NULL,
                 updated_seq INTEGER NOT NULL,
                 PRIMARY KEY (space, id)
@@ -389,7 +390,7 @@ class TeamStore:
                 + " ORDER BY id",
                 params,
             ).fetchall()
-            items = [dict(row) for row in rows]
+            items = [_row_to_item(row) for row in rows]
             if actor.role == Role.WORKER:
                 visible = self._worker_slice(space, actor.id)
                 items = [item for item in items if item["id"] in visible]
@@ -416,6 +417,7 @@ class TeamStore:
         to: str,
         *,
         comment: str = "",
+        refs: Optional[list[str]] = None,
         taint: bool = False,
     ) -> dict[str, Any]:
         target = ItemState(to)
@@ -437,6 +439,7 @@ class TeamStore:
                     "from": current.value,
                     "to": target.value,
                     "comment": comment,
+                    "refs": list(refs or []),
                 },
                 taint=taint,
             )
@@ -449,6 +452,7 @@ class TeamStore:
         item_id: int,
         body: str,
         *,
+        refs: Optional[list[str]] = None,
         taint: bool = False,
     ) -> dict[str, Any]:
         if not (body or "").strip():
@@ -468,7 +472,7 @@ class TeamStore:
                 actor,
                 item_id=item_id,
                 case_id=item["case_id"] or None,
-                payload={"body": body},
+                payload={"body": body, "refs": list(refs or [])},
                 taint=taint,
             )
 
@@ -673,8 +677,8 @@ class TeamStore:
                 """
                 INSERT INTO team_items
                     (space, id, title, description, criteria, state, assignee,
-                     case_id, created_ts, updated_seq)
-                VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?)
+                     case_id, refs, created_ts, updated_seq)
+                VALUES (?, ?, ?, ?, ?, ?, '', ?, '[]', ?, ?)
                 """,
                 (
                     space,
@@ -700,6 +704,9 @@ class TeamStore:
                 " WHERE space = ? AND id = ?",
                 (payload.get("to"), seq, space, item_id),
             )
+            self._merge_refs(space, item_id, payload.get("refs"))
+        elif kind == ITEM_COMMENTED:
+            self._merge_refs(space, item_id, payload.get("refs"))
         elif kind == ITEM_ASSIGNED:
             self._conn.execute(
                 "UPDATE team_items SET assignee = ?, updated_seq = ?"
@@ -712,8 +719,27 @@ class TeamStore:
                 " VALUES (?, ?, ?, ?)",
                 (space, payload.get("src"), payload.get("kind"), payload.get("dst")),
             )
-        # Comments and journal entries have no materialized state: their
-        # projections read straight off the (indexed) log.
+        # Comment bodies and journal entries have no materialized state: their
+        # projections read straight off the (indexed) log. Only the artifact
+        # refs a comment carries fold onto the item.
+
+    def _merge_refs(
+        self, space: str, item_id: Optional[int], refs: Optional[list]
+    ) -> None:
+        if not refs or item_id is None:
+            return
+        row = self._conn.execute(
+            "SELECT refs FROM team_items WHERE space = ? AND id = ?",
+            (space, item_id),
+        ).fetchone()
+        if row is None:
+            return
+        merged = json.loads(row["refs"] or "[]")
+        merged.extend(str(ref) for ref in refs if str(ref) not in merged)
+        self._conn.execute(
+            "UPDATE team_items SET refs = ? WHERE space = ? AND id = ?",
+            (json.dumps(merged), space, item_id),
+        )
 
     def _check_transition_authority(
         self, actor: Actor, item: dict[str, Any], current: ItemState, target: ItemState
@@ -812,7 +838,7 @@ class TeamStore:
         ).fetchone()
         if row is None:
             raise BoardError(f"no item #{item_id} in space '{space}'")
-        return dict(row)
+        return _row_to_item(row)
 
     def _next_item_id(self, space: str) -> int:
         row = self._conn.execute(
@@ -842,6 +868,15 @@ def _canonical(payload: dict[str, Any]) -> str:
 def _hash(record: dict[str, Any]) -> str:
     material = _canonical({key: record[key] for key in _HASHED_FIELDS})
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _row_to_item(row: sqlite3.Row) -> dict[str, Any]:
+    item = dict(row)
+    try:
+        item["refs"] = json.loads(item.get("refs") or "[]")
+    except json.JSONDecodeError:
+        item["refs"] = []
+    return item
 
 
 def _row_to_event(row: sqlite3.Row) -> dict[str, Any]:
