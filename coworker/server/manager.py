@@ -82,6 +82,7 @@ from ..providers import (
 )
 from ..secrets import SecretStore, state_dir
 from ..sessions import SessionRecord
+from ..teams import TeamStore
 from ..skills import (
     SessionSkillStore,
     SkillLoader,
@@ -196,6 +197,10 @@ class SessionManager:
         self.scheduler = Scheduler(
             self.task_store, self._run_scheduled_task, extra_tick=self.resume_due_wakes
         )
+        # Agent teams: the append-only team event store — board, journal, and per-agent
+        # deliveries are projections of it. Verbs register per-session behind the
+        # persona's `team:` trait (wake plumbing lands separately).
+        self.team_store = TeamStore(base / "teams.db")
         # Personas: registry + lifecycle state under this manager's data dir. Installed as the
         # process singleton so agents.get_agent resolves persona ids (incl. third-party) here.
         self.personas = PersonaRegistry(state_path=base / "personas.json")
