@@ -1461,7 +1461,47 @@ class SessionManager:
         )
         if role == "lead":
             tools.append(self._steer_tool(session_id))
+            tools.append(self._team_options_tool())
         return tools
+
+    def _team_options_tool(self) -> Any:
+        """Registry-injected staffing knowledge: the lead's options come from the
+        persona registry at call time — installing a worker coworker automatically
+        widens what a lead can propose; nothing is hardcoded. Solo personas never
+        appear (fail closed at the source AND at create_team)."""
+        import aisuite as ai
+
+        manager = self
+
+        def team_options() -> dict:
+            """List the worker coworkers available for staffing (call before
+            propose_team). Only team-capable workers are listed — solo coworkers
+            cannot join a team."""
+            out = []
+            for row in manager.personas.list_all():
+                pid = row.get("id", "")
+                entry = manager.personas.get(pid)
+                m = getattr(entry, "manifest", None)
+                if m is None or m.team != "worker":
+                    continue
+                if not manager.personas.is_enabled(pid):
+                    continue
+                out.append(
+                    {
+                        "persona": pid,
+                        "name": m.name,
+                        "tagline": m.tagline,
+                        "recommended_models": list(m.recommended_models),
+                    }
+                )
+            return {"workers": out}
+
+        return ai.tool(
+            team_options,
+            metadata=ai.ToolMetadata(
+                category="team", risk_level="low", capabilities=["team"]
+            ),
+        )
 
     def _steer_tool(self, lead_session_id: str) -> Any:
         """The lead's downward steering verb. Text lands in the worker's session

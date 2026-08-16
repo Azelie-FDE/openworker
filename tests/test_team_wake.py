@@ -223,3 +223,11 @@ def test_staleness_digest_is_role_scoped(manager, monkeypatch):
     assert "1 open" in digest
     assert "no assignee" in digest
     _ = item
+
+
+def test_team_options_lists_only_enabled_workers(manager):
+    tool = manager._team_options_tool()
+    workers = {w["persona"] for w in tool()["workers"]}
+    assert {"swe-worker", "design-worker", "test-worker"} <= workers
+    assert "swe-lead" not in workers  # leads staff, they aren't staffed
+    assert "security" not in workers  # solo coworkers are not team-eligible

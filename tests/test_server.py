@@ -65,7 +65,11 @@ def test_agents_and_memory_rest(tmp_path):
     # ship in the picker out of the box.
     names = [a["name"] for a in agents]
     assert names[0] == "cowork"
-    assert set(names) == {"cowork", "code", "ops", "security", "cloud-posture", "dep-audit"}
+    # swe-lead surfaces (it's how a user starts a team); team WORKERS never do —
+    # they're staffed by a lead, not started solo.
+    assert set(names) == {
+        "cowork", "code", "ops", "security", "cloud-posture", "dep-audit", "swe-lead",
+    }
     assert "skills" in client.get("/v1/skills").json()  # catalog (may be empty)
 
     added = client.post("/v1/memory", json={"content": "prefer pathlib"}).json()

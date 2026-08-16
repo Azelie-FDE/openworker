@@ -11,6 +11,7 @@ export type EventType =
   | "tool_requested"
   | "question_requested"
   | "plan_proposed"
+  | "team_proposed"
   | "tool_started"
   | "tool_finished"
   | "iteration_end"
@@ -83,6 +84,17 @@ export interface SessionInfo {
   // "From Slack" group and the row's platform icon.
   origin?: string;
   origin_label?: string;
+  // Agent teams: {} / absent for plain sessions. Workers carry role/lead_session
+  // (+ a computed current-item line); leads carry role/team_id. Drives the sidebar's
+  // ONE expandable team entry (workers nest under their lead; plain rows never expand).
+  team?: {
+    role?: "lead" | "worker" | string;
+    team_id?: string;
+    lead_session?: string;
+    actor?: string;
+    current_item?: string;
+    status?: string;
+  };
 }
 
 // Attachments (images, PDFs, text files) sent with a user message.
@@ -142,6 +154,14 @@ export type Item =
   | {
       kind: "planreq";
       plan: string;
+      resolved?: "approved" | "rejected";
+    }
+  | {
+      // The staffing gate (agent teams): a lead proposes its worker roster.
+      kind: "teamreq";
+      members: { persona: string; model?: string; reason?: string }[];
+      enable_chat?: boolean;
+      note?: string;
       resolved?: "approved" | "rejected";
     }
   | {

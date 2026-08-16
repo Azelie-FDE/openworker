@@ -2189,6 +2189,14 @@ export class Session {
     });
   }
 
+  respondTeam(approved: boolean, feedback?: string) {
+    this.send({
+      type: "team_response",
+      approved,
+      ...(feedback ? { feedback } : {}),
+    });
+  }
+
   // Answer a live `ask_user` prompt (attended sessions; unattended ones answer via the Inbox).
   respondQuestion(answer: string) {
     this.send({ type: "question_response", answer });

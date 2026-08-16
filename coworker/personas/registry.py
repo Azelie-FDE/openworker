@@ -198,6 +198,10 @@ class PersonaRegistry:
             workspace=m.workspace,
             tools=list(m.tools),
             manifest=m,
+            # Team workers never surface in the picker: they are purpose-built to be
+            # STAFFED by a lead, not started solo (their prompts talk to a lead, not
+            # a human). They stay enabled so the staffing gate can resolve them.
+            default_surfaced=m.team != "worker",
         )
 
     def _load_installed(self) -> None:

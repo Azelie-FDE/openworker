@@ -629,6 +629,20 @@ export async function mockApi(page: import("@playwright/test").Page) {
           });
           return; // suspended on the approval
         }
+        // Agent teams (OPE-97): the staffing gate — the lead proposes a roster and
+        // SUSPENDS until the team_response verdict arrives.
+        if (/staff the team/i.test(msg.text)) {
+          send("team_proposed", {
+            members: [
+              { persona: "swe-worker", model: "anthropic:claude-opus-4-8", reason: "implementation" },
+              { persona: "design-worker", reason: "UI polish" },
+              { persona: "test-worker", reason: "verifies against acceptance criteria" },
+            ],
+            enable_chat: false,
+            note: "Three workers cover the plan; test-worker verifies before anything closes.",
+          });
+          return; // suspended on the staffing decision
+        }
         // Agent teams (OPE-96): a decomposition turn — the plan was approved in
         // conversation (plan-approval flow); the agent files the items and the
         // board rail appears on the next board fetch.
@@ -825,6 +839,55 @@ export async function mockApi(page: import("@playwright/test").Page) {
           send("tool_finished", { name: pendingTool, status: "done", result_preview: "ok" });
           // The decision echoes back so specs can pin what rode the wire (e.g. always_task).
           send("assistant_message", { text: `Done via ${pendingTool} [decision=${msg.decision}]` });
+        }
+        send("turn_done");
+      } else if (msg.type === "team_response") {
+        if (msg.approved) {
+          // Server-side create_team pre-spawned the workers; surface them in the
+          // sessions fixture so the sidebar's expandable entry has children.
+          const lead = sessions.find((s) => s.session_id === "sess-lead") || {
+            session_id: "sess-lead",
+            title: "Build the statements page",
+            workspace: "/Users/test/OpenWorker/launch-note",
+            // The fixture keeps the lead on the default persona so it renders inside
+            // the already-open accordion; the expandable entry is what's under test.
+            agent: "cowork",
+            model: "m",
+            mode: "interactive",
+            updated_at: new Date().toISOString(),
+            messages: 2,
+            team: { role: "lead", team_id: "t1" },
+          };
+          if (!sessions.includes(lead)) sessions.unshift(lead);
+          for (const [actor, status, item] of [
+            ["swe-worker", "in_progress", "#1 in progress"],
+            ["design-worker", "idle", "idle"],
+            ["test-worker", "blocked", "#4 blocked"],
+          ] as const) {
+            sessions.push({
+              session_id: `sess-${actor}`,
+              title: actor,
+              workspace: "/Users/test/OpenWorker/launch-note",
+              agent: actor,
+              model: "m",
+              mode: "interactive",
+              updated_at: new Date().toISOString(),
+              messages: 0,
+              team: {
+                role: "worker",
+                team_id: "t1",
+                lead_session: "sess-lead",
+                actor,
+                status,
+                current_item: item,
+              },
+            });
+          }
+          send("assistant_message", {
+            text: "Team created — swe-worker, design-worker and test-worker are standing by. Assigning items now.",
+          });
+        } else {
+          send("assistant_message", { text: "Understood — tell me how to change the roster." });
         }
         send("turn_done");
       } else if (msg.type === "tool_response") {

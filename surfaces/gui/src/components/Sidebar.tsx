@@ -402,7 +402,12 @@ export function Sidebar(props: Props) {
   // Body data is keyed to the BROWSED persona (only one body renders at a time). Pinned sessions are
   // EXCLUDED here: they live in the cross-persona Pinned band only, so they don't repeat inside the
   // persona group / project list (matching the flat layout's Recent, which also drops pinned).
-  const all = props.sessions.filter((s) => s.agent === browseKey && !s.session_id.startsWith("__"));
+  const all = props.sessions.filter(
+    (s) =>
+      s.agent === browseKey &&
+      !s.session_id.startsWith("__") &&
+      s.team?.role !== "worker", // workers nest under their lead, never top-level
+  );
   const mine = all.filter((s) => !s.archived && !s.pinned);
   const archived = all.filter((s) => s.archived);
   // Only PROJECT-SCOPED personas group sessions by project (git-bound Code, project-bound Ops).
@@ -418,11 +423,31 @@ export function Sidebar(props: Props) {
 
   // Recent = every non-pinned, non-archived, real session across ALL personas, newest first
   // (by updated_at; missing timestamps keep store order), search-filtered. Drives the flat layout.
+  // Team workers never appear top-level: they nest under their lead's ONE expandable entry.
   const recentSessions = [...props.sessions]
     .filter((s) => !s.archived && !s.session_id.startsWith("__") && !s.pinned)
+    .filter((s) => s.team?.role !== "worker")
     .filter((s) => personaVisible(s.agent))
     .filter(matches)
     .sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""));
+
+  // Agent teams (UX-030): lead session id → its worker sessions. The team is ONE
+  // expandable entry in RECENT — plain sessions never expand.
+  const teamWorkers = new Map<string, SessionInfo[]>();
+  for (const s of props.sessions) {
+    if (s.team?.role === "worker" && s.team.lead_session) {
+      const list = teamWorkers.get(s.team.lead_session) || [];
+      list.push(s);
+      teamWorkers.set(s.team.lead_session, list);
+    }
+  }
+  const [teamOpen, setTeamOpen] = useState<Set<string>>(new Set());
+  const toggleTeam = (id: string) =>
+    setTeamOpen((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   // Row actions live behind ONE ⋮ kebab per row (FB-011: four hover icons read as clutter) —
   // the menu offers Rename · Pin/Unpin · Archive/Unarchive · Delete, with the two-step delete
@@ -541,6 +566,19 @@ export function Sidebar(props: Props) {
         }}
         title={editing ? undefined : title}
       >
+        {!editing && !!teamWorkers.get(s.session_id)?.length && (
+          <button
+            className="shrink-0 -ml-1 text-faint hover:text-ink"
+            data-testid={`team-toggle-${s.session_id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleTeam(s.session_id);
+            }}
+            aria-label="Show team"
+          >
+            <Icon name={teamOpen.has(s.session_id) ? "chevronDown" : "chevronRight"} size={12} />
+          </button>
+        )}
         {editing ? (
           <input
             className="flex-1 min-w-0 px-1.5 py-0.5 rounded-md bg-panel border border-accent text-[13px] text-ink outline-none"
@@ -614,7 +652,21 @@ export function Sidebar(props: Props) {
         }}
       >
         {/* No leading glyph on session rows (Rohit's call 2026-07-07: the per-session icon
-            read as noise in both grouped and chronological). */}
+            read as noise in both grouped and chronological) — except a chevron on TEAM
+            leads, whose entry expands to the worker rows. */}
+        {!editing && teamWorkers.has(s.session_id) && (
+          <button
+            className="shrink-0 -ml-1 text-faint hover:text-ink"
+            data-testid={`team-toggle-${s.session_id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleTeam(s.session_id);
+            }}
+            aria-label="Show team"
+          >
+            <Icon name={teamOpen.has(s.session_id) ? "chevronDown" : "chevronRight"} size={12} />
+          </button>
+        )}
         {editing ? (
           <input
             className="flex-1 min-w-0 px-1.5 py-0.5 rounded-md bg-panel border border-accent text-[13px] text-ink outline-none"
@@ -652,6 +704,48 @@ export function Sidebar(props: Props) {
     );
   };
 
+  // A lead's worker rows — status dot + current item. Clicking a worker opens its
+  // session: the user's altitude-3 escape hatch.
+  const teamChildren = (s: SessionInfo) => {
+    const workers = teamWorkers.get(s.session_id) || [];
+    return (
+      <div className="team-child space-y-0.5" data-testid={`team-children-${s.session_id}`}>
+        {workers.map((w) => (
+          <div
+            key={w.session_id}
+            className={
+              "group flex items-center gap-2 px-2 py-1 rounded-lg cursor-pointer text-[12px] " +
+              (w.session_id === props.activeSession ? "bg-ink/[0.055]" : "hover:bg-paper")
+            }
+            onClick={() => props.onSelectSession(w.session_id, w.workspace, w.agent)}
+            title={w.team?.actor}
+          >
+            <span className={"team-dot " + (w.team?.status || "idle")} />
+            <span className="min-w-0 flex-1 truncate text-ink">
+              {w.team?.actor || w.agent}
+              <span className="team-item"> · {w.team?.current_item || "idle"}</span>
+            </span>
+            <LiveDot state={w.liveness} />
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // A row plus (when expanded) its team children — used by BOTH row styles so the
+  // expandable team entry works in the flat AND grouped layouts.
+  const withTeamChildren = (s: SessionInfo, row: ReturnType<typeof cardRow>) => {
+    if (!teamWorkers.get(s.session_id)?.length) return row;
+    return (
+      <div key={`team-${s.session_id}`}>
+        {row}
+        {teamOpen.has(s.session_id) && teamChildren(s)}
+      </div>
+    );
+  };
+
+  const teamAwareRow = (s: SessionInfo) => withTeamChildren(s, cardRow(s));
+
   // The cross-persona Pinned band (manual pins only) — icon-free rows. Appears in BOTH layouts
   // (flat list AND accordion), so it's factored here for reuse.
   const pinnedBand = () =>
@@ -661,7 +755,7 @@ export function Sidebar(props: Props) {
           Pinned
         </div>
         <div className="space-y-0.5">
-          {pinnedSessions.map((s) => cardRow(s))}
+          {pinnedSessions.map((s) => teamAwareRow(s))}
         </div>
       </div>
     ) : null;
@@ -823,7 +917,12 @@ export function Sidebar(props: Props) {
   // persona from New Session, never orphan its conversations).
   const agentsWithSessions = new Set(
     props.sessions
-      .filter((s) => !s.archived && !s.session_id.startsWith("__"))
+      .filter(
+        (s) =>
+          !s.archived &&
+          !s.session_id.startsWith("__") &&
+          s.team?.role !== "worker",
+      )
       .map((s) => s.agent),
   );
   const visibleSurfaces = (
@@ -916,7 +1015,7 @@ export function Sidebar(props: Props) {
                         // pl-[19px] aligns each session's name under the folder NAME (folder icon
                         // 15 + gap 6 + row px 6 − session px 8 = 19), per Rohit's clean-column ask.
                         <div className="space-y-0.5 pl-[19px]">
-                          {shown.map((s) => sessionRow(s, { showTime: true }))}
+                          {shown.map((s) => withTeamChildren(s, sessionRow(s, { showTime: true })))}
                           {!showAll && list.length > peek && (
                             <button
                               className="px-2 py-1 text-[12px] text-faint hover:text-muted"
@@ -947,7 +1046,7 @@ export function Sidebar(props: Props) {
                 {(personaShowAll.has(browseKey)
                   ? mine.filter(matches)
                   : mine.filter(matches).slice(0, peek)
-                ).map((s) => sessionRow(s))}
+                ).map((s) => withTeamChildren(s, sessionRow(s)))}
                 {!personaShowAll.has(browseKey) && mine.filter(matches).length > peek && (
                   <button
                     className="px-2 py-1 text-[12px] text-faint hover:text-muted"
@@ -1106,7 +1205,7 @@ export function Sidebar(props: Props) {
                   {(recentExpanded
                     ? recentSessions
                     : recentSessions.slice(0, RECENT_PEEK)
-                  ).map((s) => cardRow(s))}
+                  ).map((s) => teamAwareRow(s))}
                   {recentSessions.length > RECENT_PEEK && (
                     <button
                       className="w-full text-left px-2 py-1.5 text-[12px] text-muted hover:text-ink"
