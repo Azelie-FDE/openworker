@@ -68,18 +68,20 @@ export function TeamChatView({ teamId, onClose }: { teamId: string; onClose: () 
   const messages = chat?.messages || [];
 
   return (
-    <div className="board-overlay" data-testid="teamchat-view" onClick={onClose}>
-      <div className="board-overlay-panel chat-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="board-overlay-head">
-          <div className="board-overlay-title">
-            <span className="chat-hash">#</span>
-            <span>team chat</span>
-            <span className="board-overlay-space">questions &amp; consensus — status lives on the board</span>
-          </div>
-          <button className="artifact-icon-btn" onClick={onClose} aria-label="Close chat" title="Close">
-            <Icon name="x" size={16} />
-          </button>
+    // Replaces the session view IN PLACE (absolute inside .main, not a modal):
+    // the sidebar stays interactive; back or Esc returns to the session.
+    <div className="chat-view" data-testid="teamchat-view">
+      <div className="chat-view-head">
+        <button className="artifact-icon-btn" onClick={onClose} aria-label="Back to session" title="Back">
+          <Icon name="arrowLeft" size={16} />
+        </button>
+        <div className="board-overlay-title">
+          <span className="chat-hash">#</span>
+          <span>team chat</span>
+          <span className="board-overlay-space">questions &amp; consensus — status lives on the board</span>
         </div>
+      </div>
+      <div className="chat-view-body">
         <div className="chat-scroll">
           {messages.length === 0 && (
             <div className="chat-empty">
@@ -127,3 +129,5 @@ export function TeamChatView({ teamId, onClose }: { teamId: string; onClose: () 
     </div>
   );
 }
+// Note: artifact links in chat (agents referencing reports, click → artifact
+// viewer) are planned — see the Linear follow-up on chat evolution.

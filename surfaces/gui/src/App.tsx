@@ -1772,6 +1772,11 @@ export function App() {
             )}
           </div>
         </div>
+        {/* # team chat replaces the session view in place (owner ask 2026-08-16 —
+            not a modal): the sidebar stays live, Esc/back returns to the session. */}
+        {chatTeam && surface === "session" && (
+          <TeamChatView teamId={chatTeam} onClose={() => setChatTeam(null)} />
+        )}
         <div className={"main-workspace" + (railHidden ? " rail-hidden" : "")}>
           <div className="main-chat">
             {/* Automation-run context (owner ask 2026-07-04): a __run__ session looked like any
@@ -2010,7 +2015,6 @@ export function App() {
           {boardOpen && board && board.space && (
             <BoardOverlay board={board} onClose={() => setBoardOpen(false)} onTransition={moveBoardItem} />
           )}
-          {chatTeam && <TeamChatView teamId={chatTeam} onClose={() => setChatTeam(null)} />}
         </div>
       </div>
       )}
