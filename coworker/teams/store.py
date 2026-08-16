@@ -517,12 +517,23 @@ class TeamStore:
                     f"illegal transition {current.value} → {target.value}"
                 )
             self._check_transition_authority(actor, item, current, target)
+            # Canceling an assigned item ADDRESSES the notice to its assignee — the
+            # top-priority queue entry whose delivery (or in-flight interrupt) makes
+            # the worker actually stop, instead of finishing into the void.
+            recipient = (
+                item["assignee"]
+                if target is ItemState.CANCELED
+                and item["assignee"]
+                and item["assignee"] != actor.id
+                else None
+            )
             event = self.append_event(
                 space,
                 ITEM_TRANSITIONED,
                 actor,
                 item_id=item_id,
                 case_id=item["case_id"] or None,
+                recipient=recipient,
                 payload={
                     "from": current.value,
                     "to": target.value,

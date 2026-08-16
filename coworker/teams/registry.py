@@ -20,10 +20,11 @@ from typing import Optional
 
 @dataclass
 class TeamWorker:
-    actor: str  # board actor id (stable; assignments address this)
+    actor: str  # the lead-given NAME — board actor id, assignee handle, @mention target
     persona: str
     session_id: str
     model: str = ""
+    reason: str = ""  # why the lead staffed it — surfaces in teammates' rosters
 
 
 @dataclass
@@ -34,6 +35,7 @@ class Team:
     lead_actor: str
     workers: list[TeamWorker] = field(default_factory=list)
     chat_enabled: bool = False
+    chat_group: str = ""  # ChatStore group_id when chat is enabled
     paused: bool = False  # budget/user pause: the wake gate skips a paused team
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -76,6 +78,7 @@ class TeamRegistry:
         lead_actor: str,
         workers: list[TeamWorker],
         chat_enabled: bool = False,
+        chat_group: str = "",
     ) -> Team:
         team = Team(
             team_id=uuid.uuid4().hex[:12],
@@ -84,6 +87,7 @@ class TeamRegistry:
             lead_actor=lead_actor,
             workers=workers,
             chat_enabled=chat_enabled,
+            chat_group=chat_group,
         )
         with self._lock:
             self._teams[team.team_id] = team

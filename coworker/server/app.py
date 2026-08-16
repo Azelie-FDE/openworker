@@ -750,6 +750,14 @@ def create_app(manager: SessionManager) -> FastAPI:
             comment=str(body.get("comment", "")),
         )
 
+    @app.get("/v1/teams/{team_id}/chat")
+    def team_chat(team_id: str) -> dict[str, Any]:
+        return manager.team_chat(team_id)
+
+    @app.post("/v1/teams/{team_id}/chat")
+    def team_chat_post(team_id: str, body: dict) -> dict[str, Any]:
+        return manager.post_team_chat(team_id, str((body or {}).get("text", "")))
+
     @app.get("/v1/teams/journal")
     def teams_journal() -> dict[str, Any]:
         return {"cases": manager.journal_overview()}
@@ -1866,10 +1874,17 @@ def create_app(manager: SessionManager) -> FastAPI:
                     "approved": False,
                     "feedback": resp.get("feedback") or "the user declined this roster",
                 }
+            # The gate checkbox is the USER's call: an explicit enable_chat in the
+            # response overrides whatever the lead proposed.
+            enable_chat = bool(
+                resp["enable_chat"]
+                if "enable_chat" in resp
+                else _args.get("enable_chat", False)
+            )
             return manager.create_team(
                 session_id,
                 [m for m in members if isinstance(m, dict)],
-                enable_chat=bool(_args.get("enable_chat", False)),
+                enable_chat=enable_chat,
             )
 
         async def items_approver(_args: dict, tool_call_id=None) -> dict:
@@ -2100,6 +2115,11 @@ def create_app(manager: SessionManager) -> FastAPI:
                             {
                                 "approved": bool(message.get("approved")),
                                 "feedback": message.get("feedback", ""),
+                                **(
+                                    {"enable_chat": bool(message.get("enable_chat"))}
+                                    if "enable_chat" in message
+                                    else {}
+                                ),
                             }
                         )
                     )

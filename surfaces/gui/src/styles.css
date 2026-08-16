@@ -1748,3 +1748,31 @@ html[data-platform="linux"] ::-webkit-scrollbar-thumb:hover { background-color: 
 .itemsreq-ac b { font-weight: 600; }
 .itemsreq-more { display: flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--accent); font-size: 12px; cursor: pointer; padding: 6px 0; }
 .itemsreq-grant { font-size: 11.5px; color: var(--faint); }
+
+/* # team chat */
+.teamreq-name { color: var(--ink); font-weight: 600; }
+.teamreq-chat { display: flex; align-items: center; gap: 8px; padding: 9px 0 2px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink); cursor: pointer; }
+.teamreq-info { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--faint); font-size: 9px; cursor: help; }
+.chat-panel { max-width: 860px; }
+.chat-hash { color: var(--faint); font-weight: 700; }
+.chat-scroll { flex: 1; overflow: auto; padding: 14px 18px; display: flex; flex-direction: column; }
+.chat-empty { color: var(--faint); font-size: 12.5px; margin: auto; max-width: 420px; text-align: center; }
+.chat-msg { margin-top: 12px; }
+.chat-msg.grouped { margin-top: 2px; padding-left: 34px; }
+.chat-who { display: flex; align-items: baseline; gap: 8px; }
+.chat-avatar { width: 26px; height: 26px; border-radius: 7px; background: var(--paper); border: 1px solid var(--line-strong); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; align-self: center; }
+.chat-avatar.lead { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.chat-avatar.user { background: var(--ok-soft); border-color: var(--ok-line); color: var(--ok); }
+.chat-name { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.chat-role { font-size: 11px; color: var(--faint); }
+.chat-ts { font-size: 10.5px; color: var(--faint); }
+.chat-text { font-size: 13px; color: var(--ink); margin-top: 1px; padding-left: 34px; }
+.chat-msg.grouped .chat-text { padding-left: 0; }
+.chat-mention { color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 0 3px; }
+.chat-composer { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.chat-input { flex: 1; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font-size: 13px; background: var(--paper); color: var(--ink); outline: none; }
+.chat-input:focus { border-color: var(--accent); }
+
+/* Sidebar chat row */
+.team-hash { color: var(--faint); font-weight: 700; font-size: 12px; width: 10px; text-align: center; }
+.team-chat-badge { margin-left: auto; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; border-radius: 8px; padding: 0 6px; }

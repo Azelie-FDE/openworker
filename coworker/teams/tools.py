@@ -227,9 +227,11 @@ _PROPOSE_TEAM_SCHEMA = {
     "function": {
         "name": "propose_team",
         "description": (
-            "Propose the worker coworkers you need for this board. The user sees the"
-            " roster and approves it; approval creates the worker sessions and"
-            " returns their actor ids so you can assign work items to them. Only"
+            "Propose the worker coworkers you need for this board. Give EACH member"
+            " a short unique callname (`name`, e.g. 'nia', 'webb', 'checks') — it"
+            " becomes their handle for assignment and @mentions, and lets you staff"
+            " two of the same coworker. The user sees the roster and approves it;"
+            " approval creates the worker sessions and returns the handles. Only"
             " team-capable worker coworkers may be proposed."
         ),
         "parameters": {
@@ -241,10 +243,11 @@ _PROPOSE_TEAM_SCHEMA = {
                         "type": "object",
                         "properties": {
                             "persona": {"type": "string"},
+                            "name": {"type": "string"},
                             "model": {"type": "string"},
                             "reason": {"type": "string"},
                         },
-                        "required": ["persona"],
+                        "required": ["persona", "name"],
                     },
                 },
                 "enable_chat": {"type": "boolean"},

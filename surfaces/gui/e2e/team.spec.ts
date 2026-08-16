@@ -41,16 +41,58 @@ test("declining the split returns feedback to the lead", async ({ page }) => {
   await expect(page.getByText(/reworking the split/)).toBeVisible();
 });
 
-test("the staffing gate shows the roster and the grant sentence", async ({ page }) => {
+test("the staffing gate shows named workers, the chat toggle, and the grant sentence", async ({
+  page,
+}) => {
   await proposeTeam(page);
   const card = page.getByTestId("teamreq-card");
   await expect(card).toContainText("Proposed team — 3 workers");
+  // callnames lead the rows; persona + reason follow
+  await expect(card).toContainText("nia");
   await expect(card).toContainText("swe-worker");
   await expect(card).toContainText("implementation");
-  await expect(card).toContainText("test-worker");
+  await expect(card).toContainText("checks");
+  // the chat checkbox defaults OFF — the user's call, not the lead's
+  await expect(card.getByTestId("teamreq-chat-toggle")).not.toBeChecked();
   await expect(card).toContainText(
     "Approving grants the lead create, assign & steer — this team only, revocable.",
   );
+});
+
+test("enabling chat at the gate adds the # team chat row; posting works with mentions", async ({
+  page,
+}) => {
+  await proposeTeam(page);
+  await page.getByTestId("teamreq-chat-toggle").check();
+  await page.getByTestId("teamreq-approve").click();
+  await expect(page.getByText(/Team created/)).toBeVisible();
+
+  await page.getByTestId("team-toggle-sess-lead").click();
+  const chatRow = page.getByTestId("team-chat-row-sess-lead");
+  await expect(chatRow).toBeVisible();
+  await expect(chatRow).toContainText("1"); // unread badge
+
+  await chatRow.click();
+  const view = page.getByTestId("teamchat-view");
+  await expect(view).toBeVisible();
+  await expect(view).toContainText("assets bucket is public");
+  await expect(view.locator(".chat-mention").first()).toHaveText("@nia");
+
+  await page.getByTestId("chat-input").fill("ship it current-month only @lead");
+  await page.getByTestId("chat-send").click();
+  await expect(view).toContainText("ship it current-month only");
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("teamchat-view")).toHaveCount(0);
+});
+
+test("with chat declined at the gate, no chat row renders", async ({ page }) => {
+  await proposeTeam(page);
+  await page.getByTestId("teamreq-approve").click();
+  await expect(page.getByText(/Team created/)).toBeVisible();
+  await page.getByTestId("team-toggle-sess-lead").click();
+  await expect(page.getByTestId("team-children-sess-lead")).toBeVisible();
+  await expect(page.getByTestId("team-chat-row-sess-lead")).toHaveCount(0);
 });
 
 test("declining the roster returns the turn to the lead", async ({ page }) => {
@@ -76,9 +118,9 @@ test("approval creates the team; workers nest under the lead's expandable entry"
   await page.getByTestId("team-toggle-sess-lead").click();
   const children = page.getByTestId("team-children-sess-lead");
   await expect(children).toBeVisible();
-  await expect(children).toContainText("swe-worker · #1 in progress");
-  await expect(children).toContainText("design-worker · idle");
-  await expect(children).toContainText("test-worker · #4 blocked");
+  await expect(children).toContainText("nia · #1 in progress");
+  await expect(children).toContainText("webb · idle");
+  await expect(children).toContainText("checks · #4 blocked");
 
   // Collapse hides them again — the team is one entry, not a panel.
   await page.getByTestId("team-toggle-sess-lead").click();

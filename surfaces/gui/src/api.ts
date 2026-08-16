@@ -253,6 +253,36 @@ export async function boardTransition(
   return res.json();
 }
 
+export interface ChatMessage {
+  seq: number;
+  ts: string;
+  author: string;
+  author_role: "user" | "lead" | "worker" | string;
+  text: string;
+  mentions: string[];
+}
+
+export interface TeamChat {
+  enabled: boolean;
+  team_id?: string;
+  members: { name: string; persona: string; role: string }[];
+  messages: ChatMessage[];
+}
+
+export async function getTeamChat(teamId: string): Promise<TeamChat> {
+  const res = await fetch(`${httpBase()}/v1/teams/${encodeURIComponent(teamId)}/chat`);
+  return res.json();
+}
+
+export async function postTeamChat(teamId: string, text: string): Promise<ChatMessage | { error: string }> {
+  const res = await fetch(`${httpBase()}/v1/teams/${encodeURIComponent(teamId)}/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  return res.json();
+}
+
 export async function getJournalCases(): Promise<JournalCase[]> {
   const res = await fetch(`${httpBase()}/v1/teams/journal`);
   return (await res.json()).cases ?? [];
@@ -2189,11 +2219,12 @@ export class Session {
     });
   }
 
-  respondTeam(approved: boolean, feedback?: string) {
+  respondTeam(approved: boolean, feedback?: string, enableChat?: boolean) {
     this.send({
       type: "team_response",
       approved,
       ...(feedback ? { feedback } : {}),
+      ...(enableChat !== undefined ? { enable_chat: enableChat } : {}),
     });
   }
 

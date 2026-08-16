@@ -87,6 +87,7 @@ from ..teams import Actor as TeamActor
 from ..teams import BoardError as TeamsBoardError
 from ..teams import JournalStore, Role as TeamRole, TeamStore, board_tools, journal_tools
 from ..teams.model import space_for_workspace
+from ..teams.chat import ChatStore
 from ..teams.registry import TeamRegistry, TeamWorker
 from ..skills import (
     SessionSkillStore,
@@ -209,6 +210,7 @@ class SessionManager:
         # sessions per board) that the wake plumbing walks.
         self.journal_store = JournalStore(base / "journal.db")
         self.team_store = TeamStore(base / "teams.db", journal=self.journal_store)
+        self.chat_store = ChatStore(base / "chat.db")
         self.teams = TeamRegistry(base / "teams.json")
         self._team_inflight: set[str] = set()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -1467,6 +1469,38 @@ class SessionManager:
             "note": "items created on the board — staff and assign to start work",
         }
 
+    def team_chat(self, team_id: str, *, mark_read: bool = True) -> dict[str, Any]:
+        """The chat view's payload. Viewing IS reading for the user: the badge
+        cursor advances on fetch."""
+        team = self.teams.get(team_id)
+        if team is None or not team.chat_enabled or not team.chat_group:
+            return {"enabled": False, "messages": [], "members": []}
+        group = self.chat_store.get_group(team.chat_group) or {"members": []}
+        messages = self.chat_store.messages(team.chat_group)
+        if mark_read and messages:
+            self.chat_store.consume(team.chat_group, "user", messages[-1]["seq"])
+        return {
+            "enabled": True,
+            "team_id": team_id,
+            "members": group["members"],
+            "messages": messages,
+        }
+
+    def post_team_chat(self, team_id: str, text: str) -> dict[str, Any]:
+        team = self.teams.get(team_id)
+        if team is None or not team.chat_enabled or not team.chat_group:
+            return {"error": "chat is not enabled for this team"}
+        try:
+            message = self.chat_store.post(
+                team.chat_group, "user", text, author_role="user"
+            )
+        except (TeamsBoardError, ValueError) as error:
+            return {"error": str(error)}
+        # A user post wakes every member — kick the drain rather than waiting a tick.
+        if self._loop is not None:
+            asyncio.run_coroutine_threadsafe(self.team_tick(), self._loop)
+        return message
+
     def journal_overview(self) -> list[dict[str, Any]]:
         return self.journal_store.overview(self._user_actor())
 
@@ -1507,7 +1541,81 @@ class SessionManager:
         if role == "lead":
             tools.append(self._steer_tool(session_id))
             tools.append(self._team_options_tool())
+        # post_chat registers for every team persona; it resolves the group at call
+        # time (the team may not exist yet at engine build) and fails gracefully
+        # when chat is off.
+        tools.append(self._post_chat_tool(session_id, role))
         return tools
+
+    def _post_chat_tool(self, session_id: str, role: str) -> Any:
+        import aisuite as ai
+
+        manager = self
+
+        def post_chat(text: str, record_on_item: Optional[int] = None) -> dict:
+            """Post to # team chat. Mention teammates with @name to reach them —
+            only mentioned members are woken (the user always sees it). Chat is for
+            questions and consensus; status lives on the board. If your message
+            answers something that matters, pass record_on_item to also record it
+            as a comment on that work item."""
+            team, handle, actor = manager._chat_identity(session_id, role)
+            if team is None:
+                return {"error": "this session is not part of a team"}
+            if not team.chat_enabled or not team.chat_group:
+                return {"error": "team chat is not enabled for this team"}
+            try:
+                message = manager.chat_store.post(
+                    team.chat_group, handle, text, author_role=role
+                )
+            except (TeamsBoardError, ValueError) as error:
+                return {"error": str(error)}
+            result: dict[str, Any] = {
+                "ok": True,
+                "mentioned": message["mentions"],
+            }
+            if record_on_item is not None and actor is not None:
+                try:
+                    manager.team_store.comment(
+                        team.space, actor, int(record_on_item), text
+                    )
+                    result["recorded_on"] = int(record_on_item)
+                except (TeamsBoardError, ValueError) as error:
+                    result["record_error"] = str(error)
+            return result
+
+        return ai.tool(
+            post_chat,
+            metadata=ai.ToolMetadata(
+                category="team", risk_level="low", capabilities=["team"]
+            ),
+        )
+
+    def _chat_identity(self, session_id: str, role: str):
+        """(team, chat handle, board actor) for a team session — the lead's chat
+        handle is "lead"; a worker's handle IS its board actor (the callname)."""
+        if role == "lead":
+            team = self.teams.for_lead_session(session_id)
+            if team is None:
+                return None, "", None
+            record = self.session_store.load(session_id)
+            actor = TeamActor(
+                id=team.lead_actor,
+                role=TeamRole.LEAD,
+                persona=record.agent if record else "",
+                session_id=session_id,
+            )
+            return team, "lead", actor
+        found = self.teams.for_worker_session(session_id)
+        if found is None:
+            return None, "", None
+        team, worker = found
+        actor = TeamActor(
+            id=worker.actor,
+            role=TeamRole.WORKER,
+            persona=worker.persona,
+            session_id=session_id,
+        )
+        return team, worker.actor, actor
 
     def _team_options_tool(self) -> Any:
         """Registry-injected staffing knowledge: the lead's options come from the
@@ -1599,7 +1707,7 @@ class SessionManager:
             return {"approved": False, "error": "this session already leads a team"}
         space = space_for_workspace(record.workspace)
         workers: list[TeamWorker] = []
-        used: set[str] = set()
+        used: set[str] = {"lead", "user", "board"}  # reserved handles
         for member in members:
             pid = str((member or {}).get("persona", "")).strip()
             try:
@@ -1616,9 +1724,17 @@ class SessionManager:
                     "approved": False,
                     "error": f"'{pid}' is not team-capable (needs `team: worker`)",
                 }
-            actor, n = pid, 2
+            # The lead-given callname is the HANDLE: board assignee, @mention target,
+            # sidebar label. It must be mention-safe and unique on the team.
+            name = str(member.get("name", "")).strip().lower()
+            if name and not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,23}", name):
+                return {
+                    "approved": False,
+                    "error": f"'{name}' isn't a usable callname — letters/digits/._- only, max 24",
+                }
+            actor, n = name or pid, 2
             while actor in used:
-                actor, n = f"{pid}-{n}", n + 1
+                actor, n = f"{name or pid}-{n}", n + 1
             used.add(actor)
             worker_sid = uuid.uuid4().hex[:12]
             model = str(member.get("model") or record.model)
@@ -1645,14 +1761,34 @@ class SessionManager:
                 },
             )
             workers.append(
-                TeamWorker(actor=actor, persona=pid, session_id=worker_sid, model=model)
+                TeamWorker(
+                    actor=actor,
+                    persona=pid,
+                    session_id=worker_sid,
+                    model=model,
+                    reason=str(member.get("reason", "")).strip(),
+                )
             )
+        chat_group = ""
+        if enable_chat:
+            group = self.chat_store.create_group(
+                "team chat",
+                [
+                    *(
+                        {"name": w.actor, "persona": w.persona, "role": "worker"}
+                        for w in workers
+                    ),
+                    {"name": "lead", "persona": record.agent, "role": "lead"},
+                ],
+            )
+            chat_group = group["group_id"]
         team = self.teams.create(
             space=space,
             lead_session=session_id,
             lead_actor=f"{record.agent}:{session_id[:8]}",
             workers=workers,
             chat_enabled=enable_chat,
+            chat_group=chat_group,
         )
         for worker in workers:
             self.session_store.set_team(
@@ -1719,14 +1855,32 @@ class SessionManager:
         subs = (
             self.team_store.subscribed_events(team.space, actor) if is_lead else []
         )
-        if not directs and not subs:
+        chat_handle = "lead" if is_lead else actor
+        chats = (
+            self.chat_store.unread_for(team.chat_group, chat_handle)
+            if team.chat_enabled and team.chat_group
+            else []
+        )
+        # Cancel is top-priority: an in-flight worker gets interrupted NOW; the
+        # queued notice (delivered when the turn dies) tells it why.
+        cancels = [
+            e
+            for e in directs
+            if e["kind"] == "item_transitioned"
+            and (e.get("payload") or {}).get("to") == "canceled"
+        ]
+        if cancels and self.is_running(session_id):
+            engine = self._engines.get(session_id)
+            if engine is not None:
+                engine.request_interrupt()
+        if not directs and not subs and not chats:
             return 0
         if self.is_running(session_id) or session_id in self._team_inflight:
             return 0  # it will drain on its next turn end / next tick
         if not self.teams.count_wake(team.team_id, cap=self.TEAM_WAKE_CAP_PER_HOUR):
             logger.warning("team %s paused for budget this hour", team.team_id)
             return 0
-        message = self._team_digest(team, directs, subs, is_lead=is_lead)
+        message = self._team_digest(team, directs, subs, chats, is_lead=is_lead)
         self._team_inflight.add(session_id)
         source = self._board_source(team, message)
 
@@ -1741,6 +1895,10 @@ class SessionManager:
                     self.team_store.consume_subscription(
                         team.space, actor, subs[-1]["seq"]
                     )
+                if chats:
+                    self.chat_store.consume(
+                        team.chat_group, chat_handle, chats[-1]["seq"]
+                    )
             finally:
                 self._team_inflight.discard(session_id)
 
@@ -1748,7 +1906,13 @@ class SessionManager:
         return 1
 
     def _team_digest(
-        self, team, directs: list[dict], subs: list[dict], *, is_lead: bool
+        self,
+        team,
+        directs: list[dict],
+        subs: list[dict],
+        chats: Optional[list[dict]] = None,
+        *,
+        is_lead: bool,
     ) -> str:
         """Coalesce one queue batch into one wake message. Deterministic, computed
         by code — the model does judgment, not arithmetic."""
@@ -1774,13 +1938,22 @@ class SessionManager:
             elif event["kind"] == "item_transitioned":
                 to = payload.get("to", "?")
                 note = f" — “{payload.get('comment')}”" if payload.get("comment") else ""
-                lines.append(f"{title} moved to {to} by {event['actor']}{note}")
+                if to == "canceled" and not is_lead:
+                    lines.append(
+                        f"{title} was CANCELED by {event['actor']}{note} — stop any"
+                        " work on it and pick up your other assignments."
+                    )
+                else:
+                    lines.append(f"{title} moved to {to} by {event['actor']}{note}")
             elif event["kind"] == "item_created":
                 lines.append(f"New item filed by {event['actor']}: {title}")
             elif event["kind"] == "item_commented":
                 lines.append(
                     f"Comment on {title} by {event['actor']}: {payload.get('body', '')}"
                 )
+        for chat in chats or []:
+            who = chat["author"] if chat["author_role"] != "user" else "[User]"
+            lines.append(f"# team chat — {who}: {chat['text']}")
         body = "\n".join(f"- {line}" for line in lines) or "- (no detail)"
         if is_lead:
             return (
@@ -1793,10 +1966,29 @@ class SessionManager:
         return (
             "[Lead] Board update:\n"
             + body
+            + self._roster_note(team)
             + "\n\nMove your item to in_progress when you start; blocked (with a"
             " comment) if stuck; review with a hand-off comment when finished."
             " Journal evidence as you go."
         )
+
+    @staticmethod
+    def _roster_note(team) -> str:
+        """Teammate awareness as a mechanism: every worker digest carries the
+        roster, so tagging teammates never depends on the lead remembering to
+        introduce them."""
+        if not team.workers:
+            return ""
+        mates = "; ".join(
+            f"{w.actor} ({w.persona}" + (f" — {w.reason})" if w.reason else ")")
+            for w in team.workers
+        )
+        reach = (
+            " Reach them or the lead with @name in # team chat (post_chat)."
+            if team.chat_enabled
+            else " Coordinate through item comments; the lead reads the board."
+        )
+        return f"\n\nYour team: {mates}; lead (coordinator).{reach}"
 
     @staticmethod
     def _board_source(team, message: str) -> dict[str, Any]:
@@ -4464,6 +4656,13 @@ class SessionManager:
             "team_id": info.get("team_id", ""),
             "lead_session": info.get("lead_session", ""),
         }
+        if info.get("role") == "lead":
+            team = self.teams.get(str(info.get("team_id", "")))
+            if team is not None and team.chat_enabled and team.chat_group:
+                row["chat_enabled"] = True
+                row["chat_unread"] = self.chat_store.unread_count(
+                    team.chat_group, "user"
+                )
         if info.get("role") == "worker" and info.get("space") and info.get("actor"):
             try:
                 items = self.team_store.list_items(

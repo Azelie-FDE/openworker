@@ -95,6 +95,8 @@ export interface SessionInfo {
     actor?: string;
     current_item?: string;
     status?: string;
+    chat_enabled?: boolean;
+    chat_unread?: number;
   };
 }
 
@@ -160,7 +162,7 @@ export type Item =
   | {
       // The staffing gate (agent teams): a lead proposes its worker roster.
       kind: "teamreq";
-      members: { persona: string; model?: string; reason?: string }[];
+      members: { persona: string; name?: string; model?: string; reason?: string }[];
       enable_chat?: boolean;
       note?: string;
       resolved?: "approved" | "rejected";

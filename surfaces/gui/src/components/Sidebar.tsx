@@ -121,6 +121,8 @@ interface Props {
   onSwitchAgent: (agent: string) => void;
   onNewSession: (agent: string) => void;
   onSelectSession: (id: string, workspace: string, agent: string) => void;
+  // Agent teams: opens the team's # team chat view (the row under the expandable entry).
+  onOpenTeamChat?: (teamId: string) => void;
   onNewProject: (persona: string) => void;
   onRenameSession: (id: string, title: string) => void;
   onDeleteSession: (id: string) => void;
@@ -728,6 +730,19 @@ export function Sidebar(props: Props) {
             <LiveDot state={w.liveness} />
           </div>
         ))}
+        {s.team?.chat_enabled && props.onOpenTeamChat && (
+          <div
+            className="group flex items-center gap-2 px-2 py-1 rounded-lg cursor-pointer text-[12px] hover:bg-paper"
+            data-testid={`team-chat-row-${s.session_id}`}
+            onClick={() => props.onOpenTeamChat?.(s.team?.team_id || "")}
+          >
+            <span className="team-hash">#</span>
+            <span className="min-w-0 flex-1 truncate text-ink">team chat</span>
+            {(s.team?.chat_unread || 0) > 0 && (
+              <span className="team-chat-badge">{s.team?.chat_unread}</span>
+            )}
+          </div>
+        )}
       </div>
     );
   };

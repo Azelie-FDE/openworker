@@ -78,6 +78,7 @@ import { PlanCard } from "./components/PlanCard";
 import { BoardOverlay } from "./components/BoardPanel";
 import { TeamRequestCard } from "./components/TeamRequestCard";
 import { WorkItemsCard } from "./components/WorkItemsCard";
+import { TeamChatView } from "./components/TeamChatView";
 import { WorkspaceTrustPrompt } from "./components/WorkspaceTrustPrompt";
 
 const newId = () =>
@@ -276,6 +277,8 @@ export function App() {
   // Agent teams (OPE-96): board for the current session's workspace space.
   const [board, setBoard] = useState<Board | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
+  // # team chat overlay — opened from the team entry's chat row.
+  const [chatTeam, setChatTeam] = useState<string | null>(null);
   const [railHidden, setRailHidden] = useState(false);
   // Left-nav collapse (⌘B): when collapsed the sidebar leaves the grid so content reclaims the
   // width; hovering the left edge peeks it back as a floating overlay. Persisted per-device.
@@ -1043,10 +1046,10 @@ export function App() {
     sessionRef.current?.respondPlan(approved, mode, feedback);
     if (approved && mode) setMode(mode); // the server flips the live engine to this mode
   };
-  const respondTeam = (approved: boolean, feedback?: string) => {
+  const respondTeam = (approved: boolean, feedback?: string, enableChat?: boolean) => {
     setItems((p) => resolveLastTeam(p, approved ? "approved" : "rejected"));
     dropSessionInbox("plan"); // the gate parks as a plan-kind Inbox item
-    sessionRef.current?.respondTeam(approved, feedback);
+    sessionRef.current?.respondTeam(approved, feedback, enableChat);
   };
   const respondItemsReq = (approved: boolean, feedback?: string) => {
     setItems((p) => resolveLastItemsReq(p, approved ? "approved" : "rejected"));
@@ -1599,6 +1602,7 @@ export function App() {
         sessions={sessions}
         projects={projects}
         activeSession={sessionId}
+        onOpenTeamChat={(teamId) => setChatTeam(teamId)}
         onSwitchAgent={switchAgent}
         onNewSession={startNewSession}
         onSelectSession={selectSession}
@@ -2006,6 +2010,7 @@ export function App() {
           {boardOpen && board && board.space && (
             <BoardOverlay board={board} onClose={() => setBoardOpen(false)} onTransition={moveBoardItem} />
           )}
+          {chatTeam && <TeamChatView teamId={chatTeam} onClose={() => setChatTeam(null)} />}
         </div>
       </div>
       )}

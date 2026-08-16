@@ -266,3 +266,83 @@ def test_turn_saves_never_detach_a_worker_from_its_team(manager, monkeypatch):
     )
     assert manager.session_store.load(wid).team["lead_session"] == "lead-sid"
     assert manager.session_store.load("lead-sid").team["role"] == "lead"
+
+
+# ------------------------------------------------------------------- chat (OPE-99)
+
+def test_chat_groups_mentions_and_wake_reads(tmp_path):
+    from coworker.teams.chat import ChatStore
+
+    chat = ChatStore(tmp_path / "chat.db")
+    group = chat.create_group(
+        "team chat",
+        [
+            {"name": "nia", "persona": "swe-worker", "role": "worker"},
+            {"name": "webb", "persona": "design-worker", "role": "worker"},
+            {"name": "lead", "persona": "swe-lead", "role": "lead"},
+        ],
+    )
+    gid = group["group_id"]
+    # mention parsing against member handles; unknown handles ignored
+    message = chat.post(gid, "lead", "does the api assume public logos? @nia @nobody")
+    assert message["mentions"] == ["nia"]
+    # mention-only wakes: nia woken, webb not; authors never wake themselves
+    assert [m["seq"] for m in chat.unread_for(gid, "nia")] == [message["seq"]]
+    assert chat.unread_for(gid, "webb") == []
+    assert chat.unread_for(gid, "lead") == []
+    chat.consume(gid, "nia", message["seq"])
+    assert chat.unread_for(gid, "nia") == []
+    # a USER post wakes every member
+    chat.post(gid, "user", "ship it current-month only", author_role="user")
+    assert len(chat.unread_for(gid, "nia")) == 1
+    assert len(chat.unread_for(gid, "webb")) == 1
+    assert len(chat.unread_for(gid, "lead")) == 1
+    # badge count for the user (its own posts excluded)
+    assert chat.unread_count(gid, "user") == 1
+
+
+def test_create_team_uses_callnames_and_creates_the_chat_group(manager, monkeypatch):
+    from coworker.agents.base import Agent
+    from coworker.sessions import SessionRecord
+
+    worker_agent = Agent(name="swe-worker", title="SWE", system_prompt="p", team="worker")
+    monkeypatch.setattr("coworker.server.manager.get_agent", lambda name: worker_agent)
+    manager.session_store.save(
+        SessionRecord(
+            session_id="lead-sid",
+            workspace=manager.default_workspace,
+            model="m",
+            mode="interactive",
+            messages=[],
+            agent="swe-lead",
+        )
+    )
+    bad = manager.create_team("lead-sid", [{"persona": "swe-worker", "name": "no spaces!"}])
+    assert bad["approved"] is False and "callname" in bad["error"]
+    result = manager.create_team(
+        "lead-sid",
+        [
+            {"persona": "swe-worker", "name": "nia", "reason": "implementation"},
+            {"persona": "swe-worker", "name": "nia"},  # dupe → suffixed
+        ],
+        enable_chat=True,
+    )
+    assert [w["actor"] for w in result["workers"]] == ["nia", "nia-2"]
+    team = manager.teams.for_lead_session("lead-sid")
+    assert team.chat_enabled and team.chat_group
+    group = manager.chat_store.get_group(team.chat_group)
+    assert {m["name"] for m in group["members"]} == {"nia", "nia-2", "lead"}
+    # the worker digest carries the roster + how to reach teammates
+    digest = manager._team_digest(team, [], [], is_lead=False)
+    assert "Your team: nia (swe-worker — implementation)" in digest
+    assert "@name in # team chat" in digest
+
+
+def test_cancel_notice_is_addressed_to_the_assignee(store):
+    item_id = assigned(store)
+    store.consume("swe-worker", store.pending_for("swe-worker")[-1]["seq"])
+    store.transition(SPACE, LEAD, item_id, "canceled", comment="scope cut")
+    pending = store.pending_for("swe-worker")
+    assert len(pending) == 1
+    assert pending[0]["kind"] == "item_transitioned"
+    assert pending[0]["payload"]["to"] == "canceled"

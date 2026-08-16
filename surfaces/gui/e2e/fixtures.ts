@@ -565,6 +565,17 @@ export async function mockApi(page: import("@playwright/test").Page) {
   // "plan the work" (the fake agent then files items; no draft state — the board only
   // holds accepted work). Mutable so transitions round-trip through the real endpoints.
   const boardItems: any[] = [];
+  // # team chat log — seeded with one lead question so mention highlighting renders.
+  const chatMessages: any[] = [
+    {
+      seq: 1,
+      ts: new Date().toISOString(),
+      author: "lead",
+      author_role: "lead",
+      text: "@nia does the api assume the assets bucket is public? quick check before you write it up.",
+      mentions: ["nia"],
+    },
+  ];
   const seedBoard = () => {
     if (boardItems.length) return;
     boardItems.push(
@@ -648,12 +659,12 @@ export async function mockApi(page: import("@playwright/test").Page) {
         if (/staff the team/i.test(msg.text)) {
           send("team_proposed", {
             members: [
-              { persona: "swe-worker", model: "anthropic:claude-opus-4-8", reason: "implementation" },
-              { persona: "design-worker", reason: "UI polish" },
-              { persona: "test-worker", reason: "verifies against acceptance criteria" },
+              { persona: "swe-worker", name: "nia", model: "anthropic:claude-opus-4-8", reason: "implementation" },
+              { persona: "design-worker", name: "webb", reason: "UI polish" },
+              { persona: "test-worker", name: "checks", reason: "verifies against acceptance criteria" },
             ],
             enable_chat: false,
-            note: "Three workers cover the plan; test-worker verifies before anything closes.",
+            note: "Three workers cover the plan; checks verifies before anything closes.",
           });
           return; // suspended on the staffing decision
         }
@@ -883,16 +894,22 @@ export async function mockApi(page: import("@playwright/test").Page) {
             team: { role: "lead", team_id: "t1" },
           };
           if (!sessions.includes(lead)) sessions.unshift(lead);
-          for (const [actor, status, item] of [
-            ["swe-worker", "in_progress", "#1 in progress"],
-            ["design-worker", "idle", "idle"],
-            ["test-worker", "blocked", "#4 blocked"],
+          lead.team = {
+            role: "lead",
+            team_id: "t1",
+            chat_enabled: !!msg.enable_chat,
+            chat_unread: msg.enable_chat ? 1 : 0,
+          };
+          for (const [actor, persona, status, item] of [
+            ["nia", "swe-worker", "in_progress", "#1 in progress"],
+            ["webb", "design-worker", "idle", "idle"],
+            ["checks", "test-worker", "blocked", "#4 blocked"],
           ] as const) {
             sessions.push({
               session_id: `sess-${actor}`,
               title: actor,
               workspace: "/Users/test/OpenWorker/launch-note",
-              agent: actor,
+              agent: persona,
               model: "m",
               mode: "interactive",
               updated_at: new Date().toISOString(),
@@ -908,7 +925,7 @@ export async function mockApi(page: import("@playwright/test").Page) {
             });
           }
           send("assistant_message", {
-            text: "Team created — swe-worker, design-worker and test-worker are standing by. Assigning items now.",
+            text: "Team created — nia, webb and checks are standing by. Assigning items now.",
           });
         } else {
           send("assistant_message", { text: "Understood — tell me how to change the roster." });
@@ -1019,6 +1036,34 @@ export async function mockApi(page: import("@playwright/test").Page) {
       return json(item);
     }
     if (/\/v1\/sessions\/[^/]+\/board$/.test(p)) return json(boardPayload());
+    // # team chat (OPE-99): one group, message log, user posts append.
+    if (/\/v1\/teams\/[^/]+\/chat$/.test(p)) {
+      if (m === "POST") {
+        const b = req.postDataJSON() || {};
+        chatMessages.push({
+          seq: chatMessages.length + 1,
+          ts: new Date().toISOString(),
+          author: "user",
+          author_role: "user",
+          text: String(b.text || ""),
+          mentions: ["nia", "webb", "checks", "lead"].filter((h) =>
+            String(b.text || "").includes(`@${h}`),
+          ),
+        });
+        return json(chatMessages[chatMessages.length - 1]);
+      }
+      return json({
+        enabled: true,
+        team_id: "t1",
+        members: [
+          { name: "nia", persona: "swe-worker", role: "worker" },
+          { name: "webb", persona: "design-worker", role: "worker" },
+          { name: "checks", persona: "test-worker", role: "worker" },
+          { name: "lead", persona: "swe-lead", role: "lead" },
+        ],
+        messages: chatMessages,
+      });
+    }
     if (p.endsWith("/v1/teams/journal")) {
       return json({
         cases: boardItems.length

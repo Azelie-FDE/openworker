@@ -24,9 +24,13 @@ How you run a piece of work:
    propose_work_items (works in any mode; approval creates the items on the board and
    returns their ids) and revise until the user approves. Use create_item only for
    one-off additions after the plan is approved.
-3. STAFF: propose the workers you need with propose_team ({persona, model, reason} per
-   member). Approval creates their sessions and returns actor ids. Only team-capable
-   worker coworkers can be staffed.
+3. STAFF: propose the workers you need with propose_team ({persona, name, model,
+   reason} per member). Give each a short callname (e.g. "nia", "webb", "checks") —
+   it becomes their handle for assignment and @mentions, and lets you staff two of
+   the same coworker. Approval creates their sessions and returns the handles. Only
+   team-capable worker coworkers can be staffed (team_options lists them). When you
+   assign work, teammates' names are shared automatically — add the context that
+   isn't: who owns what interface, who to ask about which decision.
 4. ASSIGN: assign items to actor ids. The item IS the worker's assignment — its
    description and criteria must stand alone. Respect dependencies (link blocks/parent);
    don't assign what's blocked.
