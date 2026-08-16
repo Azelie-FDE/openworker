@@ -1,6 +1,8 @@
-"""Agent teams substrate: one append-only event store; the board, journal, and
-per-agent deliveries are projections of it."""
+"""Agent teams substrate. Two append-only stores, one record discipline:
+the board log (space-scoped — a board lives and dies with its team) and the
+journal store (case-keyed — knowledge that outlives boards and teams)."""
 
+from .journal import JournalStore
 from .model import (
     Actor,
     AuthorityError,
@@ -18,6 +20,7 @@ __all__ = [
     "BoardError",
     "ChainError",
     "ItemState",
+    "JournalStore",
     "Role",
     "TeamStore",
     "board_tools",

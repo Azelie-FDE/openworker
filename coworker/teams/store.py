@@ -1,10 +1,12 @@
-"""The team event store — ONE append-only log; board, journal, and deliveries are
-projections of it.
+"""The board event store — an append-only log per space; the board and per-agent
+deliveries are projections of it.
 
-Doctrine (agent-teams design): item events, journal entries, and chat messages are one
-attributed, timestamped, immutable record shape in a single log. One write path to
-police and audit, one injection surface to defend, several read-side views. Nothing is
-ever updated or deleted — a change of mind is a new event.
+Doctrine (agent-teams design): board events and chat messages are one attributed,
+timestamped, immutable record shape in one space-scoped log. One write path to police
+and audit, one injection surface to defend, several read-side views. Nothing is ever
+updated or deleted — a change of mind is a new event. Journal entries share the shape
+and discipline but live in their own case-keyed store (teams.journal): cases outlive
+boards and teams, so their lifecycle can't be chained to a board's.
 
 Mechanics, kept boring:
 - Append and projection-fold happen in the same transaction via the same `_apply`
@@ -29,7 +31,6 @@ from typing import Any, Optional
 
 from .model import (
     EDGES,
-    JOURNAL_KINDS,
     LINK_KINDS,
     WORKER_TARGETS,
     Actor,
@@ -43,12 +44,13 @@ from .model import (
 GENESIS = "genesis"
 
 # Event kinds. Chat lands later with the chat surface; the record shape already fits.
+# Journal entries live in their own case-keyed store (teams.journal) — cases outlive
+# boards, so they don't belong in a board's space-scoped log.
 ITEM_CREATED = "item_created"
 ITEM_TRANSITIONED = "item_transitioned"
 ITEM_COMMENTED = "item_commented"
 ITEM_ASSIGNED = "item_assigned"
 ITEM_LINKED = "item_linked"
-JOURNAL_APPENDED = "journal_appended"
 
 _HASHED_FIELDS = (
     "ts",
@@ -66,7 +68,11 @@ _HASHED_FIELDS = (
 
 
 class TeamStore:
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, *, journal: Any = None) -> None:
+        # `journal` is a teams.journal.JournalStore when wired: assignment feeds
+        # case grants ("sharing rides assignment"). Optional so the board works
+        # standalone (tests, boards with no journal).
+        self.journal = journal
         self.db_path = str(db_path)
         if self.db_path != ":memory:":
             Path(self.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
@@ -369,6 +375,8 @@ class TeamStore:
                     "case": case,
                 },
             )
+            if self.journal is not None and case:
+                self.journal.ensure_case(case, actor.id)
         return self.get_item(space, item_id, seq=event["seq"])
 
     def list_items(
@@ -507,6 +515,14 @@ class TeamStore:
                 recipient=assignee,
                 payload={"assignee": assignee, "previous": item["assignee"] or ""},
             )
+            if self.journal is not None and item["case_id"]:
+                self.journal.sync_assignment(
+                    item["case_id"],
+                    space=space,
+                    item_id=item_id,
+                    assignee=assignee,
+                    previous=item["assignee"] or "",
+                )
         return self.get_item(space, item_id, seq=event["seq"])
 
     def link(
@@ -554,112 +570,6 @@ class TeamStore:
                     }
                 )
         return out
-
-    # ---------------------------------------------------------------------- journal
-
-    def journal_append(
-        self,
-        space: str,
-        actor: Actor,
-        case: str,
-        body: str,
-        *,
-        kind: str = "note",
-        item: Optional[int] = None,
-        entities: Optional[list[str]] = None,
-        refs: Optional[list[str]] = None,
-        taint: bool = False,
-    ) -> dict[str, Any]:
-        """Append one journal entry to a case. Cases are created lazily on first
-        append; sharing rides assignment — a worker may only touch cases referenced
-        by its assigned items."""
-        if not (case or "").strip():
-            raise BoardError("case is required")
-        if not (body or "").strip():
-            raise BoardError("entry body is required")
-        if kind not in JOURNAL_KINDS:
-            raise BoardError(f"unknown entry kind: {kind} (use one of {JOURNAL_KINDS})")
-        with self._lock:
-            self._check_case_access(space, actor, case)
-            if item is not None:
-                self._item(space, item)
-            return self.append_event(
-                space,
-                JOURNAL_APPENDED,
-                actor,
-                item_id=item,
-                case_id=case,
-                payload={
-                    "kind": kind,
-                    "body": body,
-                    "entities": sorted(set(entities or [])),
-                    "refs": list(refs or []),
-                },
-                taint=taint,
-            )
-
-    def journal_read(
-        self,
-        space: str,
-        actor: Actor,
-        case: str,
-        *,
-        item: Optional[int] = None,
-        author: Optional[str] = None,
-        kind: Optional[str] = None,
-        entity: Optional[str] = None,
-        since_seq: int = 0,
-        limit: int = 100,
-    ) -> list[dict[str, Any]]:
-        """Filtered read — the thing that makes shared journals viable. The entity
-        filter scans extracted entities for now; a dedicated index (then vectors)
-        drops in behind this same signature."""
-        with self._lock:
-            self._check_case_access(space, actor, case)
-        events = self.events(
-            space,
-            kinds=[JOURNAL_APPENDED],
-            case_id=case,
-            item_id=item,
-            since_seq=since_seq,
-            limit=2000,
-        )
-        out = []
-        for event in events:
-            payload = event["payload"]
-            if author and event["actor"] != author:
-                continue
-            if kind and payload.get("kind") != kind:
-                continue
-            if entity and entity not in (payload.get("entities") or []):
-                continue
-            out.append(
-                {
-                    "seq": event["seq"],
-                    "ts": event["ts"],
-                    "author": event["actor"],
-                    "role": event["actor_role"],
-                    "item": event["item_id"],
-                    "kind": payload.get("kind"),
-                    "body": payload.get("body"),
-                    "entities": payload.get("entities") or [],
-                    "refs": payload.get("refs") or [],
-                    "taint": event["taint"],
-                }
-            )
-            if len(out) >= max(1, min(int(limit or 100), 1000)):
-                break
-        return out
-
-    def cases(self, space: str) -> list[str]:
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT DISTINCT case_id FROM team_events"
-                " WHERE space = ? AND kind = ? AND case_id IS NOT NULL"
-                " ORDER BY case_id",
-                (space, JOURNAL_APPENDED),
-            ).fetchall()
-        return [row["case_id"] for row in rows]
 
     def close(self) -> None:
         self._conn.close()
@@ -777,18 +687,6 @@ class TeamStore:
                     f" {sorted(state.value for state in WORKER_TARGETS)} only"
                 )
 
-    def _check_case_access(self, space: str, actor: Actor, case: str) -> None:
-        if actor.role != Role.WORKER:
-            return
-        rows = self._conn.execute(
-            "SELECT DISTINCT case_id FROM team_items WHERE space = ? AND assignee = ?",
-            (space, actor.id),
-        ).fetchall()
-        if case not in {row["case_id"] for row in rows if row["case_id"]}:
-            raise AuthorityError(
-                f"worker {actor.id} has no assigned item on case '{case}'"
-            )
-
     def _worker_slice(self, space: str, worker_id: str) -> set[int]:
         # Assigned items, items the worker filed itself, and items directly
         # linked to either — its slice of the board, nothing more.
@@ -876,8 +774,8 @@ def _canonical(payload: dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
 
 
-def _hash(record: dict[str, Any]) -> str:
-    material = _canonical({key: record[key] for key in _HASHED_FIELDS})
+def _hash(record: dict[str, Any], *, fields: tuple[str, ...] = _HASHED_FIELDS) -> str:
+    material = _canonical({key: record[key] for key in fields})
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 

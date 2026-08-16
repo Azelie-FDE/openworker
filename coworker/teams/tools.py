@@ -15,6 +15,7 @@ from typing import Callable, Optional
 
 import aisuite as ai
 
+from .journal import JournalStore
 from .model import Actor, BoardError, Role
 from .store import TeamStore
 
@@ -150,10 +151,10 @@ def board_tools(
 
 
 def journal_tools(
-    store: TeamStore,
+    journal: "JournalStore",
     *,
-    space: str,
     actor: Actor,
+    space: str = "",
     taint: Callable[[], bool] = lambda: False,
 ) -> list:
     def journal_append(
@@ -165,16 +166,18 @@ def journal_tools(
         refs: Optional[list] = None,
     ) -> dict:
         """Append an entry to a journal case as you work: kind is finding,
-        evidence, decision, or note. `entities` are the concrete things it is
-        about (file paths, resource names, CVE ids) — they power later recall;
-        `refs` are pointers (file:line, commit, url)."""
+        evidence, decision, note (any observation), or raw (a capture — put an
+        excerpt here and store the full payload as an artifact, referenced with
+        a sha256-qualified ref). `entities` are the concrete things it is about
+        (file paths, resource names, CVE ids) — they power later recall;
+        `refs` are pointers (file:line, commit, url, artifact)."""
         return _call(
-            store.journal_append,
-            space,
+            journal.append,
             actor,
             case,
             body,
             kind=kind,
+            space=space or None,
             item=item,
             entities=[str(entity) for entity in entities or []],
             refs=[str(ref) for ref in refs or []],
@@ -187,20 +190,22 @@ def journal_tools(
         author: str = "",
         kind: str = "",
         entity: str = "",
+        include_raw: bool = False,
         limit: int = 50,
     ) -> dict:
         """Read a journal case, filtered: by item, author, entry kind, or entity.
-        Prefer narrow filtered reads over pulling the whole case."""
+        Prefer narrow filtered reads over pulling the whole case. Raw captures
+        are skipped unless you pass include_raw or kind="raw"."""
         try:
             return {
-                "entries": store.journal_read(
-                    space,
+                "entries": journal.read(
                     actor,
                     case,
                     item=item,
                     author=author or None,
                     kind=kind or None,
                     entity=entity or None,
+                    include_raw=include_raw,
                     limit=limit,
                 )
             }
