@@ -1637,3 +1637,95 @@ html[data-platform="linux"] ::-webkit-scrollbar-thumb:hover { background-color: 
 .artifact-folder-row:hover { background: var(--paper); }
 .artifact-folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artifact-folder-size { font-size: 11px; color: var(--faint); }
+
+/* ── Agent teams (OPE-96): board rail, expanded overlay, plan gate ─────────── */
+.board-rail { display: flex; flex-direction: column; gap: 2px; }
+.board-group {
+  font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--faint); font-weight: 700; margin: 8px 0 3px;
+}
+.board-rail > div:first-child .board-group { margin-top: 0; }
+.board-row {
+  display: flex; align-items: flex-start; gap: 8px; width: 100%; text-align: left;
+  padding: 5px 6px; border: 0; border-radius: 7px; background: transparent;
+  cursor: pointer; color: var(--muted); font-size: 12.5px;
+}
+.board-row:hover { background: var(--paper); }
+.board-row-main { display: flex; flex-direction: column; min-width: 0; }
+.board-row-title { color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.board-row-id { color: var(--faint); font-weight: 600; font-size: 11.5px; }
+.board-row-who { font-size: 11px; color: var(--faint); }
+.board-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; background: var(--faint); }
+.board-dot.work { background: var(--ok-dot); }
+.board-dot.blocked { background: var(--danger); }
+.board-dot.review { background: var(--warn-ink); }
+.board-dot.done { background: var(--ok); opacity: 0.55; }
+.board-dot.idle { background: var(--faint); }
+
+/* Expanded board: covers the session area — the roomy, Linear-shaped view. */
+.board-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: color-mix(in srgb, var(--paper) 55%, transparent);
+  display: flex; align-items: stretch; justify-content: center; padding: 26px 28px;
+}
+.board-overlay-panel {
+  flex: 1; max-width: 1280px; display: flex; flex-direction: column; min-height: 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28); overflow: hidden;
+}
+.board-overlay-head {
+  display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.board-overlay-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13.5px; color: var(--ink); flex: 1; }
+.board-overlay-space { color: var(--faint); font-weight: 400; font-size: 12px; }
+.board-columns {
+  flex: 1; display: flex; gap: 12px; padding: 14px 16px; overflow: auto; min-height: 0;
+}
+.board-col { flex: 1 1 0; min-width: 210px; max-width: 320px; display: flex; flex-direction: column; min-height: 0; }
+.board-col-head {
+  display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 700;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); padding: 2px 4px 8px;
+}
+.board-col-head .board-dot { margin-top: 0; }
+.board-col-count { margin-left: auto; color: var(--faint); font-weight: 500; }
+.board-col-body { display: flex; flex-direction: column; gap: 8px; overflow: auto; padding-bottom: 8px; }
+.board-col-empty { color: var(--faint); font-size: 12px; padding: 6px 4px; }
+.board-card {
+  background: var(--paper); border: 1px solid var(--line); border-radius: 10px;
+  padding: 9px 11px; display: flex; flex-direction: column; gap: 5px;
+}
+.board-card-title { font-size: 12.5px; color: var(--ink); }
+.board-card-criteria { font-size: 11.5px; color: var(--muted); }
+.board-card-label { font-weight: 600; }
+.board-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.board-card-who { font-size: 11px; color: var(--faint); }
+.board-card-actions { display: flex; gap: 6px; }
+.board-card-btn {
+  border: 1px solid var(--line-strong); background: transparent; color: var(--muted);
+  border-radius: 6px; padding: 2px 8px; font-size: 11px; cursor: pointer;
+}
+.board-card-btn:hover { color: var(--ink); border-color: var(--muted); }
+
+/* Journal rail section */
+.journal-list { display: flex; flex-direction: column; gap: 3px; }
+.journal-row { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); padding: 3px 4px; }
+.journal-case { color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.journal-count { font-size: 11px; color: var(--faint); }
+
+/* Plan gate (decomposition gate) — rides the dirreq-card frame. */
+.plangate-card { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.plangate-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.plangate-title { font-weight: 600; font-size: 13px; color: var(--ink); }
+.plangate-board { margin-left: auto; font-size: 11.5px; color: var(--faint); }
+.plangate-item { display: flex; gap: 9px; padding: 7px 0; border-top: 1px solid var(--line); }
+.plangate-num { color: var(--faint); font-size: 12px; padding-top: 1px; }
+.plangate-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.plangate-item-title { font-size: 12.5px; color: var(--ink); }
+.plangate-ac { font-size: 11.5px; color: var(--muted); }
+.plangate-ac b { font-weight: 600; }
+.plangate-more {
+  display: flex; align-items: center; gap: 5px; border: 0; background: transparent;
+  color: var(--accent); font-size: 12px; cursor: pointer; padding: 6px 0;
+}
+.plangate-note { font-size: 11.5px; color: var(--faint); }

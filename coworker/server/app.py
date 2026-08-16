@@ -734,6 +734,30 @@ def create_app(manager: SessionManager) -> FastAPI:
             session_id, str(body.get("path", "")), str(body.get("mode", "reveal"))
         )
 
+    # Agent teams (OPE-96): the session's board (workspace-keyed space) + journal
+    # overview. Mutations act as the USER — the human side of the gates.
+    @app.get("/v1/sessions/{session_id}/board")
+    def session_board(session_id: str) -> dict[str, Any]:
+        return manager.session_board(session_id)
+
+    @app.post("/v1/sessions/{session_id}/board/transition")
+    def session_board_transition(session_id: str, body: dict) -> dict[str, Any]:
+        body = body or {}
+        return manager.board_transition(
+            session_id,
+            int(body.get("item", 0)),
+            str(body.get("to", "")),
+            comment=str(body.get("comment", "")),
+        )
+
+    @app.post("/v1/sessions/{session_id}/board/approve")
+    def session_board_approve(session_id: str) -> dict[str, Any]:
+        return manager.board_approve(session_id)
+
+    @app.get("/v1/teams/journal")
+    def teams_journal() -> dict[str, Any]:
+        return {"cases": manager.journal_overview()}
+
     @app.get("/v1/memory")
     def memory() -> dict[str, Any]:
         return {"memory": manager.list_memory()}

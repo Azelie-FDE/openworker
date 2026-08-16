@@ -82,7 +82,10 @@ from ..providers import (
 )
 from ..secrets import SecretStore, state_dir
 from ..sessions import SessionRecord
-from ..teams import JournalStore, TeamStore
+from ..teams import Actor as TeamActor
+from ..teams import BoardError as TeamsBoardError
+from ..teams import JournalStore, Role as TeamRole, TeamStore, board_tools, journal_tools
+from ..teams.model import space_for_workspace
 from ..skills import (
     SessionSkillStore,
     SkillLoader,
@@ -541,7 +544,11 @@ class SessionManager:
             user_rules=lambda: self.memory_settings.user_rules,
             on_memory_saved=self._memory_saved_notifier(session_id),
             messages=messages,
-            extra_tools=extra_tools,
+            extra_tools=[
+                *(extra_tools or []),
+                *self._team_board_tools(session_id, agent_name, ws),
+            ]
+            or None,
             secrets=self.secrets,
             task_store=self.task_store,
             wake_store=self.wakes,
@@ -1370,6 +1377,74 @@ class SessionManager:
 
     def browser_close(self) -> dict[str, Any]:
         return browser_close_session()
+
+    # ------------------------------------------------------------- agent teams (OPE-96)
+
+    def _board_space(self, session_id: str) -> Optional[str]:
+        record = self.session_store.load(session_id)
+        workspace = (record.workspace if record else None) or self.default_workspace
+        return space_for_workspace(workspace) if workspace else None
+
+    def _user_actor(self) -> TeamActor:
+        return TeamActor(id="user", role=TeamRole.USER)
+
+    def session_board(self, session_id: str) -> dict[str, Any]:
+        """The session's board: items grouped by the workspace-keyed space. Empty
+        (space=None) when the workspace has no items — the rail hides itself."""
+        space = self._board_space(session_id)
+        if space is None:
+            return {"space": None, "name": "", "items": []}
+        items = self.team_store.list_items(space, self._user_actor())
+        if not items:
+            return {"space": None, "name": "", "items": []}
+        return {"space": space, "name": Path(space).name, "items": items}
+
+    def board_transition(
+        self, session_id: str, item: int, to: str, comment: str = ""
+    ) -> dict[str, Any]:
+        space = self._board_space(session_id)
+        if space is None:
+            return {"error": "this session has no board"}
+        try:
+            return self.team_store.transition(
+                space, self._user_actor(), int(item), to, comment=comment
+            )
+        except (TeamsBoardError, ValueError) as error:
+            return {"error": str(error)}
+
+    def board_approve(self, session_id: str) -> dict[str, Any]:
+        """The plan gate's action: approve every proposed item on the session's board."""
+        space = self._board_space(session_id)
+        if space is None:
+            return {"error": "this session has no board"}
+        approved = 0
+        for entry in self.team_store.list_items(
+            space, self._user_actor(), state="proposed"
+        ):
+            self.team_store.transition(space, self._user_actor(), entry["id"], "approved")
+            approved += 1
+        return {"approved": approved, **self.session_board(session_id)}
+
+    def journal_overview(self) -> list[dict[str, Any]]:
+        return self.journal_store.overview(self._user_actor())
+
+    def _team_board_tools(self, session_id: str, agent_name: str, ws: Optional[str]) -> list[Any]:
+        """Phase-1 experimental wiring (flag: OPENWORKER_TEAM_BOARD=1): every
+        workspace session gets the board+journal verbs as the LEAD of its
+        workspace's board. Registration moves behind the persona `team:` trait
+        with the wake plumbing."""
+        if not ws or os.environ.get("OPENWORKER_TEAM_BOARD") != "1":
+            return []
+        actor = TeamActor(
+            id=f"{agent_name}:{session_id[:8]}",
+            role=TeamRole.LEAD,
+            persona=agent_name,
+            session_id=session_id,
+        )
+        space = space_for_workspace(ws)
+        return board_tools(self.team_store, space=space, actor=actor) + journal_tools(
+            self.journal_store, actor=actor, space=space
+        )
 
     def list_artifacts(self, session_id: str) -> list[dict[str, Any]]:
         record = self.session_store.load(session_id)

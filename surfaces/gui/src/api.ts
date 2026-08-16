@@ -209,6 +209,60 @@ export async function deleteSession(sessionId: string): Promise<{ ok: boolean; e
   return res.json();
 }
 
+// Agent teams (OPE-96): the session's board — items on the workspace-keyed space.
+export interface BoardItem {
+  id: number;
+  title: string;
+  description: string;
+  criteria: string;
+  state: "proposed" | "approved" | "in_progress" | "blocked" | "review" | "done" | "canceled" | string;
+  assignee: string;
+  creator: string;
+  refs: string[];
+  links: { kind: string; item: number }[];
+}
+
+export interface Board {
+  space: string | null;
+  name: string;
+  items: BoardItem[];
+}
+
+export interface JournalCase {
+  case: string;
+  entries: number;
+  last_ts: string;
+}
+
+export async function getBoard(sessionId: string): Promise<Board> {
+  const res = await fetch(`${httpBase()}/v1/sessions/${encodeURIComponent(sessionId)}/board`);
+  return res.json();
+}
+
+export async function boardApprove(sessionId: string): Promise<Board & { approved: number }> {
+  const res = await fetch(`${httpBase()}/v1/sessions/${encodeURIComponent(sessionId)}/board/approve`, { method: "POST" });
+  return res.json();
+}
+
+export async function boardTransition(
+  sessionId: string,
+  item: number,
+  to: string,
+  comment = "",
+): Promise<BoardItem | { error: string }> {
+  const res = await fetch(`${httpBase()}/v1/sessions/${encodeURIComponent(sessionId)}/board/transition`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item, to, comment }),
+  });
+  return res.json();
+}
+
+export async function getJournalCases(): Promise<JournalCase[]> {
+  const res = await fetch(`${httpBase()}/v1/teams/journal`);
+  return (await res.json()).cases ?? [];
+}
+
 export interface ArtifactInfo {
   path: string; // workspace-relative (the display/API identifier)
   abs_path?: string; // absolute — what "Copy path" copies

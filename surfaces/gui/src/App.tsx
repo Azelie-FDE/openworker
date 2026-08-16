@@ -3,7 +3,11 @@ import {
   announceInboxUnlock,
   createTempWorkspace,
   finalizeAutomationRun,
+  boardApprove,
+  boardTransition,
   getArtifacts,
+  getBoard,
+  type Board,
   getHealth,
   getRecentWorkspaces,
   getSessionMessages,
@@ -72,6 +76,7 @@ import { ApprovalCard } from "./components/ApprovalCard";
 import { ToolRequestCard } from "./components/ToolRequestCard";
 import { DirectoryRequestCard } from "./components/DirectoryRequestCard";
 import { PlanCard } from "./components/PlanCard";
+import { BoardOverlay, PlanGateCard } from "./components/BoardPanel";
 import { WorkspaceTrustPrompt } from "./components/WorkspaceTrustPrompt";
 
 const newId = () =>
@@ -267,6 +272,10 @@ export function App() {
     setSurface("persona");
   };
   const [browserRefreshKey, setBrowserRefreshKey] = useState(0);
+  // Agent teams (OPE-96): board for the current session's workspace space.
+  const [board, setBoard] = useState<Board | null>(null);
+  const [boardOpen, setBoardOpen] = useState(false);
+  const [planBusy, setPlanBusy] = useState(false);
   const [railHidden, setRailHidden] = useState(false);
   // Left-nav collapse (⌘B): when collapsed the sidebar leaves the grid so content reclaims the
   // width; hovering the left edge peeks it back as a floating overlay. Persisted per-device.
@@ -944,6 +953,32 @@ export function App() {
     }
     getArtifacts(sessionId).then((a) => setArtifactCount(a.length)).catch(() => {});
   }, [agent, surface, sessionId, browserRefreshKey]);
+
+  // Agent teams (OPE-96): the session's board — drives the rail section, the plan
+  // gate, and the expanded overlay. Refreshes with the same cycle as artifacts
+  // (session change + turn end) so items the agent just created appear.
+  useEffect(() => {
+    if (surface !== "session" || agent === "chat") {
+      setBoard(null);
+      return;
+    }
+    getBoard(sessionId).then(setBoard).catch(() => setBoard(null));
+  }, [agent, surface, sessionId, browserRefreshKey, running]);
+
+  const refreshBoard = () => getBoard(sessionId).then(setBoard).catch(() => {});
+  const approvePlan = async () => {
+    setPlanBusy(true);
+    try {
+      await boardApprove(sessionId);
+      await refreshBoard();
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+  const moveBoardItem = async (item: number, to: string) => {
+    await boardTransition(sessionId, item, to);
+    await refreshBoard();
+  };
 
   // Keep the active session's pending Inbox items fresh (answer-in-context card). Loads on session
   // change + after each turn, plus a slow poll so an unattended agent's new question surfaces.
@@ -1912,6 +1947,9 @@ export function App() {
                 ) : sessionInbox[0] ? (
                   // Unattended session blocked on an Inbox item — answer it in context.
                   <InboxItemCard item={sessionInbox[0]} onResolve={resolveSessionInbox} compact />
+                ) : board && board.items.some((i) => i.state === "proposed") ? (
+                  // Agent teams: the decomposition gate — proposed items awaiting approval.
+                  <PlanGateCard board={board} onApprove={approvePlan} busy={planBusy} />
                 ) : undefined
               }
             />
@@ -1932,7 +1970,12 @@ export function App() {
             scratchPrimary={agent === "cowork" || tempWorkspace}
             openAccessKey={accessKey}
             onOpenIntegrations={() => setSurface("integrations")}
+            board={board}
+            onExpandBoard={() => setBoardOpen(true)}
           />
+          {boardOpen && board && board.space && (
+            <BoardOverlay board={board} onClose={() => setBoardOpen(false)} onTransition={moveBoardItem} />
+          )}
         </div>
       </div>
       )}

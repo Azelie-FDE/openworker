@@ -3,17 +3,21 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
   getArtifacts,
+  getJournalCases,
   readArtifact,
   revealArtifact,
   type ArtifactContent,
   type ArtifactInfo,
+  type Board,
+  type JournalCase,
 } from "../api";
 import type { TodoItem } from "../types";
 import { AccessSection } from "./AccessSection";
+import { BoardSection, boardSummary } from "./BoardPanel";
 import { Icon } from "./Icon";
 import { Markdown, OPEN_ARTIFACT_EVENT } from "./Markdown";
 
-type Panel = "progress" | "artifacts";
+type Panel = "progress" | "artifacts" | "board" | "journal";
 
 // Quiet file-type icons for the artifact list (the colored kind pills read as noisy).
 function kindIcon(kind: string): "file" | "fileCode" | "image" | "table" {
@@ -57,6 +61,10 @@ interface Props {
   scratchPrimary?: boolean;
   openAccessKey?: number;
   onOpenIntegrations?: () => void;
+  // Agent teams (OPE-96): App owns board data (the plan gate needs it too);
+  // the rail renders the summary section and the expand affordance.
+  board?: Board | null;
+  onExpandBoard?: () => void;
 }
 
 export function RightRail({
@@ -75,12 +83,17 @@ export function RightRail({
   scratchPrimary,
   openAccessKey = 0,
   onOpenIntegrations,
+  board,
+  onExpandBoard,
 }: Props) {
   const [open, setOpen] = useState<Record<Panel, boolean>>({
     progress: true,
     artifacts: true,
+    board: true,
+    journal: false,
   });
   const [artifacts, setArtifacts] = useState<ArtifactInfo[]>([]);
+  const [journal, setJournal] = useState<JournalCase[]>([]);
   const [selected, setSelected] = useState<ArtifactInfo | null>(null);
   const [content, setContent] = useState<ArtifactContent | null>(null);
 
@@ -90,6 +103,16 @@ export function RightRail({
     if (!active) return;
     if (showArtifacts) refreshArtifacts();
   }, [active, sessionId, refreshKey, showArtifacts]);
+
+  // Journal cases surface only when a board exists — same visibility rule as the
+  // Board section, so plain sessions carry zero team chrome.
+  useEffect(() => {
+    if (!active || !board?.space) {
+      setJournal([]);
+      return;
+    }
+    getJournalCases().then(setJournal).catch(() => setJournal([]));
+  }, [active, sessionId, refreshKey, board?.space]);
 
   // Switching conversations closes any open artifact — it belongs to the previous session's
   // workspace, which the new session can't (and shouldn't) read.
@@ -177,6 +200,49 @@ export function RightRail({
           <RailSection title="Progress" open={open.progress} onToggle={() => setOpen({ ...open, progress: !open.progress })}>
             <ProgressSummary running={running} toolNames={toolNames} todo={todo} />
           </RailSection>
+
+          {/* Agent teams (OPE-96): board summary — grouped by state, blocked on top.
+              Hidden entirely until the workspace has items (no chrome for plain sessions). */}
+          {board?.space && (
+            <RailSection
+              title={`Board${boardSummary(board) ? ` · ${boardSummary(board)}` : ""}`}
+              open={open.board}
+              onToggle={() => setOpen({ ...open, board: !open.board })}
+              action={
+                <button
+                  className="rail-mini-btn"
+                  data-testid="board-expand"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onExpandBoard?.();
+                  }}
+                  title="Expand the board"
+                >
+                  <Icon name="panelOpen" size={13} />
+                </button>
+              }
+            >
+              <BoardSection board={board} onExpand={() => onExpandBoard?.()} />
+            </RailSection>
+          )}
+
+          {board?.space && journal.length > 0 && (
+            <RailSection
+              title={`Journal (${journal.length})`}
+              open={open.journal}
+              onToggle={() => setOpen({ ...open, journal: !open.journal })}
+            >
+              <div className="journal-list" data-testid="journal-list">
+                {journal.map((c) => (
+                  <div className="journal-row" key={c.case}>
+                    <Icon name="file" size={13} />
+                    <span className="journal-case">{c.case}</span>
+                    <span className="journal-count">{c.entries} entr{c.entries === 1 ? "y" : "ies"}</span>
+                  </div>
+                ))}
+              </div>
+            </RailSection>
+          )}
 
           {showArtifacts && (
           <RailSection

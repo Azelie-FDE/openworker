@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 
 class ItemState(str, Enum):
@@ -70,6 +71,13 @@ JOURNAL_KINDS = ("finding", "evidence", "decision", "note", "raw")
 # An entry body is an excerpt/summary, never a blob: oversized payloads make every
 # read (and replay) drag. Full captures live as files the entry points at.
 JOURNAL_BODY_LIMIT = 16_000
+
+
+def space_for_workspace(workspace: str | Path) -> str:
+    """Spaces are keyed to the project/workspace (boards are views over a space).
+    The resolved path is the one unambiguous local key; a display name is its
+    basename."""
+    return str(Path(workspace).expanduser().resolve())
 
 
 class BoardError(Exception):

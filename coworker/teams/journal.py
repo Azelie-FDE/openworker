@@ -244,6 +244,26 @@ class JournalStore:
                 break
         return out
 
+    def overview(self, actor: Actor) -> list[dict[str, Any]]:
+        """Case list with entry counts and last activity — the rail's summary view."""
+        visible = self.cases(actor)
+        if not visible:
+            return []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT case_id, COUNT(*) AS entries, MAX(ts) AS last_ts"
+                " FROM journal_entries GROUP BY case_id"
+            ).fetchall()
+        counts = {row["case_id"]: dict(row) for row in rows}
+        return [
+            {
+                "case": case,
+                "entries": counts.get(case, {}).get("entries", 0),
+                "last_ts": counts.get(case, {}).get("last_ts") or "",
+            }
+            for case in visible
+        ]
+
     def cases(self, actor: Actor) -> list[str]:
         """Cases visible to this actor (all of them for the user)."""
         with self._lock:

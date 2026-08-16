@@ -561,6 +561,26 @@ export async function mockApi(page: import("@playwright/test").Page) {
   ];
   let stagedSkill: any = null;
 
+  // Agent teams (OPE-96): the session's board — empty until a test opts in by sending
+  // "plan the work" (the fake agent then files items into the proposed gate). Mutable
+  // so approve/transition round-trip through the real endpoints.
+  const boardItems: any[] = [];
+  const seedBoard = () => {
+    if (boardItems.length) return;
+    boardItems.push(
+      { id: 1, title: "Code security review — api", description: "", criteria: "every finding triaged with file:line evidence", state: "proposed", assignee: "", creator: "lead", refs: [], links: [] },
+      { id: 2, title: "Secrets — git history, both repos", description: "", criteria: "every hit dismissed-with-reason or rotation-instructed", state: "proposed", assignee: "", creator: "lead", refs: [], links: [] },
+      { id: 3, title: "Dependency audit — lockfiles", description: "", criteria: "reachable vs theoretical separated; upgrade branch green", state: "proposed", assignee: "", creator: "lead", refs: [], links: [] },
+      { id: 6, title: "Rate-limit audit — public endpoints", description: "", criteria: "every unauthenticated route has a limit or a reason", state: "proposed", assignee: "", creator: "lead", refs: [], links: [] },
+      { id: 4, title: "Cloud posture — infra", description: "", criteria: "trivy config clean or findings triaged", state: "blocked", assignee: "cloud-posture", creator: "lead", refs: [], links: [] },
+      { id: 5, title: "Report rollup", description: "", criteria: "one report, all sections", state: "review", assignee: "security", creator: "lead", refs: [], links: [] },
+    );
+  };
+  const boardPayload = () =>
+    boardItems.length
+      ? { space: "/Users/test/OpenWorker/launch-note", name: "launch-note", items: boardItems }
+      : { space: null, name: "", items: [] };
+
   // Fresh cloud sign-in state per test (module state outlives a page).
   Object.assign(CLOUD_STATE, {
     signed_in: false,
@@ -609,6 +629,16 @@ export async function mockApi(page: import("@playwright/test").Page) {
             readonly_ok: true, // `ls` classifies read-only server-side
           });
           return; // suspended on the approval
+        }
+        // Agent teams (OPE-96): a decomposition turn — the agent files work items and
+        // the board (rail section + plan gate) appears on the next board fetch.
+        if (/plan the work/i.test(msg.text)) {
+          seedBoard();
+          send("assistant_message", {
+            text: "Split it into 5 work items — approve the plan and I'll get started.",
+          });
+          send("turn_done");
+          return;
         }
         // A deliverable turn ending in an artifact chip (§34) — for the chip-open flow.
         if (/show the report/i.test(msg.text)) {
@@ -893,6 +923,32 @@ export async function mockApi(page: import("@playwright/test").Page) {
       });
     }
     if (/\/v1\/sessions\/[^/]+\/artifacts\/reveal$/.test(p)) return json({ ok: true });
+    // Agent teams (OPE-96): board reads + the user-side mutations.
+    if (/\/v1\/sessions\/[^/]+\/board\/approve$/.test(p)) {
+      let approved = 0;
+      for (const item of boardItems) {
+        if (item.state === "proposed") {
+          item.state = "approved";
+          approved += 1;
+        }
+      }
+      return json({ approved, ...boardPayload() });
+    }
+    if (/\/v1\/sessions\/[^/]+\/board\/transition$/.test(p)) {
+      const b = req.postDataJSON() || {};
+      const item = boardItems.find((i) => i.id === Number(b.item));
+      if (!item) return json({ error: "no such item" });
+      item.state = String(b.to);
+      return json(item);
+    }
+    if (/\/v1\/sessions\/[^/]+\/board$/.test(p)) return json(boardPayload());
+    if (p.endsWith("/v1/teams/journal")) {
+      return json({
+        cases: boardItems.length
+          ? [{ case: "findings", entries: 12, last_ts: new Date().toISOString() }]
+          : [],
+      });
+    }
     if (/\/v1\/sessions\/[^/]+\/artifacts$/.test(p)) {
       return json({
         artifacts: [
