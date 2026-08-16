@@ -86,12 +86,21 @@ export function RightRail({
   board,
   onExpandBoard,
 }: Props) {
+  // Progress starts collapsed (owner call 2026-08-16 — rail space goes to the
+  // board/artifacts); it still auto-opens the first time a live turn has todos.
   const [open, setOpen] = useState<Record<Panel, boolean>>({
-    progress: true,
+    progress: false,
     artifacts: true,
     board: true,
     journal: false,
   });
+  const autoOpenedProgress = useRef(false);
+  useEffect(() => {
+    if (running && todo.length > 0 && !autoOpenedProgress.current) {
+      autoOpenedProgress.current = true;
+      setOpen((prev) => ({ ...prev, progress: true }));
+    }
+  }, [running, todo.length]);
   const [artifacts, setArtifacts] = useState<ArtifactInfo[]>([]);
   const [journal, setJournal] = useState<JournalCase[]>([]);
   const [selected, setSelected] = useState<ArtifactInfo | null>(null);
