@@ -33,9 +33,21 @@ def test_acceptance_criteria_are_required(store):
         store.create_item(SPACE, LEAD, title="Vague hope", criteria="  ")
 
 
-def test_workers_cannot_create_items(store):
-    with pytest.raises(AuthorityError):
-        store.create_item(SPACE, WORKER, title="Scope creep", criteria="c")
+def test_workers_file_items_into_the_proposed_gate(store):
+    mine = assigned_item(store)
+    filed = store.create_item(
+        SPACE, WORKER, title="Rounding bug in invoices", criteria="repro + fix",
+        parent=mine,
+    )
+    assert filed["state"] == "proposed"
+    assert filed["creator"] == "worker-1"
+    # the worker sees its own filing; nothing runs until the user approves it
+    visible = {item["id"] for item in store.list_items(SPACE, WORKER)}
+    assert filed["id"] in visible
+    with pytest.raises(AuthorityError, match="decomposition gate"):
+        store.transition(SPACE, WORKER, filed["id"], "approved")
+    other_worker = {item["id"] for item in store.list_items(SPACE, OTHER)}
+    assert filed["id"] not in other_worker
 
 
 def test_child_inherits_parent_case(store):
@@ -197,7 +209,7 @@ def test_tool_sets_are_role_filtered(store):
         tool.__name__ for tool in board_tools(store, space=SPACE, actor=WORKER)
     }
     assert lead_names == {"create_item", "list_items", "transition", "comment", "assign", "link"}
-    assert worker_names == {"list_items", "transition", "comment"}
+    assert worker_names == {"create_item", "list_items", "transition", "comment"}
 
 
 def test_tools_return_errors_instead_of_raising(store):

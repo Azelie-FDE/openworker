@@ -19,7 +19,9 @@ from .model import Actor, BoardError, Role
 from .store import TeamStore
 
 LEAD_VERBS = ("create_item", "list_items", "transition", "comment", "assign", "link")
-WORKER_VERBS = ("list_items", "transition", "comment")
+# Workers file items too (a bug spotted in passing, a follow-up) — new items land
+# in `proposed`, so the approval gate catches everything a worker proposes.
+WORKER_VERBS = ("create_item", "list_items", "transition", "comment")
 JOURNAL_VERBS = ("journal_append", "journal_read")
 
 # Explicit schema: the auto-generator's normalizer strips every `title` key to drop

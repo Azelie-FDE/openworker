@@ -108,6 +108,7 @@ class TeamStore:
                 criteria TEXT NOT NULL,
                 state TEXT NOT NULL,
                 assignee TEXT DEFAULT '',
+                creator TEXT NOT NULL DEFAULT '',
                 case_id TEXT DEFAULT '',
                 refs TEXT NOT NULL DEFAULT '[]',
                 created_ts TEXT NOT NULL,
@@ -215,7 +216,7 @@ class TeamStore:
             ),
         )
         seq = cursor.lastrowid
-        self._apply(space, seq, record["ts"], kind, item_id, payload)
+        self._apply(space, seq, record["ts"], kind, actor.id, item_id, payload)
         self._conn.execute(
             """
             INSERT INTO team_meta (space, head_hash, watermark) VALUES (?, ?, ?)
@@ -306,7 +307,7 @@ class TeamStore:
             self._conn.execute("DELETE FROM team_items WHERE space = ?", (space,))
             self._conn.execute("DELETE FROM team_links WHERE space = ?", (space,))
             rows = self._conn.execute(
-                "SELECT seq, ts, kind, item_id, payload FROM team_events"
+                "SELECT seq, ts, kind, actor, item_id, payload FROM team_events"
                 " WHERE space = ? ORDER BY seq",
                 (space,),
             ).fetchall()
@@ -316,6 +317,7 @@ class TeamStore:
                     row["seq"],
                     row["ts"],
                     row["kind"],
+                    row["actor"],
                     row["item_id"],
                     json.loads(row["payload"]),
                 )
@@ -334,8 +336,12 @@ class TeamStore:
         parent: Optional[int] = None,
         case: Optional[str] = None,
     ) -> dict[str, Any]:
-        """New item in `proposed`. Acceptance criteria are load-bearing — required."""
-        self._require(actor, {Role.USER, Role.LEAD}, "create_item")
+        """New item in `proposed`. Acceptance criteria are load-bearing — required.
+
+        Workers may create too — a bug spotted in passing, a follow-up — because
+        proposing is harmless: nothing runs until the item crosses the approval
+        gate."""
+        self._require(actor, {Role.USER, Role.LEAD, Role.WORKER}, "create_item")
         if not (title or "").strip():
             raise BoardError("title is required")
         if not (criteria or "").strip():
@@ -666,6 +672,7 @@ class TeamStore:
         seq: int,
         ts: str,
         kind: str,
+        actor_id: str,
         item_id: Optional[int],
         payload: dict[str, Any],
     ) -> None:
@@ -677,8 +684,8 @@ class TeamStore:
                 """
                 INSERT INTO team_items
                     (space, id, title, description, criteria, state, assignee,
-                     case_id, refs, created_ts, updated_seq)
-                VALUES (?, ?, ?, ?, ?, ?, '', ?, '[]', ?, ?)
+                     creator, case_id, refs, created_ts, updated_seq)
+                VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, '[]', ?, ?)
                 """,
                 (
                     space,
@@ -687,6 +694,7 @@ class TeamStore:
                     payload.get("description") or "",
                     payload.get("criteria") or "",
                     ItemState.PROPOSED.value,
+                    actor_id,
                     payload.get("case") or "",
                     ts,
                     seq,
@@ -782,9 +790,12 @@ class TeamStore:
             )
 
     def _worker_slice(self, space: str, worker_id: str) -> set[int]:
+        # Assigned items, items the worker filed itself, and items directly
+        # linked to either — its slice of the board, nothing more.
         rows = self._conn.execute(
-            "SELECT id FROM team_items WHERE space = ? AND assignee = ?",
-            (space, worker_id),
+            "SELECT id FROM team_items WHERE space = ?"
+            " AND (assignee = ? OR creator = ?)",
+            (space, worker_id, worker_id),
         ).fetchall()
         mine = {row["id"] for row in rows}
         if not mine:
