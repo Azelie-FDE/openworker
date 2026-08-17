@@ -100,6 +100,25 @@ def build(dialect, *, space: str):
         return _safe(dialect.comment, space, item, body, refs=list(refs or []))
 
     @mcp.tool()
+    def board_attach(item: int, path: str, caption: str = "") -> Any:
+        """Attach a screenshot or image (png/jpg/gif/webp, ≤10MB) from a local
+        file to a work item — so the lead/reviewer can SEE what you did. Give it
+        a caption saying what the image shows. Great with review hand-offs."""
+        from pathlib import Path as _Path
+
+        source = _Path(path).expanduser()
+        if not source.is_file():
+            return {"error": f"no such file: {path}"}
+        return _safe(
+            dialect.attach,
+            space,
+            item,
+            source.read_bytes(),
+            source.name,
+            caption=caption,
+        )
+
+    @mcp.tool()
     def board_pending() -> Any:
         """Your unconsumed deliveries — assignments addressed to you, cancel
         notices. Check at the start of a work session; acknowledge with

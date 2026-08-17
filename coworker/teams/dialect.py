@@ -78,6 +78,16 @@ class BoardDialect(Protocol):
     def assign(self, space: str, item_id: int, assignee: str) -> dict[str, Any]: ...
     def claim(self, space: str, item_id: int) -> dict[str, Any]: ...
     def link(self, space: str, src: int, kind: str, dst: int) -> dict[str, Any]: ...
+    def attach(
+        self,
+        space: str,
+        item_id: int,
+        data: bytes,
+        filename: str,
+        *,
+        caption: str = "",
+    ) -> dict[str, Any]: ...
+    def attachment(self, stored: str) -> tuple[bytes, str]: ...
     def policy(self, space: str) -> dict[str, Any]: ...
     def set_policy(self, space: str, *, claims: str) -> dict[str, Any]: ...
     def pending(self, *, limit: int = 200) -> list[dict[str, Any]]: ...
@@ -111,11 +121,17 @@ class LocalDialect:
     """Direct store access, one bound identity. The headless/standalone backing."""
 
     def __init__(
-        self, store: TeamStore, journal: Optional[JournalStore], actor: Actor
+        self,
+        store: TeamStore,
+        journal: Optional[JournalStore],
+        actor: Actor,
+        *,
+        attachments: Any = None,
     ) -> None:
         self.store = store
         self.journal = journal
         self.actor = actor
+        self.attachments = attachments
 
     def whoami(self) -> dict[str, Any]:
         return {"actor": self.actor.id, "role": self.actor.role.value}
@@ -186,6 +202,34 @@ class LocalDialect:
 
     def link(self, space: str, src: int, kind: str, dst: int) -> dict[str, Any]:
         return self.store.link(space, self.actor, src, kind, dst)
+
+    def attach(
+        self,
+        space: str,
+        item_id: int,
+        data: bytes,
+        filename: str,
+        *,
+        caption: str = "",
+    ) -> dict[str, Any]:
+        # Attach = store blob + a normal comment event carrying the ref. Comment
+        # authority IS attach authority (workers attach on their slice only).
+        if self.attachments is None:
+            raise BoardError("no attachment store is attached to this board")
+        ref = self.attachments.put(data, filename)
+        return self.store.comment(
+            space,
+            self.actor,
+            item_id,
+            caption or f"attached {filename}",
+            refs=[ref],
+        )
+
+    def attachment(self, stored: str) -> tuple[bytes, str]:
+        if self.attachments is None:
+            raise BoardError("no attachment store is attached to this board")
+        path = self.attachments.path_for(stored)
+        return path.read_bytes(), self.attachments.mime_for(stored)
 
     def policy(self, space: str) -> dict[str, Any]:
         return self.store.policy(space)
@@ -392,6 +436,36 @@ class RemoteDialect:
             "/v1/board/link", {"space": space, "src": src, "kind": kind, "dst": dst}
         )
 
+    def attach(
+        self,
+        space: str,
+        item_id: int,
+        data: bytes,
+        filename: str,
+        *,
+        caption: str = "",
+    ) -> dict[str, Any]:
+        import base64
+
+        return self._post(
+            "/v1/board/items/attach",
+            {
+                "space": space,
+                "id": item_id,
+                "filename": filename,
+                "caption": caption,
+                "data_b64": base64.b64encode(data).decode("ascii"),
+            },
+        )
+
+    def attachment(self, stored: str) -> tuple[bytes, str]:
+        response = self._client.get("/v1/board/attachment", params={"name": stored})
+        if response.status_code >= 400:
+            self._unwrap(response)  # raises with the server's message
+        return response.content, response.headers.get(
+            "content-type", "application/octet-stream"
+        )
+
     def policy(self, space: str) -> dict[str, Any]:
         return self._get("/v1/board/policy", {"space": space})
 
@@ -466,9 +540,14 @@ def local_dialect(
     backing for the CLI and MCP server when no OpenWorker server is running."""
     from pathlib import Path
 
+    from .attachments import AttachmentStore
+
     base = Path(db_dir).expanduser()
     journal = JournalStore(base / "journal.db")
     store = TeamStore(base / "teams.db", journal=journal)
     return LocalDialect(
-        store, journal, Actor(id=actor, role=Role(role))
+        store,
+        journal,
+        Actor(id=actor, role=Role(role)),
+        attachments=AttachmentStore(base / "attachments"),
     )

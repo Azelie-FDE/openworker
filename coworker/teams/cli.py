@@ -93,6 +93,15 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("id", type=int)
     p.add_argument("assignee")
 
+    p = cmd("attach", _cmd_attach, "attach a screenshot/image to an item")
+    p.add_argument("id", type=int)
+    p.add_argument("file", help="image file (png/jpg/gif/webp, ≤10MB)")
+    p.add_argument("--caption", default="")
+
+    p = cmd("attachment", _cmd_attachment, "download an attachment by ref or name")
+    p.add_argument("ref", help="attachment:// ref or <sha256>.<ext> name")
+    p.add_argument("-o", "--out", default="", help="output path (default: basename)")
+
     p = cmd("link", _cmd_link, "link two items")
     p.add_argument("src", type=int)
     p.add_argument("kind", choices=("parent", "blocks"))
@@ -325,6 +334,34 @@ def _cmd_assign(args) -> int:
         if args.json
         else f"#{item['id']} → @{item['assignee']}"
     )
+    return 0
+
+
+def _cmd_attach(args) -> int:
+    source = Path(args.file).expanduser()
+    if not source.is_file():
+        print(f"error: no such file: {source}", file=sys.stderr)
+        return 1
+    result = _dialect(args).attach(
+        _space(args), args.id, source.read_bytes(), source.name, caption=args.caption
+    )
+    ref = result.get("ref") or next(
+        (r for r in (result.get("payload") or {}).get("refs", [])), ""
+    )
+    print(json.dumps(result, indent=2) if args.json else f"attached → {ref}")
+    return 0
+
+
+def _cmd_attachment(args) -> int:
+    from .attachments import stored_name
+
+    stored = stored_name(args.ref) or args.ref
+    data, _mime = _dialect(args).attachment(stored)
+    out = Path(args.out) if args.out else Path(
+        args.ref.rsplit("#", 1)[-1] if "#" in args.ref else stored
+    )
+    out.write_bytes(data)
+    print(str(out))
     return 0
 
 

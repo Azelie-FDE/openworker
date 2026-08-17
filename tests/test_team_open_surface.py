@@ -319,6 +319,95 @@ def test_pending_and_consume_over_the_wire(api):
     assert nia.pending() == []
 
 
+# ------------------------------------------------------------------ attachments
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"drill-bytes"
+
+
+def test_attachment_store_is_content_addressed(tmp_path):
+    from coworker.teams.attachments import AttachmentStore, stored_name
+
+    store = AttachmentStore(tmp_path / "attachments")
+    ref = store.put(PNG, "shot.png")
+    assert ref.startswith("attachment://") and ref.endswith("#shot.png")
+    # identical bytes dedupe to the same file, whatever the filename says
+    assert stored_name(store.put(PNG, "other.png")) == stored_name(ref)
+    data = store.path_for(stored_name(ref)).read_bytes()
+    assert data == PNG
+    assert store.mime_for(stored_name(ref)) == "image/png"
+
+
+def test_attachment_store_validates(tmp_path):
+    from coworker.teams.attachments import AttachmentStore
+
+    store = AttachmentStore(tmp_path / "attachments")
+    with pytest.raises(BoardError, match="images only"):
+        store.put(b"#!/bin/sh", "run.sh")
+    with pytest.raises(BoardError, match="does not look like"):
+        store.put(b"not a png at all", "fake.png")
+    with pytest.raises(BoardError, match="not an attachment name"):
+        store.path_for("../../etc/passwd")
+
+
+def test_attach_over_the_wire_and_fetch(api):
+    client, manager, app = api
+    from fastapi.testclient import TestClient
+
+    lead_token = _tokens(manager).mint("lead-1", "lead")
+    nia_token = _tokens(manager).mint("nia", "worker")
+    lead = RemoteDialect(
+        "http://board.test",
+        lead_token,
+        client=TestClient(app, base_url="http://board.test"),
+    )
+    nia = RemoteDialect(
+        "http://board.test",
+        nia_token,
+        client=TestClient(app, base_url="http://board.test"),
+    )
+    item = lead.create_item("proj", title="With screenshot", criteria="c")
+    nia.claim("proj", item["id"])
+    result = nia.attach(
+        "proj", item["id"], PNG, "after.png", caption="statements page, dark mode"
+    )
+    assert result["ref"].startswith("attachment://")
+
+    # the ref lands on the item as a comment with the caption
+    shown = lead.get_item("proj", item["id"])
+    assert result["ref"] in shown["refs"]
+    assert shown["comments"][-1]["body"] == "statements page, dark mode"
+
+    # and the lead can fetch the bytes back
+    from coworker.teams.attachments import stored_name
+
+    data, mime = lead.attachment(stored_name(result["ref"]))
+    assert data == PNG and mime == "image/png"
+
+    # a worker cannot attach to an item outside its slice
+    other = lead.create_item("proj", title="Not nia's", criteria="c")
+    lead.assign("proj", other["id"], "someone-else")
+    with pytest.raises(BoardError, match="assigned items"):
+        nia.attach("proj", other["id"], PNG, "sneaky.png")
+
+
+def test_attach_rejects_bad_payloads_over_the_wire(api):
+    client, manager, app = api
+    lead_token = _tokens(manager).mint("lead-1", "lead")
+    headers = {"Authorization": f"Bearer {lead_token}"}
+    client.post(
+        "/v1/board/items",
+        headers=headers,
+        json={"space": "proj", "title": "T", "criteria": "c"},
+    )
+    bad = client.post(
+        "/v1/board/items/attach",
+        headers=headers,
+        json={"space": "proj", "id": 1, "filename": "x.png", "data_b64": "!!!"},
+    )
+    assert bad.status_code == 400
+    assert "base64" in bad.json()["error"]
+
+
 # ------------------------------------------------------------------ tokens
 
 
@@ -361,6 +450,7 @@ def test_mcp_tool_surface_is_role_scoped(tmp_path):
     worker_names = names(worker)
     lead_names = names(lead)
     assert "board_claim" in worker_names
+    assert "board_attach" in worker_names
     assert "board_assign" not in worker_names
     assert "board_policy" not in worker_names
     assert {"board_assign", "board_link", "board_policy"} <= lead_names

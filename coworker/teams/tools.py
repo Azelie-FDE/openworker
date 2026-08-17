@@ -63,6 +63,7 @@ def board_tools(
     space: str,
     actor: Actor,
     taint: Callable[[], bool] = lambda: False,
+    attachments=None,
 ) -> list:
     """The board verbs for one agent, pre-bound to its space and identity.
 
@@ -150,7 +151,32 @@ def board_tools(
         `blocks` (src blocks dst)."""
         return _call(store.link, space, actor, src, kind, dst)
 
+    def attach_image(item: int, path: str, caption: str = "") -> dict:
+        """Attach a screenshot or image file (png/jpg/gif/webp, ≤10MB) to a work
+        item so the lead/reviewer can SEE what you did — pair it with your review
+        hand-off. `caption` says what the image shows."""
+        from pathlib import Path as _Path
+
+        source = _Path(path).expanduser()
+        if not source.is_file():
+            return {"error": f"no such file: {path}"}
+        try:
+            ref = attachments.put(source.read_bytes(), source.name)
+        except (BoardError, ValueError) as error:
+            return {"error": str(error)}
+        return _call(
+            store.comment,
+            space,
+            actor,
+            item,
+            caption or f"attached {source.name}",
+            refs=[ref],
+            taint=taint(),
+        )
+
     verbs = LEAD_VERBS if actor.role in (Role.USER, Role.LEAD) else WORKER_VERBS
+    if attachments is not None:
+        verbs = verbs + ("attach_image",)
     local = locals()
     out = []
     for name in verbs:

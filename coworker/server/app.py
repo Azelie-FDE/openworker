@@ -921,6 +921,52 @@ def create_app(manager: SessionManager) -> FastAPI:
             ),
         )
 
+    @app.post("/v1/board/items/attach")
+    def board_attach(request: Request, body: dict):
+        body = body or {}
+
+        def run(actor):
+            raw = str(body.get("data_b64", ""))
+            # Cheap pre-decode bound: base64 is ~4/3 of the payload, so anything
+            # multiples over the cap is refused before allocating the decode.
+            if len(raw) > 15 * 1024 * 1024:
+                return JSONResponse(
+                    {"error": "attachment exceeds 10MB"}, status_code=400
+                )
+            try:
+                data = base64.b64decode(raw, validate=True)
+            except (binascii.Error, ValueError):
+                return JSONResponse(
+                    {"error": "data_b64 is not valid base64"}, status_code=400
+                )
+            ref = manager.attachment_store.put(
+                data, str(body.get("filename", ""))
+            )
+            filename = str(body.get("filename", ""))
+            event = manager.team_store.comment(
+                str(body.get("space", "")),
+                actor,
+                int(body.get("id", 0)),
+                str(body.get("caption", "")) or f"attached {filename}",
+                refs=[ref],
+            )
+            return {"ref": ref, "seq": event["seq"]}
+
+        return _board(request, run)
+
+    @app.get("/v1/board/attachment")
+    def board_attachment(request: Request, name: str):
+        def run(actor):
+            from fastapi.responses import Response
+
+            path = manager.attachment_store.path_for(name)
+            return Response(
+                content=path.read_bytes(),
+                media_type=manager.attachment_store.mime_for(name),
+            )
+
+        return _board(request, run)
+
     @app.get("/v1/board/policy")
     def board_get_policy(request: Request, space: str):
         return _board(request, lambda actor: manager.team_store.policy(space))

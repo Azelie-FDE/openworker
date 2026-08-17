@@ -89,6 +89,7 @@ from ..teams import JournalStore, Role as TeamRole, TeamStore, board_tools, jour
 from ..teams.model import space_for_workspace
 from ..teams.chat import ChatStore
 from ..teams.registry import TeamRegistry, TeamWorker
+from ..teams.attachments import AttachmentStore
 from ..teams.tokens import BoardTokens
 from ..skills import (
     SessionSkillStore,
@@ -216,6 +217,9 @@ class SessionManager:
         # External board clients (OPE-100): join tokens bind actor+role; the
         # `/v1/board` API resolves them and the store enforces authority.
         self.board_tokens = BoardTokens(base / "board-tokens.json")
+        # Work-item attachments (OPE-105): content-addressed blobs next to the
+        # board; the log carries only `attachment://` refs.
+        self.attachment_store = AttachmentStore(base / "attachments")
         self._team_inflight: set[str] = set()
         # Lead-session last-turn timestamps for the check-in backstop (monotonic-ish
         # wall clock; restart resets the clock rather than firing a wake storm).
@@ -1542,7 +1546,12 @@ class SessionManager:
                 persona=agent.name,
                 session_id=session_id,
             )
-        tools = board_tools(self.team_store, space=space, actor=actor) + journal_tools(
+        tools = board_tools(
+            self.team_store,
+            space=space,
+            actor=actor,
+            attachments=self.attachment_store,
+        ) + journal_tools(
             self.journal_store, actor=actor, space=space
         )
         if role == "lead":
