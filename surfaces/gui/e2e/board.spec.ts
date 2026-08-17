@@ -111,7 +111,7 @@ test("item detail: timeline with attachment, worker link, request changes", asyn
   // Request changes… discloses a comment box; sending returns the item to work
   await detail.getByRole("button", { name: "Request changes…" }).click();
   await detail.getByPlaceholder("What needs to change?").fill("totals drift on Tom");
-  await detail.getByRole("button", { name: "Send to security" }).click();
+  await detail.getByRole("button", { name: "Request changes", exact: true }).click();
   await expect(detail).toContainText("In progress");
   // switching rows switches the pane
   await page.getByTestId("board-item-3").click();

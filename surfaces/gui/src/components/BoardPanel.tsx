@@ -358,6 +358,8 @@ function DetailActions({
               onChange={(e) => setChangesText(e.target.value)}
             />
             <div className="board-changes-row">
+              {/* A board write, not a message: review → in_progress with the
+                  comment attached; delivery to the assignee is the queue's job. */}
               <button
                 className="board-btn primary"
                 disabled={!changesText.trim()}
@@ -365,7 +367,7 @@ function DetailActions({
                   onTransition(detail.id, "in_progress", changesText.trim())
                 }
               >
-                Send to {detail.assignee || "worker"}
+                Request changes
               </button>
               <button className="board-btn ghost" onClick={() => setChangesOpen(false)}>
                 Cancel

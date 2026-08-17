@@ -408,6 +408,27 @@ def test_item_detail_timeline_and_blocker_fact(manager):
     assert blocked["blocker"] == "need the staging tfvars"
 
 
+def test_transitions_by_others_address_the_assignee(store):
+    """A send-back or unblock is a board write, not a message — but the queue
+    projection addresses it to the worker whose action it demands (owner
+    question 2026-08-17 exposed the gap: only cancel was addressed)."""
+    item_id = assigned(store)
+    store.consume("swe-worker", store.pending_for("swe-worker")[-1]["seq"])
+    store.transition(SPACE, WORKER, item_id, "in_progress")
+    store.transition(SPACE, WORKER, item_id, "review", comment="ready")
+    assert store.pending_for("swe-worker") == []  # own moves never self-address
+    # the lead's send-back reaches the worker's queue, feedback attached
+    store.transition(SPACE, LEAD, item_id, "in_progress", comment="totals drift")
+    pending = store.pending_for("swe-worker")
+    assert [e["payload"]["to"] for e in pending] == ["in_progress"]
+    assert pending[-1]["payload"]["comment"] == "totals drift"
+    store.consume("swe-worker", pending[-1]["seq"])
+    # ...but done is deliberately unaddressed — no wake to hear "it's finished"
+    store.transition(SPACE, WORKER, item_id, "review", comment="fixed")
+    store.transition(SPACE, LEAD, item_id, "done")
+    assert store.pending_for("swe-worker") == []
+
+
 def test_cancel_notice_is_addressed_to_the_assignee(store):
     item_id = assigned(store)
     store.consume("swe-worker", store.pending_for("swe-worker")[-1]["seq"])

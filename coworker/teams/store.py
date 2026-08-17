@@ -545,12 +545,21 @@ class TeamStore:
                     f"illegal transition {current.value} → {target.value}"
                 )
             self._check_transition_authority(actor, item, current, target)
-            # Canceling an assigned item ADDRESSES the notice to its assignee — the
-            # top-priority queue entry whose delivery (or in-flight interrupt) makes
-            # the worker actually stop, instead of finishing into the void.
+            # When someone ELSE moves your assigned item to a state that needs
+            # YOUR action, the event is addressed to you: a send-back
+            # (review→in_progress with feedback), an unblock, a cancel (whose
+            # delivery/in-flight interrupt makes the worker actually stop). This
+            # is a board write, not a message — delivery is the queue projection
+            # doing its job. DONE is deliberately unaddressed: waking a worker to
+            # say its finished item is finished would burn a turn for nothing.
+            action_needed = {
+                ItemState.IN_PROGRESS,
+                ItemState.BLOCKED,
+                ItemState.CANCELED,
+            }
             recipient = (
                 item["assignee"]
-                if target is ItemState.CANCELED
+                if target in action_needed
                 and item["assignee"]
                 and item["assignee"] != actor.id
                 else None
