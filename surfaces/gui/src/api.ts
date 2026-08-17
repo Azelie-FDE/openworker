@@ -162,6 +162,20 @@ export interface MessageSource {
   sender_name: string; // resolved; may equal the id
   ts: number; // epoch seconds
   text: string; // the RAW message (what the card shows)
+  // Board wakes only (connector === "board"): the digest as structured rows, so
+  // the BoardWakeCard renders collapsed summaries instead of re-parsing prose.
+  board?: { rows: BoardWakeRow[] };
+}
+
+// One digest event on a board wake. `note` is a UI-clamped excerpt of a hand-off
+// comment (the full text lives on the board).
+export interface BoardWakeRow {
+  kind: "assigned" | "claimed" | "moved" | "filed" | "comment" | "chat" | string;
+  item?: number | null;
+  title?: string;
+  actor?: string;
+  to?: string;
+  note?: string;
 }
 
 // A transcript message from GET /v1/sessions/{id}/messages. Kept permissive (open shape) because

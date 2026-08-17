@@ -5,7 +5,7 @@
 // endpoints and act as the USER. There is NO proposed/draft state: a plan
 // proposal lives in the conversation (plan-approval flow); the board only ever
 // contains accepted work, and work starts at ASSIGNMENT.
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { Board, BoardItem } from "../api";
 import { Icon } from "./Icon";
 
@@ -39,12 +39,30 @@ export function boardSummary(board: Board): string {
 }
 
 export function BoardSection({ board, onExpand }: { board: Board; onExpand: () => void }) {
-  const groups = GROUPS.map((g) => ({
-    ...g,
-    items: board.items.filter((i) => i.state === g.state),
-  })).filter((g) => g.items.length > 0);
+  // The rail shows ACTIVE work only (owner ruling 2026-08-16): a project board
+  // outlives its sessions, so finished history from a past effort would greet
+  // every fresh session as a long stale list. Done/canceled sit behind a quiet
+  // count; the expanded overlay keeps the full picture.
+  const [showFinished, setShowFinished] = useState(false);
+  const finished = board.items.filter(
+    (i) => i.state === "done" || i.state === "canceled"
+  ).length;
+  const shown = showFinished
+    ? GROUPS
+    : GROUPS.filter((g) => g.state !== "done" && g.state !== "canceled");
+  const groups = shown
+    .map((g) => ({
+      ...g,
+      items: board.items.filter((i) => i.state === g.state),
+    }))
+    .filter((g) => g.items.length > 0);
   return (
     <div className="board-rail" data-testid="board-rail">
+      {groups.length === 0 && (
+        <div className="board-rail-quiet" data-testid="board-rail-quiet">
+          No active work
+        </div>
+      )}
       {groups.map((group) => (
         <div key={group.state}>
           <div className="board-group">{group.label}</div>
@@ -61,6 +79,15 @@ export function BoardSection({ board, onExpand }: { board: Board; onExpand: () =
           ))}
         </div>
       ))}
+      {finished > 0 && (
+        <button
+          className="board-finished-toggle"
+          data-testid="board-finished-toggle"
+          onClick={() => setShowFinished((v) => !v)}
+        >
+          {showFinished ? "Hide finished" : `${finished} finished · show`}
+        </button>
+      )}
     </div>
   );
 }

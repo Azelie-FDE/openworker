@@ -642,10 +642,42 @@ export async function mockApi(page: import("@playwright/test").Page) {
         }
         // Agent teams: the decomposition gate — the lead proposes work items and
         // SUSPENDS until the items_response verdict arrives (approval creates them).
+        // A board wake arriving on this session: the digest rides `source` with
+        // structured rows — the BoardWakeCard renders collapsed by default.
+        if (/board wake/i.test(msg.text)) {
+          send("turn_start", {
+            source: {
+              connector: "board",
+              kind: "channel",
+              channel_id: "/Users/test/OpenWorker/launch-note",
+              channel_name: "Team board",
+              sender_id: "board",
+              sender_name: "Board",
+              ts: Date.now() / 1000,
+              text: "⏰ Board wake — your team needs decisions:\n- #2 moved to review by webb",
+              board: {
+                rows: [
+                  {
+                    kind: "moved",
+                    item: 2,
+                    title: "Statements page",
+                    actor: "webb",
+                    to: "review",
+                    note: "Ready for review on feat/customer-statements, commit 029f9f7. Build verified; final verdict stays with the tester.",
+                  },
+                  { kind: "filed", item: 5, title: "Follow-up: rate limit", actor: "nia" },
+                ],
+              },
+            },
+          });
+          send("assistant_message", { text: "Reviewing the hand-off now." });
+          send("turn_done");
+          return;
+        }
         if (/propose the split/i.test(msg.text)) {
           send("items_proposed", {
             items: [
-              { title: "Statement API endpoint", criteria: "returns opening/closing balances; 8 endpoint tests green" },
+              { title: "Statement API endpoint", criteria: "returns opening/closing balances over the chosen range; 8 endpoint tests green; malformed, missing, and reversed date ranges return 400; draft invoices are excluded from issued totals; inclusive boundaries verified end to end" },
               { title: "Statements dashboard page", criteria: "renders seeded data for Ada / Northgate; empty + error states covered" },
               { title: "Statement totals reconcile", criteria: "running balance matches invoices minus payments for the range" },
               { title: "Verification pass", criteria: "tester confirms page renders with live API data" },

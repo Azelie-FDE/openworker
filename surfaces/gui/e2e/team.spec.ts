@@ -27,9 +27,57 @@ test("the decomposition gate shows items with criteria; approval lands them on t
   await card.getByRole("button", { name: /1 more item/ }).click();
   await expect(card.getByText("Verification pass")).toBeVisible();
 
+  // essay-length criteria clamp behind a per-item expander (owner-hit 2026-08-16)
+  const acToggle = page.getByTestId("itemsreq-ac-toggle-0");
+  await expect(acToggle).toHaveText("Show full criteria");
+  await acToggle.click();
+  await expect(acToggle).toHaveText("Show less");
+  // the short-criteria items get no toggle
+  await expect(page.getByTestId("itemsreq-ac-toggle-1")).toHaveCount(0);
+
   await page.getByTestId("itemsreq-approve").click();
   await expect(page.getByText(/Items created on the board/)).toBeVisible();
   await expect(page.getByTestId("board-rail")).toBeVisible();
+});
+
+test("typing while a gate is pending sends the reply as feedback to the lead", async ({
+  page,
+}) => {
+  await proposeTeam(page);
+  // the composer re-opens for a typed answer instead of hard-blocking on "running"
+  const box = page.getByPlaceholder(/Reply to adjust the proposal/);
+  await box.fill("use openai:gpt-5.6-sol for all the workers");
+  await page.getByRole("button", { name: "Send" }).click();
+  // the reply lands as a user message AND resolves the gate as decline-with-feedback
+  await expect(
+    page.getByText("use openai:gpt-5.6-sol for all the workers"),
+  ).toBeVisible();
+  await expect(page.getByText(/tell me how to change the roster/)).toBeVisible();
+  await expect(page.getByTestId("teamreq-card")).toHaveCount(0);
+});
+
+test("a board wake renders collapsed; expanding reveals rows, hand-offs stay one more click away", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByPlaceholder(/Ask the coworker/).fill("board wake");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.getByTestId("boardwake-card");
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("Board wake");
+  await expect(card).toContainText("1 review, 1 filing");
+  // collapsed by default: ambient awareness, not reading assignment
+  await expect(page.getByTestId("boardwake-body")).toHaveCount(0);
+  await expect(card).not.toContainText("029f9f7");
+  await page.getByTestId("boardwake-toggle").click();
+  const body = page.getByTestId("boardwake-body");
+  await expect(body).toBeVisible();
+  await expect(body).toContainText("#2 Statements page → review by webb");
+  await expect(body).toContainText("nia filed #5 Follow-up: rate limit");
+  // the hand-off comment sits behind its own per-row toggle
+  await expect(body).not.toContainText("029f9f7");
+  await body.getByRole("button", { name: "show hand-off" }).click();
+  await expect(body).toContainText("029f9f7");
 });
 
 test("declining the split returns feedback to the lead", async ({ page }) => {

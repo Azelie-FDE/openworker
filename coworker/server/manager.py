@@ -1955,9 +1955,9 @@ class SessionManager:
         if not self.teams.count_wake(team.team_id, cap=self.TEAM_WAKE_CAP_PER_HOUR):
             logger.warning("team %s paused for budget this hour", team.team_id)
             return 0
-        message = self._team_digest(team, directs, subs, chats, is_lead=is_lead)
+        message, rows = self._team_digest(team, directs, subs, chats, is_lead=is_lead)
         self._team_inflight.add(session_id)
-        source = self._board_source(team, message)
+        source = self._board_source(team, message, rows=rows)
 
         async def _deliver() -> None:
             try:
@@ -1980,6 +1980,21 @@ class SessionManager:
         asyncio.create_task(_deliver())
         return 1
 
+    # Long comment/hand-off bodies are already durable on the board — the wake
+    # message's job is to say what needs DECISIONS, not to re-carry the evidence
+    # into the recipient's context on every wake (owner ruling 2026-08-16). The
+    # model text clamps hard; the UI sidecar rows clamp softer (the human gets a
+    # bigger excerpt on click without re-inflating the lead's prompt).
+    DIGEST_CLAMP_MODEL = 300
+    DIGEST_CLAMP_UI = 600
+
+    @staticmethod
+    def _clamp(text: str, limit: int, *, suffix: str = "…") -> str:
+        text = (text or "").strip()
+        if len(text) <= limit:
+            return text
+        return text[:limit].rstrip() + suffix
+
     def _team_digest(
         self,
         team,
@@ -1988,10 +2003,16 @@ class SessionManager:
         chats: Optional[list[dict]] = None,
         *,
         is_lead: bool,
-    ) -> str:
+    ) -> tuple[str, list[dict]]:
         """Coalesce one queue batch into one wake message. Deterministic, computed
-        by code — the model does judgment, not arithmetic."""
+        by code — the model does judgment, not arithmetic. Returns (model text,
+        structured rows) — the rows ride the display sidecar so the GUI renders a
+        collapsed BoardWakeCard instead of re-parsing prose."""
+        clamp = lambda text: self._clamp(  # noqa: E731 — two-site local shorthand
+            text, self.DIGEST_CLAMP_MODEL, suffix=" … (full text on the board)"
+        )
         lines: list[str] = []
+        rows: list[dict] = []
         for event in directs + subs:
             item_id = event.get("item_id")
             payload = event.get("payload") or {}
@@ -2002,6 +2023,11 @@ class SessionManager:
                 except Exception:
                     item = None
             title = f"#{item_id} {item['title']}" if item else f"#{item_id}"
+            row = {
+                "item": item_id,
+                "title": item["title"] if item else "",
+                "actor": event.get("actor", ""),
+            }
             if event["kind"] == "item_assigned":
                 if item is None:
                     continue
@@ -2012,15 +2038,18 @@ class SessionManager:
                         f"{event['actor']} claimed {title} — it's theirs now;"
                         " reassign or cancel if that's wrong."
                     )
+                    rows.append({**row, "kind": "claimed"})
                     continue
                 lines.append(
                     f"You've been assigned work item {title}.\n"
                     f"  Done when: {item['criteria']}"
                     + (f"\n  Details: {item['description']}" if item["description"] else "")
                 )
+                rows.append({**row, "kind": "assigned"})
             elif event["kind"] == "item_transitioned":
                 to = payload.get("to", "?")
-                note = f" — “{payload.get('comment')}”" if payload.get("comment") else ""
+                comment = clamp(payload.get("comment") or "")
+                note = f" — “{comment}”" if comment else ""
                 if to == "canceled" and not is_lead:
                     lines.append(
                         f"{title} was CANCELED by {event['actor']}{note} — stop any"
@@ -2028,32 +2057,63 @@ class SessionManager:
                     )
                 else:
                     lines.append(f"{title} moved to {to} by {event['actor']}{note}")
+                rows.append(
+                    {
+                        **row,
+                        "kind": "moved",
+                        "to": to,
+                        "note": self._clamp(
+                            payload.get("comment") or "", self.DIGEST_CLAMP_UI
+                        ),
+                    }
+                )
             elif event["kind"] == "item_created":
                 lines.append(f"New item filed by {event['actor']}: {title}")
+                rows.append({**row, "kind": "filed"})
             elif event["kind"] == "item_commented":
                 lines.append(
-                    f"Comment on {title} by {event['actor']}: {payload.get('body', '')}"
+                    f"Comment on {title} by {event['actor']}:"
+                    f" {clamp(payload.get('body', ''))}"
+                )
+                rows.append(
+                    {
+                        **row,
+                        "kind": "comment",
+                        "note": self._clamp(
+                            payload.get("body") or "", self.DIGEST_CLAMP_UI
+                        ),
+                    }
                 )
         for chat in chats or []:
             who = chat["author"] if chat["author_role"] != "user" else "[User]"
-            lines.append(f"# team chat — {who}: {chat['text']}")
+            lines.append(f"# team chat — {who}: {clamp(chat['text'])}")
+            rows.append(
+                {
+                    "kind": "chat",
+                    "actor": who,
+                    "note": self._clamp(chat["text"], self.DIGEST_CLAMP_UI),
+                }
+            )
         body = "\n".join(f"- {line}" for line in lines) or "- (no detail)"
         if is_lead:
-            return (
+            message = (
                 "⏰ Board wake — your team needs decisions:\n"
                 + body
-                + "\n\nVerify review items against their acceptance criteria (then"
+                + "\n\nFull hand-off comments live on the board (get_item)."
+                " Verify review items against their acceptance criteria (then"
                 " done, or send back with a comment), unblock or reassign blocked"
                 " items, and triage new filings. Steer only where needed."
             )
-        return (
-            "[Lead] Board update:\n"
-            + body
-            + self._roster_note(team)
-            + "\n\nMove your item to in_progress when you start; blocked (with a"
-            " comment) if stuck; review with a hand-off comment when finished."
-            " Journal evidence as you go."
-        )
+        else:
+            message = (
+                "[Lead] Board update:\n"
+                + body
+                + self._roster_note(team)
+                + "\n\nMove your item to in_progress when you start; blocked (with a"
+                " comment) if stuck; review with a hand-off comment when finished."
+                " Journal evidence as you go."
+            )
+        return message, rows
 
     @staticmethod
     def _roster_note(team) -> str:
@@ -2074,11 +2134,15 @@ class SessionManager:
         return f"\n\nYour team: {mates}; lead (coordinator).{reach}"
 
     @staticmethod
-    def _board_source(team, message: str) -> dict[str, Any]:
+    def _board_source(
+        team, message: str, *, rows: Optional[list[dict]] = None
+    ) -> dict[str, Any]:
         """Display-only MessageSource sidecar for board deliveries — the same
         mechanism connector messages use, so the GUI renders a structured card
         instead of a fake user bubble (owner ask 2026-08-16). The framed message
-        stays the model-facing text; this only shapes presentation."""
+        stays the model-facing text; this only shapes presentation. `rows` are
+        the digest's structured events — the BoardWakeCard renders those
+        (collapsed to one line by default) instead of re-parsing the prose."""
         return {
             "connector": "board",
             "kind": "channel",
@@ -2088,6 +2152,7 @@ class SessionManager:
             "sender_name": "Board",
             "ts": time.time(),
             "text": message,
+            "board": {"rows": rows or []},
         }
 
     def team_staleness_digest(self, session_id: str) -> str:

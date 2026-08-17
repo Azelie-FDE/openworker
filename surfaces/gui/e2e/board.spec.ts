@@ -61,6 +61,26 @@ test("expand opens the overlay board; the user verifies review items and removes
   await expect(page.getByTestId("board-overlay")).toHaveCount(0);
 });
 
+test("finished items leave the rail; a quiet toggle reveals them", async ({ page }) => {
+  await planTheWork(page);
+  const rail = page.getByTestId("board-rail");
+  await expect(rail.getByText("Report rollup")).toBeVisible(); // review = active
+  await page.getByTestId("board-expand").click();
+  await page
+    .getByTestId("board-col-review")
+    .getByRole("button", { name: "Mark done" })
+    .click();
+  await page.keyboard.press("Escape");
+  // done vanishes from the rail — a fresh session on an old board starts calm
+  await expect(rail.getByText("Report rollup")).toHaveCount(0);
+  const toggle = page.getByTestId("board-finished-toggle");
+  await expect(toggle).toHaveText("1 finished · show");
+  await toggle.click();
+  await expect(rail.getByText("Report rollup")).toBeVisible();
+  await toggle.click();
+  await expect(rail.getByText("Report rollup")).toHaveCount(0);
+});
+
 test("journal section lists cases once a board exists", async ({ page }) => {
   await planTheWork(page);
   await page.getByRole("button", { name: /Journal/ }).click();

@@ -333,9 +333,42 @@ def test_create_team_uses_callnames_and_creates_the_chat_group(manager, monkeypa
     group = manager.chat_store.get_group(team.chat_group)
     assert {m["name"] for m in group["members"]} == {"nia", "nia-2", "lead"}
     # the worker digest carries the roster + how to reach teammates
-    digest = manager._team_digest(team, [], [], is_lead=False)
+    digest, _rows = manager._team_digest(team, [], [], is_lead=False)
     assert "Your team: nia (swe-worker — implementation)" in digest
     assert "@name in # team chat" in digest
+
+
+def test_digest_clamps_long_comments_and_carries_structured_rows(manager):
+    """Hand-off essays live on the board; the wake message carries a head, the
+    sidecar carries UI rows (owner ruling 2026-08-16 — the digest was arriving
+    as a wall of text)."""
+    from coworker.teams.registry import Team
+
+    space = str(manager.default_workspace)
+    lead = Actor(id="lead-1", role=Role.LEAD)
+    worker = Actor(id="nia", role=Role.WORKER)
+    item = manager.team_store.create_item(
+        space, lead, title="Big item", criteria="c"
+    )
+    manager.team_store.assign(space, lead, item["id"], "nia")
+    essay = "verified the endpoint thoroughly. " * 40  # ~1300 chars
+    manager.team_store.transition(
+        space, worker, item["id"], "in_progress"
+    )
+    manager.team_store.transition(
+        space, worker, item["id"], "review", comment=essay
+    )
+    team = Team(team_id="t1", space=space, lead_session="s", lead_actor="lead-1")
+    subs = manager.team_store.subscribed_events(space, "lead-1")
+    message, rows = manager._team_digest(team, [], subs, is_lead=True)
+    # model text: clamped hard, with the pointer back to the board
+    assert essay not in message
+    assert "(full text on the board)" in message
+    assert len(message) < 1200
+    # sidecar rows: structured, softer clamp for the human on click
+    moved = [r for r in rows if r["kind"] == "moved" and r["to"] == "review"]
+    assert moved and moved[0]["item"] == item["id"]
+    assert moved[0]["note"].endswith("…") and len(moved[0]["note"]) < 700
 
 
 def test_cancel_notice_is_addressed_to_the_assignee(store):

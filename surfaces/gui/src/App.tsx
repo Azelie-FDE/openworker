@@ -1020,6 +1020,24 @@ export function App() {
       setSendGate({ text, attachments, skill });
       return;
     }
+    // A typed message while a proposal gate is pending IS the answer: it resolves
+    // the gate as decline-with-feedback, so "use gpt-5.6-sol for all workers"
+    // reaches the lead instead of bouncing off a blocked composer (owner-hit
+    // 2026-08-16). The card buttons stay the approve/plain-decline paths.
+    if (!unattended && pendingTeam?.kind === "teamreq" && !pendingTeam.resolved) {
+      setItems((p) => [...p, { kind: "user", text, ts: Date.now() / 1000 }]);
+      respondTeam(false, text);
+      return;
+    }
+    if (
+      !unattended &&
+      pendingItemsReq?.kind === "itemsreq" &&
+      !pendingItemsReq.resolved
+    ) {
+      setItems((p) => [...p, { kind: "user", text, ts: Date.now() / 1000 }]);
+      respondItemsReq(false, text);
+      return;
+    }
     // Force-run shows exactly what the user typed: "/name rest". Must match the server's
     // `display` sidecar formula so the turn_start dedupe recognizes the local echo.
     const shown = skill ? `/${skill}${text ? ` ${text}` : ""}` : text;
@@ -1952,6 +1970,7 @@ export function App() {
               models={models}
               modelLabels={modelLabels}
               running={running}
+              gateOpen={!unattended && (!!pendingTeam || !!pendingItemsReq)}
               connected={connected}
               modelReady={modelReady}
               onConnectModel={openModelSetup}

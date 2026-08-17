@@ -456,7 +456,9 @@ button.btn.danger { color: var(--accent); }
    (Composer.tsx); only the textarea reset + drag-ring remain in CSS. */
 .composer textarea {
   width: 100%; border: none; outline: none; resize: none; font: inherit; font-size: 14.5px; line-height: 1.45;
-  background: transparent; color: var(--ink); min-height: 24px; max-height: 88px; overflow: hidden;
+  background: transparent; color: var(--ink); min-height: 24px; overflow: hidden;
+  /* Height (incl. the cap) is owned by the autogrow effect in Composer.tsx — a
+     CSS max-height here fought it and re-created the OPE-106 clipping. */
 }
 .composer textarea::placeholder { color: var(--faint); }
 .voice-wave-line { flex: 1; min-width: 28px; border-top: 1px dashed var(--line-strong); }
@@ -1640,6 +1642,42 @@ html[data-platform="linux"] ::-webkit-scrollbar-thumb:hover { background-color: 
 
 /* ── Agent teams (OPE-96): board rail, expanded overlay, plan gate ─────────── */
 .board-rail { display: flex; flex-direction: column; gap: 2px; }
+.board-rail-quiet { font-size: 12px; color: var(--faint); padding: 2px 0 4px; }
+.board-finished-toggle {
+  align-self: flex-start; border: none; background: none; padding: 4px 0 0; cursor: pointer;
+  font-size: 11.5px; color: var(--faint);
+}
+.board-finished-toggle:hover { color: var(--muted); text-decoration: underline; }
+
+/* -- BoardWakeCard: a board wake collapsed to one line (click to expand) ------- */
+.boardwake {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+  margin: 2px 0; overflow: hidden;
+}
+.boardwake.attention { border-color: color-mix(in srgb, var(--warn, #b98a2f) 45%, var(--line)); }
+.boardwake-head {
+  display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+  border: none; background: none; cursor: pointer; padding: 7px 10px;
+  font-size: 12.5px; color: var(--muted);
+}
+.boardwake-head:hover { background: var(--paper); }
+.boardwake-title { font-weight: 600; color: var(--ink); }
+.boardwake-chevron { display: inline-flex; transition: transform 0.15s; }
+.boardwake-chevron.open { transform: rotate(180deg); }
+.boardwake-summary { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.boardwake-body { border-top: 1px solid var(--line); padding: 6px 10px 8px; max-height: 260px; overflow-y: auto; }
+.boardwake-row { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; }
+.boardwake-row-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.boardwake-row-text { font-size: 12px; color: var(--ink); }
+.boardwake-note {
+  font-size: 11.5px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere;
+  border-left: 2px solid var(--line); padding-left: 8px;
+}
+.boardwake-note-toggle {
+  align-self: flex-start; border: none; background: none; padding: 0; cursor: pointer;
+  font-size: 11px; color: var(--accent);
+}
+.boardwake-note-toggle:hover { text-decoration: underline; }
 .board-group {
   font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--faint); font-weight: 700; margin: 8px 0 3px;
@@ -1746,6 +1784,17 @@ html[data-platform="linux"] ::-webkit-scrollbar-thumb:hover { background-color: 
 .itemsreq-item-title { font-size: 12.5px; color: var(--ink); }
 .itemsreq-ac { font-size: 11.5px; color: var(--muted); }
 .itemsreq-ac b { font-weight: 600; }
+/* Essay-length criteria clamp to two lines; the expander reveals the rest. The
+   list itself caps so a big proposal never occupies two screens of chat. */
+.itemsreq-ac.clamped {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.itemsreq-ac-toggle {
+  align-self: flex-start; border: none; background: none; padding: 0; cursor: pointer;
+  font-size: 11px; color: var(--accent);
+}
+.itemsreq-ac-toggle:hover { text-decoration: underline; }
+.itemsreq-list { max-height: 320px; overflow-y: auto; }
 .itemsreq-more { display: flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--accent); font-size: 12px; cursor: pointer; padding: 6px 0; }
 .itemsreq-grant { font-size: 11.5px; color: var(--faint); }
 

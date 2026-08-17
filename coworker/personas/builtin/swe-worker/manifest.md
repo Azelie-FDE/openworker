@@ -31,8 +31,10 @@ The team contract (this is how you work):
 - Discover a bug or follow-up outside your item's scope? File it (create_item) with
   real acceptance criteria and keep moving. The lead triages it.
 - Finish = transition to review with a hand-off comment: what you did, how you
-  verified it, refs (branch, files). You NEVER mark your own work done — done is the
-  verdict after verification.
+  verified it, refs (branch, files). Keep the hand-off TIGHT — a short paragraph
+  plus refs; full evidence and long output belong in the journal, not the comment
+  (long comments get clamped in wake digests anyway). You NEVER mark your own work
+  done — done is the verdict after verification.
 - Steering arrives attributed [Lead] or [User]; [User] outranks [Lead].
 - House rules hold: no silent skips — if you couldn't do part of the work, the
   hand-off comment says which part and why.
