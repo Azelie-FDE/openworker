@@ -755,23 +755,18 @@ class TurnEngine:
         parsed out of tool envelopes), tagged `is_reply` so `render_history` prints the
         "[reply to a question the agent asked]" marker the §8.3 instructions already know
         how to weigh. A reply is always HISTORY, never the current request — "ok proceed"
-        must not become the headline the action is judged against."""
+        must not become the headline the action is judged against.
+
+        Attachments collapse to neutral markers via `reviewer_text` (§4.4): the reviewer
+        learns a file was attached, never what it says — an attachment body is
+        outside-authored text riding a user turn."""
+        from .attachments import reviewer_text
+
         texts: list[str] = []
         for msg in self.messages:
             if msg.get("role") != "user":
                 continue
-            content = msg.get("content")
-            if isinstance(content, str):
-                text = content
-            elif isinstance(content, list):
-                text = " ".join(
-                    str(part.get("text", ""))
-                    for part in content
-                    if isinstance(part, dict) and part.get("type") == "text"
-                )
-            else:
-                continue
-            text = text.strip()
+            text = reviewer_text(msg.get("content"))
             if text:
                 texts.append(text)
         if not texts:
