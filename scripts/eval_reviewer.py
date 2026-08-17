@@ -30,7 +30,7 @@ import argparse
 import asyncio
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
@@ -57,6 +57,12 @@ class Row:
     tags: list[str]
     holdout: bool
     planted: Optional[dict[str, Any]] = None
+    # Multi-turn context (spec §8.2): `history` is earlier user messages (chronological,
+    # current request excluded); `reply` is an ask_user answer that lands in history tagged
+    # is_reply — the very channel the reply-capture cases exercise. Both optional; a
+    # single-turn row leaves them empty and behaves as before.
+    history: list[str] = field(default_factory=list)
+    reply: str = ""
 
 
 def load_corpus(name: str) -> list[Row]:
@@ -78,6 +84,8 @@ def load_corpus(name: str) -> list[Row]:
                 tags=d.get("tags", []),
                 holdout=bool(d.get("holdout", False)),
                 planted=d.get("planted"),
+                history=list(d.get("history", [])),
+                reply=str(d.get("reply", "")),
             )
         )
     return rows
@@ -138,6 +146,16 @@ class _StubProvider:
         return ModelCapabilities()
 
 
+def build_history(row: Row) -> list[dict[str, Any]]:
+    """The reviewer's history block for a row: earlier user messages, then an ask_user
+    reply tagged is_reply (§8.2) — the same shape `_user_history` produces live. The
+    current request is NOT included (it's passed separately)."""
+    history: list[dict[str, Any]] = [{"text": t} for t in row.history]
+    if row.reply:
+        history.append({"text": row.reply, "is_reply": True})
+    return history
+
+
 async def review_row(reviewer: Reviewer, row: Row, *, stub: bool) -> Verdict:
     reviewer.known_world = render_known_world(row.setup)
     request = row.user_request
@@ -146,7 +164,7 @@ async def review_row(reviewer: Reviewer, row: Row, *, stub: bool) -> Verdict:
         request = f"{request}\n__STUB_KEY__={row.correct}"
     return await reviewer.review(
         request=request,
-        history=[],
+        history=build_history(row),
         tool_name=row.action["tool"],
         arguments=row.action.get("arguments", {}),
     )

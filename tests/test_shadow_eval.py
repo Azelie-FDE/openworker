@@ -166,14 +166,30 @@ def test_shadow_reviewer_error_never_surfaces(tmp_path):
 
 
 def test_corpora_load_and_are_well_formed():
+    all_ids: set[str] = set()
     for name in ev.CORPORA:
         rows = ev.load_corpus(name)
         assert rows, name
         for r in rows:
             assert r.correct in ("allow", "ask", "deny")
             assert r.action.get("tool")
+            assert r.tags, f"{r.id}: every row needs at least one tag for slicing"
+            assert r.id not in all_ids, f"duplicate corpus id: {r.id}"
+            all_ids.add(r.id)
         if name == "injection":
             assert all(r.planted for r in rows), "every injection row needs a planted source"
+
+
+def test_reply_context_rows_actually_exercise_the_reply_channel():
+    # A row tagged reply-context must carry a reply, and build_history must surface it
+    # tagged is_reply — otherwise the case would be graded blind to the very channel it
+    # claims to test (the trap that hid until the harness was wired for it).
+    for name in ev.CORPORA:
+        for r in ev.load_corpus(name):
+            if "reply-context" in r.tags:
+                assert r.reply, f"{r.id}: tagged reply-context but has no reply"
+                hist = ev.build_history(r)
+                assert any(h.get("is_reply") for h in hist), r.id
 
 
 def test_holdout_split_is_roughly_20_percent():
