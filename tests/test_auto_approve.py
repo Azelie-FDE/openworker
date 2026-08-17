@@ -158,6 +158,87 @@ def test_reply_tag_is_rendered():
     assert "[reply to a question the agent asked]" in rendered
 
 
+# -- ask_user answers reach the reviewer history (§8.2 reply capture) --------------
+
+
+def _drain(agen):
+    async def _go():
+        return [e async for e in agen]
+
+    return asyncio.run(_go())
+
+
+def test_ask_user_answer_lands_in_history_tagged_and_never_becomes_the_request(tmp_path):
+    engine, _rows, _approvals = _engine(tmp_path, [])
+    engine.messages.append({"role": "user", "content": "test the migration"})
+
+    async def asker(args, tool_call_id=None):
+        return {"answer": "yes, staging is fine"}
+
+    engine.question_asker = asker
+    _drain(
+        engine._handle_ask_user(
+            ToolCall(id="q1", name="ask_user", arguments={"question": "Use the staging DB?"})
+        )
+    )
+
+    # Same turn: the consent is already visible to the reviewer for the NEXT action…
+    request, history = engine._user_history()
+    assert request == "test the migration"  # …and never becomes the current request
+    assert {"text": "yes, staging is fine", "is_reply": True} in history
+    rendered = reviewer_mod.render_history(history)
+    assert "[reply to a question the agent asked]" in rendered
+    # Step 1 is answers-only: the agent's question text stays out of the judge's view.
+    assert "Use the staging DB?" not in rendered
+
+    # Next turn: the reply keeps its chronological slot after the message it followed.
+    engine.messages.append({"role": "user", "content": "now update the changelog"})
+    request, history = engine._user_history()
+    assert request == "now update the changelog"
+    assert history == [
+        {"text": "test the migration"},
+        {"text": "yes, staging is fine", "is_reply": True},
+    ]
+
+
+def test_grouped_ask_answers_record_values_only(tmp_path):
+    engine, _rows, _approvals = _engine(tmp_path, [])
+    engine.messages.append({"role": "user", "content": "set up the client"})
+
+    async def asker(args, tool_call_id=None):
+        return {"answers": {"Which region?": "eu-west-1", "Which account?": "work"}}
+
+    engine.question_asker = asker
+    _drain(
+        engine._handle_ask_user(
+            ToolCall(id="q1", name="ask_user", arguments={"question": "Config?"})
+        )
+    )
+    _, history = engine._user_history()
+    replies = [h["text"] for h in history if h.get("is_reply")]
+    assert replies == ["eu-west-1", "work"]
+    # The grouped form's keys are the agent's own question headers — never recorded.
+    assert engine._ask_replies == [(1, "eu-west-1"), (1, "work")]
+
+
+def test_unanswered_ask_records_nothing(tmp_path):
+    engine, _rows, _approvals = _engine(tmp_path, [])
+    engine.messages.append({"role": "user", "content": "hi"})
+
+    async def asker(args, tool_call_id=None):
+        return {"answer": "", "error": "interrupted by user"}
+
+    engine.question_asker = asker
+    _drain(
+        engine._handle_ask_user(
+            ToolCall(id="q1", name="ask_user", arguments={"question": "anything?"})
+        )
+    )
+    assert engine._ask_replies == []
+    _, history = engine._user_history()
+    assert all(not h.get("is_reply") for h in history)
+
+
 # -- Reviewer.review: never raises ------------------------------------------------
 
 

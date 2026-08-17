@@ -138,6 +138,18 @@ class TurnEngine:
         # re-proposal with even slightly different arguments does not match and goes back
         # through the reviewer/card — deliberately narrow, deliberately not standing.
         self._allow_anyway: set[tuple[str, str]] = set()
+        # ask_user answers for the reviewer's history (§8.2 — the missing third of the
+        # reply-tag feature: render_history prints the tag and the §8.3 instructions say to
+        # weigh it lower; this is the extractor that finally delivers the data). Captured at
+        # the moment the asker returns — the one point where the engine KNOWS the text came
+        # from the human, whichever authenticated surface answered (inline card, Inbox, or a
+        # bound channel; the same trust approval clicks already carry). ANSWERS ONLY, never
+        # the agent's question: agent-authored text stays out of the judge's view — showing
+        # the question too is step 2, evidence-gated on shadow data. Each entry is
+        # (anchor, text) where anchor = how many user messages existed at capture, so the
+        # merge in `_user_history` stays chronological. Runtime-only on purpose: a restart
+        # costs the reviewer context (more cards), never correctness.
+        self._ask_replies: list[tuple[int, str]] = []
         # Extra user-facing fields for a tool's approval card, merged into the
         # PERMISSION_REQUIRED payload — e.g. web_search's live provider name, so the card
         # can say where queries actually go (§1.9). Set post-construction by the surface
@@ -737,7 +749,13 @@ class TurnEngine:
 
     def _user_history(self) -> tuple[str, list[dict[str, Any]]]:
         """(current request, earlier user messages) — the user's own words only, extracted
-        mechanically (§8.2). Never agent output, never tool results, never a summary."""
+        mechanically (§8.2). Never agent output, never tool results, never a summary.
+
+        `ask_user` answers are merged in from `_ask_replies` (captured as they arrived, not
+        parsed out of tool envelopes), tagged `is_reply` so `render_history` prints the
+        "[reply to a question the agent asked]" marker the §8.3 instructions already know
+        how to weigh. A reply is always HISTORY, never the current request — "ok proceed"
+        must not become the headline the action is judged against."""
         texts: list[str] = []
         for msg in self.messages:
             if msg.get("role") != "user":
@@ -757,8 +775,22 @@ class TurnEngine:
             if text:
                 texts.append(text)
         if not texts:
-            return "", []
-        return texts[-1], [{"text": t} for t in texts[:-1]]
+            return "", [{"text": t, "is_reply": True} for _, t in self._ask_replies]
+        history: list[dict[str, Any]] = []
+        for i, t in enumerate(texts[:-1], start=1):
+            history.append({"text": t})
+            history.extend(
+                {"text": r, "is_reply": True} for a, r in self._ask_replies if a == i
+            )
+        # Replies captured during the current turn (anchor == len(texts)) — or after an
+        # anchor message that was itself empty/skipped — land at the tail, so a same-turn
+        # consent is already visible to the reviewer for the very next action.
+        history.extend(
+            {"text": r, "is_reply": True}
+            for a, r in self._ask_replies
+            if a >= len(texts)
+        )
+        return texts[-1], history
 
     async def _preconsult_reviewer(self, tool_calls: list[ToolCall]) -> None:
         """Fire one reviewer request per call that will escalate, all concurrently, and
@@ -1315,6 +1347,8 @@ class TurnEngine:
             }
 
         status = "ok" if (result.get("answer") or result.get("answers")) else "denied"
+        if status == "ok":
+            self._note_ask_replies(result)
         self.messages.append(_tool_result_message(tool_call, result))
         self._audit(
             tool_call,
@@ -1331,6 +1365,23 @@ class TurnEngine:
                 "result_preview": _preview(result),
             },
         )
+
+    def _note_ask_replies(self, result: dict[str, Any]) -> None:
+        """Record the user's ask_user answer(s) for the reviewer's history (§8.2). Values
+        only — a grouped form's keys are the agent's own question headers, and agent text
+        never enters the judge's view. Anchored to the number of user messages present now,
+        so the merge stays chronological however the session continues."""
+        anchor = sum(1 for m in self.messages if m.get("role") == "user")
+        answers = result.get("answers")
+        values = (
+            [str(v) for v in answers.values()]
+            if isinstance(answers, dict)
+            else [str(result.get("answer") or "")]
+        )
+        for text in values:
+            text = text.strip()
+            if text:
+                self._ask_replies.append((anchor, text))
 
     def _inject_steering(self) -> None:
         for text, source in self._steering:
