@@ -402,8 +402,27 @@ def test_allow_verdict_counts_tokens():
     assert v.verdict == "allow"
     assert rv.stats == {
         "checks": 1, "allow": 1, "deny": 0, "unsure": 0,
-        "tokens_in": 100, "tokens_out": 20,
+        "tokens_in": 100, "tokens_out": 20, "cache_read": 0, "cache_write": 0,
     }
+
+
+def test_cache_tokens_are_carried_not_dropped():
+    # Auto-caching providers (OpenAI/Together/Gemini) serve most of the prefix from cache
+    # and report it separately; dropping it made a 1,400-token call read as "16 in".
+    provider = _Provider(['{"verdict": "allow", "reason": "ok"}'])
+    original = provider.complete
+
+    def complete(**kw):
+        turn = original(**kw)
+        turn.usage.input = 16
+        turn.usage.cache_read = 1384
+        return turn
+
+    provider.complete = complete
+    rv = Reviewer(provider=provider, model="m")
+    v = _review(rv)
+    assert (v.tokens_in, v.cache_read) == (16, 1384)
+    assert rv.stats["cache_read"] == 1384
 
 
 # -- engine integration -----------------------------------------------------------

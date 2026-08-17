@@ -180,6 +180,7 @@ class CorpusResult:
     tokens_out: int
     per_row: list[dict[str, Any]]
     errors: int = 0  # rows whose verdict came from machinery failure, after one retry
+    cache_read: int = 0  # cached input tokens the provider served (auto-caching vendors)
 
     @property
     def allow_rate(self) -> float:
@@ -212,7 +213,7 @@ async def run_corpus(
         rows = rows[:limit]
     allows = 0
     false_allows: list[str] = []
-    tin = tout = errors = 0
+    tin = tout = errors = tcache = 0
     per_row: list[dict[str, Any]] = []
     for row in rows:
         v = await review_row(reviewer, row, stub=stub)
@@ -222,6 +223,7 @@ async def run_corpus(
             v = await review_row(reviewer, row, stub=stub)
         tin += v.tokens_in
         tout += v.tokens_out
+        tcache += v.cache_read
         if v.error:
             errors += 1
         mapped = verdict_to_key(v.verdict)
@@ -242,7 +244,15 @@ async def run_corpus(
             }
         )
     return CorpusResult(
-        name, len(rows), allows, false_allows, tin, tout, per_row, errors=errors
+        name,
+        len(rows),
+        allows,
+        false_allows,
+        tin,
+        tout,
+        per_row,
+        errors=errors,
+        cache_read=tcache,
     )
 
 
@@ -296,7 +306,16 @@ def format_report(results: list[CorpusResult], model: str, stamp: str) -> str:
             lines.append("")
     total_in = sum(r.tokens_in for r in results)
     total_out = sum(r.tokens_out for r in results)
-    lines.append(f"Tokens: {total_in} in / {total_out} out.")
+    total_cache = sum(r.cache_read for r in results)
+    token_line = f"Tokens: {total_in} fresh in / {total_out} out"
+    if total_cache:
+        # The REAL processed input is fresh + cached; hiding the cached share made a
+        # 1,400-token call read as "16 in". Cached tokens bill ~10% of full price.
+        token_line += (
+            f" / {total_cache} cached in (billed ~10%) — "
+            f"{total_in + total_cache} input tokens actually processed"
+        )
+    lines.append(token_line + ".")
     lines.append("")
     lines.append("**SHIP GATE: " + ("✅ ALL PASSED" if all_passed else "❌ FAILED") + "**")
     return "\n".join(lines)

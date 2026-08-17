@@ -157,9 +157,15 @@ _VALID_VERDICTS = frozenset({"allow", "deny", "unsure"})
 class Verdict:
     verdict: str  # "allow" | "deny" | "unsure" — never anything else
     reason: str
-    # Diagnostics for audit/metering; never shown to the agent.
+    # Diagnostics for audit/metering; never shown to the agent. `tokens_in` is the FRESH
+    # input share (what providers bill full price); `cache_read`/`cache_write` are the
+    # cached shares several providers serve/report automatically. Dropping them made a
+    # 1,400-token call report as "16 in" (Together GLM, live 2026-08-17) — the real
+    # processed volume is tokens_in + cache_read, and reports must say so.
     tokens_in: int = 0
     tokens_out: int = 0
+    cache_read: int = 0
+    cache_write: int = 0
     # True when this `unsure` came from the MACHINERY failing (provider error, timeout),
     # not from the model judging. The live engine treats both identically — card, human —
     # but the eval must not: an errored row measured nothing, and a gate "passed" on
@@ -295,6 +301,8 @@ class Reviewer:
             "unsure": 0,
             "tokens_in": 0,
             "tokens_out": 0,
+            "cache_read": 0,
+            "cache_write": 0,
         }
 
     async def review(
@@ -339,6 +347,8 @@ class Reviewer:
                 verdict.reason,
                 tokens_in=int(getattr(usage, "input", 0) or 0),
                 tokens_out=int(getattr(usage, "output", 0) or 0),
+                cache_read=int(getattr(usage, "cache_read", 0) or 0),
+                cache_write=int(getattr(usage, "cache_write", 0) or 0),
             )
         return self._count(verdict)
 
@@ -347,4 +357,6 @@ class Reviewer:
         self.stats[verdict.verdict] += 1
         self.stats["tokens_in"] += verdict.tokens_in
         self.stats["tokens_out"] += verdict.tokens_out
+        self.stats["cache_read"] += verdict.cache_read
+        self.stats["cache_write"] += verdict.cache_write
         return verdict
