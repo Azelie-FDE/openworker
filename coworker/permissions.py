@@ -204,6 +204,12 @@ class Decision:
     allowed: bool
     reason: str = ""
     needs_user: bool = False  # True → surface should prompt the user for approval
+    # True → this ask is reserved for a HUMAN: the Auto-Approve reviewer must not be
+    # consulted and cannot clear it. Set on decisions whose entire point is that a person
+    # sees them — protected in-project files that execute later (git hooks, CI configs:
+    # "never WITHOUT a human — no auto-approve path may clear them") and writes whose path
+    # could not be located for scoping (an allow would bypass root scoping unverified).
+    human_only: bool = False
     # Set when a task-scoped standing rule allowed the call ("tool → target") so the
     # engine can audit the exact rule and the tool card can say so (§25).
     rule: str = ""
@@ -313,6 +319,7 @@ class PermissionEngine:
                     False,
                     "cannot determine the write path to scope",
                     needs_user=True,
+                    human_only=True,  # an unscopable write must reach a person, not the reviewer
                 )
             for path in paths:
                 if not self._under_writable_root(path):
@@ -335,6 +342,7 @@ class PermissionEngine:
                 False,
                 "this file runs automatically later — approval required",
                 needs_user=True,
+                human_only=True,  # deferred-execution files: a human sees every one (§ floor)
             )
 
         # Full access.

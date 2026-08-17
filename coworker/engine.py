@@ -806,7 +806,8 @@ class TurnEngine:
             decision = self.permissions.evaluate(
                 tool_call.name, tool_call.arguments, spec.metadata
             )
-            if not decision.allowed and decision.needs_user:
+            # human_only asks never reach the reviewer — same rule as `_authorize`.
+            if not decision.allowed and decision.needs_user and not decision.human_only:
                 pending.append(tool_call)
         if not pending:
             return
@@ -948,10 +949,17 @@ class TurnEngine:
             self._audit(tool_call, stage="auto_allowed", status="allowed", reason=reason)
 
         consulted_live = False
-        if not allowed and decision.needs_user and self._reviewer_active():
+        if (
+            not allowed
+            and decision.needs_user
+            and not decision.human_only
+            and self._reviewer_active()
+        ):
             # The one thing the reviewer may do: turn "ask the human" into "go ahead" —
             # never "blocked" into "go ahead" (§1.2; hard denies never reach this branch
-            # because needs_user is False on them).
+            # because needs_user is False on them). `human_only` asks (git hooks, CI
+            # configs, unscopable writes) skip the reviewer entirely: their floor is that
+            # a PERSON sees them, and a verdict here would be that floor's bypass.
             consulted_live = True
             verdict = await self._consult_reviewer(tool_call)
             self._audit(
