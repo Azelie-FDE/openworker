@@ -158,6 +158,21 @@ def test_reply_tag_is_rendered():
     assert "[reply to a question the agent asked]" in rendered
 
 
+def test_replies_are_labelled_reply_and_turn_numbering_skips_them():
+    # A reply is not a "turn": labelling it as one would read as a spontaneous statement.
+    rendered = reviewer_mod.render_history(
+        [
+            {"text": "fix the tests"},
+            {"text": "yes", "is_reply": True},
+            {"text": "update the changelog"},
+        ]
+    )
+    lines = rendered.splitlines()[1:]
+    assert lines[0].startswith("  turn 1  fix the tests")
+    assert lines[1].startswith("  reply   yes") and "turn" not in lines[1]
+    assert lines[2].startswith("  turn 2  update the changelog")  # numbering skipped the reply
+
+
 # -- ask_user answers reach the reviewer history (§8.2 reply capture) --------------
 
 

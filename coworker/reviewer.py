@@ -202,16 +202,23 @@ def render_history(user_messages: list[dict[str, Any]]) -> str:
     """The EARLIER-IN-THIS-SESSION block: the user's own words, mechanically extracted,
     clipped hard, with `ask_user` replies tagged as replies (§8.2). `user_messages` is a
     list of {"text": str, "is_reply": bool} in chronological order, current turn excluded.
-    """
+
+    Replies are labelled `reply`, never `turn N`: a "turn" is a message the user sent on
+    their own, and labelling an answer as one would read as a spontaneous statement —
+    stronger evidence than it is. Turn numbering counts real messages only."""
     if not user_messages:
         return ""
     lines = ["EARLIER IN THIS SESSION (the user's own words, verbatim)"]
-    for i, msg in enumerate(user_messages, start=1):
+    turn = 0
+    for msg in user_messages:
         text = clip_message(str(msg.get("text", "")))
         if not text:
             continue
-        tag = "  [reply to a question the agent asked]" if msg.get("is_reply") else ""
-        lines.append(f"  turn {i}  {text}{tag}")
+        if msg.get("is_reply"):
+            lines.append(f"  reply   {text}  [reply to a question the agent asked]")
+        else:
+            turn += 1
+            lines.append(f"  turn {turn}  {text}")
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
