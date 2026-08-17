@@ -47,6 +47,11 @@ def test_workers_file_items_open_and_unassigned(store):
     assert filed["id"] in visible
     with pytest.raises(AuthorityError):
         store.assign(SPACE, WORKER, filed["id"], "worker-1")
+    # open + unassigned = claimable, so OTHER sees it in the pool (open-claims
+    # default); under lead-only policy the strict slice rule returns
+    other_worker = {item["id"] for item in store.list_items(SPACE, OTHER)}
+    assert filed["id"] in other_worker
+    store.set_policy(SPACE, LEAD, claims="lead-only")
     other_worker = {item["id"] for item in store.list_items(SPACE, OTHER)}
     assert filed["id"] not in other_worker
 

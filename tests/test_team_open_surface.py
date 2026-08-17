@@ -102,6 +102,27 @@ def test_claim_feeds_journal_grants_like_assignment(store):
     assert "case-alpha" in store.journal.cases(NIA)
 
 
+def test_workers_see_the_claimable_pool(store):
+    """A pull queue nobody can see is not a queue (drill-caught 2026-08-16):
+    an unassigned worker must be able to DISCOVER open items to claim them."""
+    item = seed(store)
+    mine = store.create_item("proj", NIA, title="Mine", criteria="c")
+    # WEBB sees every open unassigned item — including NIA's filing (claimable)
+    assert {i["id"] for i in store.list_items("proj", WEBB)} == {
+        item["id"],
+        mine["id"],
+    }
+    # …but only while claims are open; under lead-only the slice rule stands
+    store.set_policy("proj", LEAD, claims="lead-only")
+    assert store.list_items("proj", WEBB) == []
+    # own filings stay visible regardless of policy
+    assert {i["id"] for i in store.list_items("proj", NIA)} == {mine["id"]}
+    # a claimed item leaves the pool for everyone else
+    store.set_policy("proj", LEAD, claims="open")
+    store.claim("proj", NIA, item["id"])
+    assert {i["id"] for i in store.list_items("proj", WEBB)} == {mine["id"]}
+
+
 # ------------------------------------------------------------------ dialects
 
 

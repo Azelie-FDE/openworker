@@ -495,7 +495,21 @@ class TeamStore:
             items = [_row_to_item(row) for row in rows]
             if actor.role == Role.WORKER:
                 visible = self._worker_slice(space, actor.id)
-                items = [item for item in items if item["id"] in visible]
+                # On an open-claims board the claimable pool is visible too — a
+                # pull queue nobody can see is not a queue (drill-caught: an
+                # external worker with no assignment saw an empty board). Under
+                # lead-only policy workers can't act on it, so it stays hidden.
+                claims_open = self.policy(space)["claims"] == "open"
+                items = [
+                    item
+                    for item in items
+                    if item["id"] in visible
+                    or (
+                        claims_open
+                        and item["state"] == ItemState.OPEN.value
+                        and not item["assignee"]
+                    )
+                ]
             for item in items:
                 item["links"] = self._links_of(space, item["id"])
         return items
