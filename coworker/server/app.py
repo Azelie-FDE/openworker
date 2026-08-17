@@ -746,6 +746,23 @@ def create_app(manager: SessionManager) -> FastAPI:
     def session_board(session_id: str) -> dict[str, Any]:
         return manager.session_board(session_id)
 
+    @app.get("/v1/sessions/{session_id}/board/item")
+    def session_board_item(session_id: str, id: int) -> dict[str, Any]:
+        return manager.board_item_detail(session_id, int(id))
+
+    @app.get("/v1/sessions/{session_id}/board/attachment")
+    def session_board_attachment(session_id: str, name: str):
+        from fastapi.responses import Response
+
+        try:
+            path = manager.attachment_store.path_for(name)
+        except TeamsBoardError as error:
+            return JSONResponse({"error": str(error)}, status_code=404)
+        return Response(
+            content=path.read_bytes(),
+            media_type=manager.attachment_store.mime_for(name),
+        )
+
     @app.post("/v1/sessions/{session_id}/board/transition")
     def session_board_transition(session_id: str, body: dict) -> dict[str, Any]:
         body = body or {}

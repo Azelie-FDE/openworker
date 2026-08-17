@@ -234,6 +234,8 @@ export interface BoardItem {
   creator: string;
   refs: string[];
   links: { kind: string; item: number }[];
+  // Blocked rows only: the latest blocker comment, clamped ("need tfvars…").
+  blocker?: string;
 }
 
 export interface Board {
@@ -251,6 +253,44 @@ export interface JournalCase {
 export async function getBoard(sessionId: string): Promise<Board> {
   const res = await fetch(`${httpBase()}/v1/sessions/${encodeURIComponent(sessionId)}/board`);
   return res.json();
+}
+
+// One event in an item's merged timeline (the detail pane renders the item's
+// whole story: filed → assigned/claimed → moves → comments, with attachments).
+export interface BoardTimelineEvent {
+  seq: number;
+  ts: string;
+  actor: string;
+  kind: "created" | "assigned" | "claimed" | "moved" | "comment" | string;
+  to?: string;
+  assignee?: string;
+  body?: string;
+  refs?: string[];
+}
+
+export type BoardItemDetail = BoardItem & { timeline?: BoardTimelineEvent[] };
+
+export async function getBoardItem(
+  sessionId: string,
+  id: number,
+): Promise<BoardItemDetail | { error: string }> {
+  const res = await fetch(
+    `${httpBase()}/v1/sessions/${encodeURIComponent(sessionId)}/board/item?id=${id}`,
+  );
+  return res.json();
+}
+
+// Attachment bytes → an object URL for <img>. The module fetch wrapper carries
+// the sidecar token, which a bare <img src> cannot.
+export async function fetchBoardAttachment(
+  sessionId: string,
+  stored: string,
+): Promise<string | null> {
+  const res = await fetch(
+    `${httpBase()}/v1/sessions/${encodeURIComponent(sessionId)}/board/attachment?name=${encodeURIComponent(stored)}`,
+  );
+  if (!res.ok) return null;
+  return URL.createObjectURL(await res.blob());
 }
 
 export async function boardTransition(

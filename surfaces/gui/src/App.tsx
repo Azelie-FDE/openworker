@@ -4,6 +4,8 @@ import {
   createTempWorkspace,
   finalizeAutomationRun,
   boardTransition,
+  fetchBoardAttachment,
+  getBoardItem,
   getArtifacts,
   getBoard,
   type Board,
@@ -277,6 +279,8 @@ export function App() {
   // Agent teams (OPE-96): board for the current session's workspace space.
   const [board, setBoard] = useState<Board | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
+  // A rail row click deep-opens the overlay on that item's detail pane.
+  const [boardDetailId, setBoardDetailId] = useState<number | null>(null);
   // # team chat overlay — opened from the team entry's chat row.
   const [chatTeam, setChatTeam] = useState<string | null>(null);
   const [railHidden, setRailHidden] = useState(false);
@@ -994,8 +998,8 @@ export function App() {
   }, [agent, surface, sessionId, browserRefreshKey, running]);
 
   const refreshBoard = () => getBoard(sessionId).then(setBoard).catch(() => {});
-  const moveBoardItem = async (item: number, to: string) => {
-    await boardTransition(sessionId, item, to);
+  const moveBoardItem = async (item: number, to: string, comment = "") => {
+    await boardTransition(sessionId, item, to, comment);
     await refreshBoard();
   };
 
@@ -2058,9 +2062,41 @@ export function App() {
             onOpenIntegrations={() => setSurface("integrations")}
             board={board}
             onExpandBoard={() => setBoardOpen(true)}
+            onOpenBoardItem={(id) => {
+              setBoardDetailId(id);
+              setBoardOpen(true);
+            }}
           />
           {boardOpen && board && board.space && (
-            <BoardOverlay board={board} onClose={() => setBoardOpen(false)} onTransition={moveBoardItem} />
+            <BoardOverlay
+              board={board}
+              onClose={() => {
+                setBoardOpen(false);
+                setBoardDetailId(null);
+              }}
+              onTransition={moveBoardItem}
+              loadItem={(id) => getBoardItem(sessionId, id)}
+              loadAttachment={(stored) => fetchBoardAttachment(sessionId, stored)}
+              onOpenWorker={(actor) => {
+                // The assignee is a team actor whose worker session the sidebar
+                // already knows — jump straight into its transcript.
+                const match =
+                  sessions.find(
+                    (s) =>
+                      s.team?.role === "worker" &&
+                      s.team?.actor === actor &&
+                      s.workspace === board.space
+                  ) ||
+                  sessions.find(
+                    (s) => s.team?.role === "worker" && s.team?.actor === actor
+                  );
+                if (!match) return;
+                setBoardOpen(false);
+                setBoardDetailId(null);
+                void selectSession(match.session_id, match.workspace, match.agent);
+              }}
+              initialItem={boardDetailId}
+            />
           )}
         </div>
       </div>

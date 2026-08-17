@@ -65,6 +65,7 @@ interface Props {
   // the rail renders the summary section and the expand affordance.
   board?: Board | null;
   onExpandBoard?: () => void;
+  onOpenBoardItem?: (id: number) => void;
 }
 
 export function RightRail({
@@ -85,6 +86,7 @@ export function RightRail({
   onOpenIntegrations,
   board,
   onExpandBoard,
+  onOpenBoardItem,
 }: Props) {
   // Progress starts collapsed (owner call 2026-08-16 — rail space goes to the
   // board/artifacts); it still auto-opens the first time a live turn has todos.
@@ -231,7 +233,11 @@ export function RightRail({
                 </button>
               }
             >
-              <BoardSection board={board} onExpand={() => onExpandBoard?.()} />
+              <BoardSection
+                board={board}
+                onExpand={() => onExpandBoard?.()}
+                onOpenItem={onOpenBoardItem}
+              />
             </RailSection>
           )}
 

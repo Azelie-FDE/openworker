@@ -582,8 +582,8 @@ export async function mockApi(page: import("@playwright/test").Page) {
       { id: 1, title: "Code security review — api", description: "", criteria: "every finding triaged with file:line evidence", state: "open", assignee: "", creator: "lead", refs: [], links: [] },
       { id: 2, title: "Secrets — git history, both repos", description: "", criteria: "every hit dismissed-with-reason or rotation-instructed", state: "open", assignee: "", creator: "lead", refs: [], links: [] },
       { id: 3, title: "Dependency audit — lockfiles", description: "", criteria: "reachable vs theoretical separated; upgrade branch green", state: "in_progress", assignee: "dep-audit", creator: "lead", refs: [], links: [] },
-      { id: 4, title: "Cloud posture — infra", description: "", criteria: "trivy config clean or findings triaged", state: "blocked", assignee: "cloud-posture", creator: "lead", refs: [], links: [] },
-      { id: 5, title: "Report rollup", description: "", criteria: "one report, all sections", state: "review", assignee: "security", creator: "lead", refs: [], links: [] },
+      { id: 4, title: "Cloud posture — infra", description: "", criteria: "trivy config clean or findings triaged", state: "blocked", assignee: "cloud-posture", creator: "lead", refs: [], links: [], blocker: "need tfvars for staging" },
+      { id: 5, title: "Report rollup", description: "", criteria: "one report, all sections", state: "review", assignee: "security", creator: "lead", refs: [`attachment://${"a".repeat(64)}.png#rendered-page.png`], links: [] },
     );
   };
   const boardPayload = () =>
@@ -1062,6 +1062,56 @@ export async function mockApi(page: import("@playwright/test").Page) {
       });
     }
     if (/\/v1\/sessions\/[^/]+\/artifacts\/reveal$/.test(p)) return json({ ok: true });
+    // Item detail (merged event timeline + attachments) for the detail pane.
+    if (/\/v1\/sessions\/[^/]+\/board\/item$/.test(p)) {
+      const id = Number(new URL(req.url()).searchParams.get("id"));
+      const item = boardItems.find((i) => i.id === id);
+      if (!item) return json({ error: "no such item" });
+      const at = new Date().toISOString();
+      const timeline =
+        id === 5
+          ? [
+              { seq: 30, ts: at, actor: "lead", kind: "created" },
+              { seq: 31, ts: at, actor: "lead", kind: "assigned", assignee: "security" },
+              { seq: 32, ts: at, actor: "security", kind: "moved", to: "in_progress" },
+              {
+                seq: 41,
+                ts: at,
+                actor: "security",
+                kind: "comment",
+                body: "Rolled all four sections into report.md — balances reconcile against the seeded rows.",
+              },
+              {
+                seq: 42,
+                ts: at,
+                actor: "security",
+                kind: "comment",
+                body: "attached the rendered page",
+                refs: [`attachment://${"a".repeat(64)}.png#rendered-page.png`],
+              },
+              {
+                seq: 43,
+                ts: at,
+                actor: "security",
+                kind: "moved",
+                to: "review",
+                body: "Ready — balances verified against seeded rows.",
+              },
+            ]
+          : [{ seq: 30, ts: at, actor: "lead", kind: "created" }];
+      return json({ ...item, timeline });
+    }
+    if (/\/v1\/sessions\/[^/]+\/board\/attachment$/.test(p)) {
+      // A real 1x1 PNG so the <img> actually loads (the spec asserts it renders).
+      return route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        body: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      });
+    }
     // Agent teams (OPE-96): board reads + the user-side mutations.
     if (/\/v1\/sessions\/[^/]+\/board\/transition$/.test(p)) {
       const b = req.postDataJSON() || {};

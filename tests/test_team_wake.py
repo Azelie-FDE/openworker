@@ -371,6 +371,43 @@ def test_digest_clamps_long_comments_and_carries_structured_rows(manager):
     assert moved[0]["note"].endswith("…") and len(moved[0]["note"]) < 700
 
 
+def test_item_detail_timeline_and_blocker_fact(manager):
+    """The detail pane renders the item's merged event story; blocked rows carry
+    the latest blocker comment as a plain fact (owner-approved mock 2026-08-17)."""
+    space = str(manager.default_workspace)
+    lead = Actor(id="lead-1", role=Role.LEAD)
+    worker = Actor(id="nia", role=Role.WORKER)
+    item = manager.team_store.create_item(space, lead, title="Story", criteria="c")
+    manager.team_store.assign(space, lead, item["id"], "nia")
+    manager.team_store.transition(space, worker, item["id"], "in_progress")
+    manager.team_store.comment(space, worker, item["id"], "halfway there")
+    manager.team_store.transition(
+        space, worker, item["id"], "blocked", comment="need the staging tfvars"
+    )
+    # session with this workspace → the board space resolves
+    from coworker.sessions import SessionRecord
+
+    manager.session_store.save(
+        SessionRecord(
+            session_id="sid", workspace=space, model="m",
+            mode="interactive", messages=[], agent="cowork",
+        )
+    )
+    detail = manager.board_item_detail("sid", item["id"])
+    kinds = [(e["kind"], e.get("to")) for e in detail["timeline"]]
+    assert kinds == [
+        ("created", None),
+        ("assigned", None),
+        ("moved", "in_progress"),
+        ("comment", None),
+        ("moved", "blocked"),
+    ]
+    assert detail["timeline"][3]["body"] == "halfway there"
+    board = manager.session_board("sid")
+    blocked = next(i for i in board["items"] if i["id"] == item["id"])
+    assert blocked["blocker"] == "need the staging tfvars"
+
+
 def test_cancel_notice_is_addressed_to_the_assignee(store):
     item_id = assigned(store)
     store.consume("swe-worker", store.pending_for("swe-worker")[-1]["seq"])

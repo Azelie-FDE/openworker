@@ -1415,6 +1415,49 @@ class SessionManager:
     def _user_actor(self) -> TeamActor:
         return TeamActor(id="user", role=TeamRole.USER)
 
+    def board_item_detail(self, session_id: str, item_id: int) -> dict[str, Any]:
+        """One item in full, with its TIMELINE — creations, assignments,
+        transitions, and comments merged chronologically (the detail pane renders
+        the item's whole story; the store is an event log, so this is just its
+        honest projection). Acts as the user."""
+        space = self._board_space(session_id)
+        if space is None:
+            return {"error": "no board for this session"}
+        try:
+            item = self.team_store.get_item(space, int(item_id))
+        except TeamsBoardError as error:
+            return {"error": str(error)}
+        timeline: list[dict[str, Any]] = []
+        for event in self.team_store.events(space, item_id=int(item_id)):
+            payload = event.get("payload") or {}
+            row: dict[str, Any] = {
+                "seq": event["seq"],
+                "ts": event["ts"],
+                "actor": event["actor"],
+            }
+            if event["kind"] == "item_created":
+                row["kind"] = "created"
+            elif event["kind"] == "item_assigned":
+                row["kind"] = "claimed" if payload.get("claimed") else "assigned"
+                row["assignee"] = payload.get("assignee") or ""
+            elif event["kind"] == "item_transitioned":
+                row["kind"] = "moved"
+                row["to"] = payload.get("to") or ""
+                if payload.get("comment"):
+                    row["body"] = payload["comment"]
+                if payload.get("refs"):
+                    row["refs"] = payload["refs"]
+            elif event["kind"] == "item_commented":
+                row["kind"] = "comment"
+                row["body"] = payload.get("body") or ""
+                if payload.get("refs"):
+                    row["refs"] = payload["refs"]
+            else:
+                continue
+            timeline.append(row)
+        item["timeline"] = timeline
+        return item
+
     def session_board(self, session_id: str) -> dict[str, Any]:
         """The session's board: items grouped by the workspace-keyed space. Empty
         (space=None) when the workspace has no items — the rail hides itself."""
@@ -1424,6 +1467,20 @@ class SessionManager:
         items = self.team_store.list_items(space, self._user_actor())
         if not items:
             return {"space": None, "name": "", "items": []}
+        # Blocked rows carry the blocker as a plain fact ("blocked: need tfvars") —
+        # the latest blocked-transition comment, resolved here so the list stays
+        # one round-trip.
+        for item in items:
+            if item["state"] != "blocked":
+                continue
+            for event in reversed(
+                self.team_store.events(space, item_id=item["id"])
+            ):
+                payload = event.get("payload") or {}
+                if event["kind"] == "item_transitioned" and payload.get("to") == "blocked":
+                    if payload.get("comment"):
+                        item["blocker"] = self._clamp(payload["comment"], 120)
+                    break
         return {"space": space, "name": Path(space).name, "items": items}
 
     def board_transition(
