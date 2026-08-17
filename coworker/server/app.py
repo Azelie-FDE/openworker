@@ -763,6 +763,13 @@ def create_app(manager: SessionManager) -> FastAPI:
             media_type=manager.attachment_store.mime_for(name),
         )
 
+    @app.post("/v1/sessions/{session_id}/board/comment")
+    def session_board_comment(session_id: str, body: dict) -> dict[str, Any]:
+        body = body or {}
+        return manager.board_comment(
+            session_id, int(body.get("item", 0)), str(body.get("body", ""))
+        )
+
     @app.post("/v1/sessions/{session_id}/board/transition")
     def session_board_transition(session_id: str, body: dict) -> dict[str, Any]:
         body = body or {}
@@ -999,11 +1006,15 @@ def create_app(manager: SessionManager) -> FastAPI:
         )
 
     @app.get("/v1/board/pending")
-    def board_pending(request: Request, limit: int = 200):
+    def board_pending(request: Request, space: str, limit: int = 200):
+        # The actor's FEED: events on its slice since its cursor — interest
+        # follows the assignment relation, same projection in-app workers use.
         return _board(
             request,
             lambda actor: {
-                "events": manager.team_store.pending_for(actor.id, limit=int(limit))
+                "events": manager.team_store.feed_for(
+                    space, actor.id, limit=int(limit)
+                )
             },
         )
 
@@ -1012,7 +1023,9 @@ def create_app(manager: SessionManager) -> FastAPI:
         body = body or {}
 
         def run(actor):
-            manager.team_store.consume(actor.id, int(body.get("upto_seq", 0)))
+            manager.team_store.consume_feed(
+                str(body.get("space", "")), actor.id, int(body.get("upto_seq", 0))
+            )
             return {"ok": True}
 
         return _board(request, run)

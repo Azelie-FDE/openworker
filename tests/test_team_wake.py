@@ -61,17 +61,18 @@ def assigned(store, assignee="swe-worker"):
     return item["id"]
 
 
-def test_deliveries_are_durable_until_consumed(store):
+def test_feed_is_durable_until_consumed(store):
     assigned(store)
-    first = store.pending_for("swe-worker")
-    assert len(first) == 1 and first[0]["kind"] == "item_assigned"
+    first = store.feed_for(SPACE, "swe-worker")
+    # the item's creation and the assignment both start the worker's story
+    assert [e["kind"] for e in first] == ["item_created", "item_assigned"]
     # not consumed → still pending (crash-safe replay)
-    assert store.pending_for("swe-worker") == first
-    store.consume("swe-worker", first[-1]["seq"])
-    assert store.pending_for("swe-worker") == []
+    assert store.feed_for(SPACE, "swe-worker") == first
+    store.consume_feed(SPACE, "swe-worker", first[-1]["seq"])
+    assert store.feed_for(SPACE, "swe-worker") == []
     # a second assignment queues fresh
     assigned(store)
-    assert len(store.pending_for("swe-worker")) == 1
+    assert len(store.feed_for(SPACE, "swe-worker")) == 2
 
 
 def test_lead_subscriptions_are_an_allowlist(store):
@@ -408,32 +409,58 @@ def test_item_detail_timeline_and_blocker_fact(manager):
     assert blocked["blocker"] == "need the staging tfvars"
 
 
-def test_transitions_by_others_address_the_assignee(store):
-    """A send-back or unblock is a board write, not a message — but the queue
-    projection addresses it to the worker whose action it demands (owner
-    question 2026-08-17 exposed the gap: only cancel was addressed)."""
+def test_feed_interest_follows_the_assignment_relation(store):
+    """Owner ruling 2026-08-17: no per-event addressing — a worker is subscribed
+    to everything on its slice. Send-backs, comment ANSWERS (the silently broken
+    path), and acceptance all arrive through one relation."""
     item_id = assigned(store)
-    store.consume("swe-worker", store.pending_for("swe-worker")[-1]["seq"])
+    store.consume_feed(SPACE, "swe-worker", store.feed_for(SPACE, "swe-worker")[-1]["seq"])
     store.transition(SPACE, WORKER, item_id, "in_progress")
     store.transition(SPACE, WORKER, item_id, "review", comment="ready")
-    assert store.pending_for("swe-worker") == []  # own moves never self-address
-    # the lead's send-back reaches the worker's queue, feedback attached
+    assert store.feed_for(SPACE, "swe-worker") == []  # own moves never self-deliver
+    # the lead's send-back arrives with the feedback…
     store.transition(SPACE, LEAD, item_id, "in_progress", comment="totals drift")
-    pending = store.pending_for("swe-worker")
-    assert [e["payload"]["to"] for e in pending] == ["in_progress"]
-    assert pending[-1]["payload"]["comment"] == "totals drift"
-    store.consume("swe-worker", pending[-1]["seq"])
-    # ...but done is deliberately unaddressed — no wake to hear "it's finished"
+    # …and so does a lead's comment ANSWER (never delivered under addressing)
+    store.comment(SPACE, LEAD, item_id, "use the v2 endpoint")
+    feed = store.feed_for(SPACE, "swe-worker")
+    assert [e["kind"] for e in feed] == ["item_transitioned", "item_commented"]
+    assert feed[0]["payload"]["comment"] == "totals drift"
+    assert feed[1]["payload"]["body"] == "use the v2 endpoint"
+    store.consume_feed(SPACE, "swe-worker", feed[-1]["seq"])
+    # acceptance is in-slice too: the worker hears closure (and can pick up next)
     store.transition(SPACE, WORKER, item_id, "review", comment="fixed")
     store.transition(SPACE, LEAD, item_id, "done")
-    assert store.pending_for("swe-worker") == []
+    assert [e["payload"]["to"] for e in store.feed_for(SPACE, "swe-worker")] == ["done"]
 
 
-def test_cancel_notice_is_addressed_to_the_assignee(store):
+def test_feed_reassignment_delivers_then_interest_ends(store):
     item_id = assigned(store)
-    store.consume("swe-worker", store.pending_for("swe-worker")[-1]["seq"])
+    store.consume_feed(SPACE, "swe-worker", store.feed_for(SPACE, "swe-worker")[-1]["seq"])
+    store.assign(SPACE, LEAD, item_id, "other-worker")
+    # the loser hears the reassignment…
+    feed = store.feed_for(SPACE, "swe-worker")
+    assert [e["kind"] for e in feed] == ["item_assigned"]
+    assert feed[0]["payload"]["previous"] == "swe-worker"
+    store.consume_feed(SPACE, "swe-worker", feed[-1]["seq"])
+    # …then goes quiet: later events on the item never reach it
+    store.comment(SPACE, LEAD, item_id, "carry on")
+    assert store.feed_for(SPACE, "swe-worker") == []
+    # while the new holder gets the item's whole story (its slice now) — the
+    # history it needs to pick the work up
+    kinds = [e["kind"] for e in store.feed_for(SPACE, "other-worker")]
+    assert kinds == [
+        "item_created",
+        "item_assigned",
+        "item_assigned",
+        "item_commented",
+    ]
+
+
+def test_cancel_reaches_the_assignee_through_the_feed(store):
+    item_id = assigned(store)
+    store.consume_feed(SPACE, "swe-worker", store.feed_for(SPACE, "swe-worker")[-1]["seq"])
     store.transition(SPACE, LEAD, item_id, "canceled", comment="scope cut")
-    pending = store.pending_for("swe-worker")
+    pending = store.feed_for(SPACE, "swe-worker")
     assert len(pending) == 1
     assert pending[0]["kind"] == "item_transitioned"
     assert pending[0]["payload"]["to"] == "canceled"

@@ -122,6 +122,7 @@ export function BoardOverlay({
   board,
   onClose,
   onTransition,
+  onComment,
   loadItem,
   loadAttachment,
   onOpenWorker,
@@ -131,6 +132,8 @@ export function BoardOverlay({
   onClose: () => void;
   // (item, to, comment?) → performed as the user; App refetches on completion.
   onTransition?: (item: number, to: string, comment?: string) => void;
+  // A pure note — never changes state; the assignee hears it through its feed.
+  onComment?: (item: number, body: string) => Promise<unknown> | void;
   loadItem?: (id: number) => Promise<BoardItemDetail | { error: string }>;
   loadAttachment?: (stored: string) => Promise<string | null>;
   // Assignee link → jump into that coworker's session (closes the overlay).
@@ -161,6 +164,10 @@ export function BoardOverlay({
     onTransition?.(item, to, comment);
     // the pane refreshes on the next tick so the transition's board refetch lands first
     if (detail?.id === item) setTimeout(() => void openItem(item), 350);
+  };
+  const addNote = async (item: number, body: string) => {
+    await onComment?.(item, body);
+    await openItem(item);
   };
 
   const finished = board.items.filter(
@@ -238,6 +245,7 @@ export function BoardOverlay({
             <ItemDetail
               detail={detail}
               onTransition={move}
+              onAddNote={onComment ? addNote : undefined}
               loadAttachment={loadAttachment}
               onOpenWorker={onOpenWorker}
             />
@@ -260,11 +268,13 @@ const STATE_LABEL: Record<string, string> = {
 function ItemDetail({
   detail,
   onTransition,
+  onAddNote,
   loadAttachment,
   onOpenWorker,
 }: {
   detail: BoardItemDetail;
   onTransition?: (item: number, to: string, comment?: string) => void;
+  onAddNote?: (item: number, body: string) => Promise<void>;
   loadAttachment?: (stored: string) => Promise<string | null>;
   onOpenWorker?: (actor: string) => void;
 }) {
@@ -317,6 +327,7 @@ function ItemDetail({
           <TimelineRow key={event.seq} event={event} loadAttachment={loadAttachment} />
         ))}
       </div>
+      {onAddNote && <NoteComposer detail={detail} onAddNote={onAddNote} />}
       {onTransition && (
         <DetailActions
           detail={detail}
@@ -328,6 +339,39 @@ function ItemDetail({
         />
       )}
     </div>
+  );
+}
+
+// A pure note — an append to the item's story that NEVER changes state (owner
+// doctrine 2026-08-17). The assignee hears it through its feed, so this is the
+// lightweight way to talk to a worker through the board.
+function NoteComposer({
+  detail,
+  onAddNote,
+}: {
+  detail: BoardItemDetail;
+  onAddNote: (item: number, body: string) => Promise<void>;
+}) {
+  const [text, setText] = useState("");
+  useEffect(() => setText(""), [detail.id]);
+  const submit = async () => {
+    const body = text.trim();
+    if (!body) return;
+    setText("");
+    await onAddNote(detail.id, body);
+  };
+  return (
+    <input
+      className="board-note-input"
+      data-testid="board-note-input"
+      placeholder="Add a note…"
+      title="Leaves a note on the item — never changes its state"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") void submit();
+      }}
+    />
   );
 }
 

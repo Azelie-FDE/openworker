@@ -118,6 +118,23 @@ test("item detail: timeline with attachment, worker link, request changes", asyn
   await expect(detail).toContainText("Dependency audit — lockfiles");
 });
 
+test("Add a note is a pure append — it lands in the timeline, state untouched", async ({
+  page,
+}) => {
+  await planTheWork(page);
+  await page.getByTestId("board-rail").getByText("Report rollup").click();
+  const detail = page.getByTestId("board-detail");
+  await expect(detail).toContainText("In review");
+  await detail.getByTestId("board-note-input").fill("prefer the v2 endpoint for totals");
+  await detail.getByTestId("board-note-input").press("Enter");
+  // the note appears as a timeline event…
+  await expect(detail).toContainText("user commented");
+  await expect(detail).toContainText("prefer the v2 endpoint for totals");
+  // …and the state did NOT change (notes never transition)
+  await expect(detail).toContainText("In review");
+  await expect(detail.getByRole("button", { name: "Mark done" })).toBeVisible();
+});
+
 test("journal section lists cases once a board exists", async ({ page }) => {
   await planTheWork(page);
   await page.getByRole("button", { name: /Journal/ }).click();

@@ -313,10 +313,14 @@ def test_pending_and_consume_over_the_wire(api):
     )
     item = lead.create_item("proj", title="Queued", criteria="c")
     lead.assign("proj", item["id"], "nia")
-    events = nia.pending()
+    events = nia.pending("proj")
     assert events and events[-1]["kind"] == "item_assigned"
-    nia.consume(events[-1]["seq"])
-    assert nia.pending() == []
+    nia.consume("proj", events[-1]["seq"])
+    assert nia.pending("proj") == []
+    # a comment ANSWER arrives through the same feed — no addressing anywhere
+    lead.comment("proj", item["id"], "start with the v2 endpoint")
+    follow = nia.pending("proj")
+    assert [e["kind"] for e in follow] == ["item_commented"]
 
 
 # ------------------------------------------------------------------ attachments

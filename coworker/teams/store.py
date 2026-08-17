@@ -15,8 +15,10 @@ Mechanics, kept boring:
   detects out-of-band edits. Tamper-evidence, not tamper-proofing.
 - `taint` marks records authored after touching untrusted content; readers render it
   as provenance ("treat as evidence, not instructions").
-- `recipient` is how per-agent delivery works: a projection over the one log, not a
-  second write path (consumption semantics arrive with the wake plumbing).
+- Per-agent delivery is the FEED projection over the one log (never a second write
+  path): interest follows the assignment relation — a worker is subscribed to its
+  slice, cursors mark consumption. The `recipient` column is retired plumbing
+  (kept in the schema; no longer written).
 """
 
 from __future__ import annotations
@@ -290,22 +292,44 @@ class TeamStore:
             ).fetchall()
         return [_row_to_event(row) for row in rows]
 
-    # -------------------------------------------------- delivery (durable queue)
+    # -------------------------------------------------- delivery (durable feed)
 
-    # The per-agent durable queue is a PROJECTION over the one log, never a second
-    # write path: entries are events addressed to a recipient, "consumed" is a
-    # cursor. Durable-until-consumed (a crash before consume() replays on the next
-    # drain); coalescing happens at dequeue — the caller turns one batch into one
-    # digest. "Mailbox" is banned as a concept; this is internal plumbing.
+    # The per-agent durable feed is a PROJECTION over the one log, never a second
+    # write path — and INTEREST FOLLOWS THE ASSIGNMENT RELATION (owner ruling
+    # 2026-08-17): a worker is subscribed to events on its slice (items assigned
+    # to it or filed by it — subscription ≡ visibility, one boundary), with no
+    # per-event addressing decisions in the write path. "Consumed" is a cursor;
+    # durable-until-consumed (a crash before consume replays on the next drain);
+    # coalescing happens at dequeue. "Mailbox" is banned as a concept.
 
-    def pending_for(self, recipient: str, *, limit: int = 200) -> list[dict[str, Any]]:
-        """Unconsumed events addressed to this agent, in order."""
-        return self.for_recipient(
-            recipient, since_seq=self._cursor(f"to:{recipient}"), limit=limit
-        )
+    def feed_for(
+        self, space: str, actor_id: str, *, limit: int = 200
+    ) -> list[dict[str, Any]]:
+        """Unconsumed events this actor is subscribed to, in order: everything on
+        its current slice, plus assignment events that START its interest (newly
+        assigned to it) or END it (just reassigned away — it hears that, then
+        goes quiet). Its own events never appear."""
+        key = f"feed:{actor_id}:{space}"
+        events = self.events(space, since_seq=self._cursor(key), limit=limit)
+        with self._lock:
+            slice_ids = self._worker_slice(space, actor_id)
+        out = []
+        for event in events:
+            if event["actor"] == actor_id:
+                continue
+            payload = event.get("payload") or {}
+            if event["kind"] == ITEM_ASSIGNED and actor_id in (
+                payload.get("assignee"),
+                payload.get("previous"),
+            ):
+                out.append(event)
+                continue
+            if event.get("item_id") in slice_ids:
+                out.append(event)
+        return out
 
-    def consume(self, recipient: str, upto_seq: int) -> None:
-        self._set_cursor(f"to:{recipient}", upto_seq)
+    def consume_feed(self, space: str, actor_id: str, upto_seq: int) -> None:
+        self._set_cursor(f"feed:{actor_id}:{space}", int(upto_seq))
 
     # Lead subscriptions: an ALLOWLIST of decision-demanding event classes — a
     # worker moving its item to review/blocked, or filing a new item. Journal
@@ -545,32 +569,16 @@ class TeamStore:
                     f"illegal transition {current.value} → {target.value}"
                 )
             self._check_transition_authority(actor, item, current, target)
-            # When someone ELSE moves your assigned item to a state that needs
-            # YOUR action, the event is addressed to you: a send-back
-            # (review→in_progress with feedback), an unblock, a cancel (whose
-            # delivery/in-flight interrupt makes the worker actually stop). This
-            # is a board write, not a message — delivery is the queue projection
-            # doing its job. DONE is deliberately unaddressed: waking a worker to
-            # say its finished item is finished would burn a turn for nothing.
-            action_needed = {
-                ItemState.IN_PROGRESS,
-                ItemState.BLOCKED,
-                ItemState.CANCELED,
-            }
-            recipient = (
-                item["assignee"]
-                if target in action_needed
-                and item["assignee"]
-                and item["assignee"] != actor.id
-                else None
-            )
+            # No per-event addressing: delivery is the FEED projection — interest
+            # follows the assignment relation (see feed_for), so a send-back, an
+            # unblock, a cancel, or an acceptance reaches whoever holds the item
+            # without the store editorializing about who cares.
             event = self.append_event(
                 space,
                 ITEM_TRANSITIONED,
                 actor,
                 item_id=item_id,
                 case_id=item["case_id"] or None,
-                recipient=recipient,
                 payload={
                     "from": current.value,
                     "to": target.value,
@@ -615,8 +623,9 @@ class TeamStore:
     def assign(
         self, space: str, actor: Actor, item_id: int, assignee: str
     ) -> dict[str, Any]:
-        """Set the assignee. Not a message: the event addresses the assignee
-        (`recipient`), and the worker's prompt derives from the item itself."""
+        """Set the assignee. Not a message: the feed projection delivers it — the
+        new assignee's interest starts with this event, and the previous
+        assignee's interest ends with it (both hear it; see feed_for)."""
         self._require(actor, {Role.USER, Role.LEAD}, "assign")
         if not (assignee or "").strip():
             raise BoardError("assignee is required")
@@ -633,7 +642,6 @@ class TeamStore:
                 actor,
                 item_id=item_id,
                 case_id=item["case_id"] or None,
-                recipient=assignee,
                 payload={"assignee": assignee, "previous": item["assignee"] or ""},
             )
             if self.journal is not None and item["case_id"]:

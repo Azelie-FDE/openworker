@@ -293,6 +293,23 @@ export async function fetchBoardAttachment(
   return URL.createObjectURL(await res.blob());
 }
 
+// A pure note on an item — never changes state; the assignee hears it via its feed.
+export async function boardComment(
+  sessionId: string,
+  item: number,
+  body: string,
+): Promise<{ ok?: boolean; error?: string }> {
+  const res = await fetch(
+    `${httpBase()}/v1/sessions/${encodeURIComponent(sessionId)}/board/comment`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ item, body }),
+    },
+  );
+  return res.json();
+}
+
 export async function boardTransition(
   sessionId: string,
   item: number,

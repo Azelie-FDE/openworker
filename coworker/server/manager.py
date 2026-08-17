@@ -1458,6 +1458,21 @@ class SessionManager:
         item["timeline"] = timeline
         return item
 
+    def board_comment(self, session_id: str, item_id: int, body: str) -> dict[str, Any]:
+        """A pure note from the user on an item — never changes state (owner
+        doctrine 2026-08-17); the assignee hears it through its feed."""
+        space = self._board_space(session_id)
+        if space is None:
+            return {"error": "no board for this session"}
+        try:
+            event = self.team_store.comment(
+                space, self._user_actor(), int(item_id), body
+            )
+        except (TeamsBoardError, ValueError) as error:
+            return {"error": str(error)}
+        self.kick_team_tick()  # the assignee's feed has news
+        return {"ok": True, "seq": event["seq"]}
+
     def session_board(self, session_id: str) -> dict[str, Any]:
         """The session's board: items grouped by the workspace-keyed space. Empty
         (space=None) when the workspace has no items — the rail hides itself."""
@@ -1983,10 +1998,16 @@ class SessionManager:
     async def _drain_team_member(
         self, team, *, session_id: str, actor: str, is_lead: bool
     ) -> int:
-        directs = self.team_store.pending_for(actor)
+        # Interest follows the assignment relation: everyone's feed is the events
+        # on their slice (assigned ∪ filed) — comments, moves, reassignments. The
+        # lead additionally subscribes to the board-wide decision classes.
+        directs = self.team_store.feed_for(team.space, actor)
         subs = (
             self.team_store.subscribed_events(team.space, actor) if is_lead else []
         )
+        if subs:
+            seen = {e["seq"] for e in subs}
+            directs = [e for e in directs if e["seq"] not in seen]
         chat_handle = "lead" if is_lead else actor
         chats = (
             self.chat_store.unread_for(team.chat_group, chat_handle)
@@ -1994,12 +2015,21 @@ class SessionManager:
             else []
         )
         # Cancel is top-priority: an in-flight worker gets interrupted NOW; the
-        # queued notice (delivered when the turn dies) tells it why.
+        # queued notice (delivered when the turn dies) tells it why. Only for the
+        # item's ASSIGNEE — a filer merely hears about it.
+        def _holds(event) -> bool:
+            try:
+                item = self.team_store.get_item(team.space, int(event["item_id"]))
+            except Exception:
+                return False
+            return item["assignee"] == actor
+
         cancels = [
             e
             for e in directs
             if e["kind"] == "item_transitioned"
             and (e.get("payload") or {}).get("to") == "canceled"
+            and _holds(e)
         ]
         if cancels and self.is_running(session_id):
             engine = self._engines.get(session_id)
@@ -2012,7 +2042,9 @@ class SessionManager:
         if not self.teams.count_wake(team.team_id, cap=self.TEAM_WAKE_CAP_PER_HOUR):
             logger.warning("team %s paused for budget this hour", team.team_id)
             return 0
-        message, rows = self._team_digest(team, directs, subs, chats, is_lead=is_lead)
+        message, rows = self._team_digest(
+            team, directs, subs, chats, is_lead=is_lead, reader=actor
+        )
         self._team_inflight.add(session_id)
         source = self._board_source(team, message, rows=rows)
 
@@ -2021,8 +2053,11 @@ class SessionManager:
                 await self.deliver_to_session(session_id, message, source=source)
                 # Consume only after the turn dispatched: a crash before this replays
                 # the batch next tick (at-least-once, never silently lost).
-                if directs:
-                    self.team_store.consume(actor, directs[-1]["seq"])
+                # The feed cursor advances past BOTH batches: a subs event deduped
+                # out of directs must not replay as a direct next tick.
+                delivered = [e["seq"] for e in directs] + [e["seq"] for e in subs]
+                if delivered:
+                    self.team_store.consume_feed(team.space, actor, max(delivered))
                 if subs:
                     self.team_store.consume_subscription(
                         team.space, actor, subs[-1]["seq"]
@@ -2060,6 +2095,7 @@ class SessionManager:
         chats: Optional[list[dict]] = None,
         *,
         is_lead: bool,
+        reader: str = "",
     ) -> tuple[str, list[dict]]:
         """Coalesce one queue batch into one wake message. Deterministic, computed
         by code — the model does judgment, not arithmetic. Returns (model text,
@@ -2088,6 +2124,7 @@ class SessionManager:
             if event["kind"] == "item_assigned":
                 if item is None:
                     continue
+                assignee = payload.get("assignee") or ""
                 if payload.get("claimed"):
                     # A self-claim surfacing in the lead's subscription feed —
                     # supervision by exception, not an assignment to the reader.
@@ -2097,12 +2134,26 @@ class SessionManager:
                     )
                     rows.append({**row, "kind": "claimed"})
                     continue
+                if reader and payload.get("previous") == reader and assignee != reader:
+                    # The reader just LOST this item — its interest ends here.
+                    lines.append(
+                        f"{title} was reassigned to {assignee} by {event['actor']}"
+                        " — stop any work on it; hand off context via a comment"
+                        " if useful."
+                    )
+                    rows.append({**row, "kind": "assigned", "assignee": assignee})
+                    continue
+                if reader and assignee != reader:
+                    # Someone else's assignment surfacing in a broader feed.
+                    lines.append(f"{title} assigned to {assignee} by {event['actor']}")
+                    rows.append({**row, "kind": "assigned", "assignee": assignee})
+                    continue
                 lines.append(
                     f"You've been assigned work item {title}.\n"
                     f"  Done when: {item['criteria']}"
                     + (f"\n  Details: {item['description']}" if item["description"] else "")
                 )
-                rows.append({**row, "kind": "assigned"})
+                rows.append({**row, "kind": "assigned", "assignee": assignee})
             elif event["kind"] == "item_transitioned":
                 to = payload.get("to", "?")
                 comment = clamp(payload.get("comment") or "")

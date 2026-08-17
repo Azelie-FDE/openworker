@@ -3,6 +3,7 @@ import {
   announceInboxUnlock,
   createTempWorkspace,
   finalizeAutomationRun,
+  boardComment,
   boardTransition,
   fetchBoardAttachment,
   getBoardItem,
@@ -2075,6 +2076,7 @@ export function App() {
                 setBoardDetailId(null);
               }}
               onTransition={moveBoardItem}
+              onComment={(item, body) => boardComment(sessionId, item, body)}
               loadItem={(id) => getBoardItem(sessionId, id)}
               loadAttachment={(stored) => fetchBoardAttachment(sessionId, stored)}
               onOpenWorker={(actor) => {

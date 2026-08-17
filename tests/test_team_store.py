@@ -73,14 +73,13 @@ def test_spaces_created_lazily_and_isolated(store):
     assert [i["id"] for i in store.list_items("beta", USER)] == [1]
 
 
-def test_assignment_lands_in_the_assignees_deliveries(store):
+def test_assignment_lands_in_the_assignees_feed(store):
     item = seed(store)
     store.assign("proj", LEAD, item["id"], "worker-1")
-    deliveries = store.for_recipient("worker-1")
-    assert len(deliveries) == 1
-    assert deliveries[0]["kind"] == "item_assigned"
-    assert deliveries[0]["payload"]["assignee"] == "worker-1"
-    assert store.for_recipient("worker-2") == []
+    deliveries = store.feed_for("proj", "worker-1")
+    assert [e["kind"] for e in deliveries] == ["item_created", "item_assigned"]
+    assert deliveries[-1]["payload"]["assignee"] == "worker-1"
+    assert store.feed_for("proj", "worker-2") == []
 
 
 def test_rebuild_reproduces_the_projection(store):

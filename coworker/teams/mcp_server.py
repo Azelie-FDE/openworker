@@ -120,16 +120,17 @@ def build(dialect, *, space: str):
 
     @mcp.tool()
     def board_pending() -> Any:
-        """Your unconsumed deliveries — assignments addressed to you, cancel
-        notices. Check at the start of a work session; acknowledge with
-        board_consume."""
-        return _safe(dialect.pending)
+        """Your unconsumed feed: every event on items assigned to you or filed
+        by you — assignments, send-backs with feedback, comments from the lead
+        or user, cancellations. Check at the start of a work session and before
+        finishing; acknowledge with board_consume."""
+        return _safe(dialect.pending, space)
 
     @mcp.tool()
     def board_consume(upto_seq: int) -> Any:
-        """Acknowledge deliveries up to a sequence number (from board_pending),
+        """Acknowledge feed events up to a sequence number (from board_pending),
         so they are not re-delivered."""
-        return _safe(lambda: (dialect.consume(upto_seq), {"ok": True})[1])
+        return _safe(lambda: (dialect.consume(space, upto_seq), {"ok": True})[1])
 
     if role in ("lead", "user"):
 

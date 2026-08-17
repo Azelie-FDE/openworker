@@ -576,6 +576,9 @@ export async function mockApi(page: import("@playwright/test").Page) {
       mentions: ["nia"],
     },
   ];
+  // Pure notes added from the detail pane (never change state) — appended to
+  // the item's timeline so the pane reflects them after reload.
+  const itemNotes: Record<number, any[]> = {};
   const seedBoard = () => {
     if (boardItems.length) return;
     boardItems.push(
@@ -1099,7 +1102,19 @@ export async function mockApi(page: import("@playwright/test").Page) {
               },
             ]
           : [{ seq: 30, ts: at, actor: "lead", kind: "created" }];
-      return json({ ...item, timeline });
+      return json({ ...item, timeline: timeline.concat(itemNotes[id] || []) });
+    }
+    if (/\/v1\/sessions\/[^/]+\/board\/comment$/.test(p) && m === "POST") {
+      const b = req.postDataJSON() || {};
+      const id = Number(b.item);
+      (itemNotes[id] = itemNotes[id] || []).push({
+        seq: 90 + (itemNotes[id]?.length || 0),
+        ts: new Date().toISOString(),
+        actor: "user",
+        kind: "comment",
+        body: String(b.body || ""),
+      });
+      return json({ ok: true });
     }
     if (/\/v1\/sessions\/[^/]+\/board\/attachment$/.test(p)) {
       // A real 1x1 PNG so the <img> actually loads (the spec asserts it renders).

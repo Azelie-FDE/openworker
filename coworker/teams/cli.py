@@ -384,7 +384,7 @@ def _cmd_policy(args) -> int:
 
 def _cmd_pending(args) -> int:
     dialect = _dialect(args)
-    events = dialect.pending(limit=args.limit)
+    events = dialect.pending(_space(args), limit=args.limit)
     if args.json:
         print(json.dumps(events, indent=2))
     else:
@@ -394,7 +394,7 @@ def _cmd_pending(args) -> int:
         if not events:
             print("nothing pending")
     if args.consume and events:
-        dialect.consume(events[-1]["seq"])
+        dialect.consume(_space(args), events[-1]["seq"])
     return 0
 
 

@@ -90,8 +90,8 @@ class BoardDialect(Protocol):
     def attachment(self, stored: str) -> tuple[bytes, str]: ...
     def policy(self, space: str) -> dict[str, Any]: ...
     def set_policy(self, space: str, *, claims: str) -> dict[str, Any]: ...
-    def pending(self, *, limit: int = 200) -> list[dict[str, Any]]: ...
-    def consume(self, upto_seq: int) -> None: ...
+    def pending(self, space: str, *, limit: int = 200) -> list[dict[str, Any]]: ...
+    def consume(self, space: str, upto_seq: int) -> None: ...
     def journal_append(
         self,
         case: str,
@@ -237,11 +237,11 @@ class LocalDialect:
     def set_policy(self, space: str, *, claims: str) -> dict[str, Any]:
         return self.store.set_policy(space, self.actor, claims=claims)
 
-    def pending(self, *, limit: int = 200) -> list[dict[str, Any]]:
-        return self.store.pending_for(self.actor.id, limit=limit)
+    def pending(self, space: str, *, limit: int = 200) -> list[dict[str, Any]]:
+        return self.store.feed_for(space, self.actor.id, limit=limit)
 
-    def consume(self, upto_seq: int) -> None:
-        self.store.consume(self.actor.id, int(upto_seq))
+    def consume(self, space: str, upto_seq: int) -> None:
+        self.store.consume_feed(space, self.actor.id, int(upto_seq))
 
     def journal_append(
         self,
@@ -472,11 +472,13 @@ class RemoteDialect:
     def set_policy(self, space: str, *, claims: str) -> dict[str, Any]:
         return self._post("/v1/board/policy", {"space": space, "claims": claims})
 
-    def pending(self, *, limit: int = 200) -> list[dict[str, Any]]:
-        return self._get("/v1/board/pending", {"limit": limit})["events"]
+    def pending(self, space: str, *, limit: int = 200) -> list[dict[str, Any]]:
+        return self._get("/v1/board/pending", {"space": space, "limit": limit})[
+            "events"
+        ]
 
-    def consume(self, upto_seq: int) -> None:
-        self._post("/v1/board/consume", {"upto_seq": int(upto_seq)})
+    def consume(self, space: str, upto_seq: int) -> None:
+        self._post("/v1/board/consume", {"space": space, "upto_seq": int(upto_seq)})
 
     def journal_append(
         self,
