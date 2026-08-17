@@ -53,6 +53,9 @@ bedrock = ["boto3>=1.34"]
 openworker = "coworker.cli:main"
 openworker-server = "coworker.server.run:main"
 openworker-connectors = "coworker.connectors.cli:main"
+# The board as an open surface (OPE-100): `ocw board …` / `ocw journal …`,
+# including `ocw board mcp` — the stdio MCP server external harnesses attach to.
+ocw = "coworker.teams.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
