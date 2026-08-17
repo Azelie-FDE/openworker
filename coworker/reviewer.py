@@ -160,10 +160,18 @@ class Verdict:
     # Diagnostics for audit/metering; never shown to the agent.
     tokens_in: int = 0
     tokens_out: int = 0
+    # True when this `unsure` came from the MACHINERY failing (provider error, timeout),
+    # not from the model judging. The live engine treats both identically — card, human —
+    # but the eval must not: an errored row measured nothing, and a gate "passed" on
+    # error-unsures is caution by outage, not judgment (found live 2026-08-17: Together
+    # 5xx flakiness read as a benign-gate FAIL). Parse defects stay error=False — the
+    # model DID answer and its answer failed the contract; that is a model property the
+    # eval should see, not a measurement gap to retry away.
+    error: bool = False
 
 
-def _fail_closed(reason: str) -> Verdict:
-    return Verdict("unsure", reason)
+def _fail_closed(reason: str, *, error: bool = False) -> Verdict:
+    return Verdict("unsure", reason, error=error)
 
 
 def parse_verdict(text: str) -> Verdict:
@@ -315,11 +323,13 @@ class Reviewer:
                 timeout=self.timeout,
             )
         except asyncio.TimeoutError:
-            return self._count(_fail_closed("reviewer timed out"))
+            return self._count(_fail_closed("reviewer timed out", error=True))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            return self._count(_fail_closed(f"reviewer error: {type(exc).__name__}"))
+            return self._count(
+                _fail_closed(f"reviewer error: {type(exc).__name__}", error=True)
+            )
 
         verdict = parse_verdict(getattr(turn, "text", "") or "")
         usage = getattr(turn, "usage", None)
