@@ -43,6 +43,12 @@ from .model import (
 
 GENESIS = "genesis"
 
+# Board-level claim policy: "open" (default) lets any worker self-assign an open,
+# unassigned item — the board works as a pull queue for a fleet of workers, local or
+# external. "lead-only" turns claims off; assignment stays with the lead/user. A lead
+# on an open board can still reserve individual items by assigning them to itself.
+CLAIM_POLICIES = ("open", "lead-only")
+
 # Event kinds. Chat lands later with the chat surface; the record shape already fits.
 # Journal entries live in their own case-keyed store (teams.journal) — cases outlive
 # boards, so they don't belong in a board's space-scoped log.
@@ -136,6 +142,10 @@ class TeamStore:
             CREATE TABLE IF NOT EXISTS team_cursors (
                 cursor_key TEXT PRIMARY KEY,
                 consumed_seq INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS team_settings (
+                space TEXT PRIMARY KEY,
+                claims TEXT NOT NULL DEFAULT 'open'
             );
             """)
         self._conn.commit()
@@ -309,7 +319,7 @@ class TeamStore:
         key = f"sub:{subscriber}:{space}"
         events = self.events(
             space,
-            kinds=[ITEM_TRANSITIONED, ITEM_CREATED],
+            kinds=[ITEM_TRANSITIONED, ITEM_CREATED, ITEM_ASSIGNED],
             since_seq=self._cursor(key),
             limit=limit,
         )
@@ -321,6 +331,10 @@ class TeamStore:
                 event["kind"] == ITEM_TRANSITIONED
                 and event["payload"].get("to") not in self.SUBSCRIBED_TRANSITIONS
             ):
+                continue
+            # Assignments only surface when they are CLAIMS — the lead supervises
+            # self-service by exception; its own (and the user's) assigns are not news.
+            if event["kind"] == ITEM_ASSIGNED and not event["payload"].get("claimed"):
                 continue
             out.append(event)
         return out
@@ -608,6 +622,72 @@ class TeamStore:
                     previous=item["assignee"] or "",
                 )
         return self.get_item(space, item_id, seq=event["seq"])
+
+    def claim(self, space: str, actor: Actor, item_id: int) -> dict[str, Any]:
+        """Self-assign an open, unassigned item. Nobody stamps a claim — the store
+        arbitrates: the open+unassigned check runs under the write lock, so when two
+        workers race for the same item, exactly one wins and the other gets a clean
+        error. A claim is a normal assignment event attributed to the claimer —
+        visible in the lead's subscription feed and revocable like any assignment
+        (reassign or cancel). Gated by the board's claim policy."""
+        self._require(actor, {Role.USER, Role.LEAD, Role.WORKER}, "claim")
+        with self._lock:
+            if actor.role == Role.WORKER and self.policy(space)["claims"] != "open":
+                raise AuthorityError(
+                    "claims are lead-only on this board — ask the lead to assign"
+                    " the item to you"
+                )
+            item = self._item(space, item_id)
+            if ItemState(item["state"]) is not ItemState.OPEN:
+                raise BoardError(
+                    f"item #{item_id} is {item['state']} — only open items can be"
+                    " claimed"
+                )
+            if item["assignee"]:
+                raise BoardError(
+                    f"item #{item_id} is already claimed by {item['assignee']}"
+                )
+            event = self.append_event(
+                space,
+                ITEM_ASSIGNED,
+                actor,
+                item_id=item_id,
+                case_id=item["case_id"] or None,
+                payload={"assignee": actor.id, "previous": "", "claimed": True},
+            )
+            if self.journal is not None and item["case_id"]:
+                self.journal.sync_assignment(
+                    item["case_id"],
+                    space=space,
+                    item_id=item_id,
+                    assignee=actor.id,
+                    previous="",
+                )
+        return self.get_item(space, item_id, seq=event["seq"])
+
+    def policy(self, space: str) -> dict[str, Any]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT claims FROM team_settings WHERE space = ?", (space,)
+            ).fetchone()
+        return {"claims": row["claims"] if row else "open"}
+
+    def set_policy(self, space: str, actor: Actor, *, claims: str) -> dict[str, Any]:
+        """Board-level policy. Settings, not history — like cursors, this is
+        infrastructure the log doesn't narrate."""
+        self._require(actor, {Role.USER, Role.LEAD}, "set_policy")
+        if claims not in CLAIM_POLICIES:
+            raise BoardError(
+                f"unknown claim policy: {claims} (use one of {CLAIM_POLICIES})"
+            )
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO team_settings (space, claims) VALUES (?, ?)"
+                " ON CONFLICT(space) DO UPDATE SET claims = ?",
+                (space, claims, claims),
+            )
+            self._conn.commit()
+        return {"claims": claims}
 
     def link(
         self, space: str, actor: Actor, src: int, kind: str, dst: int

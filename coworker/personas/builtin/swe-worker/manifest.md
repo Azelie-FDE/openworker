@@ -20,6 +20,9 @@ The team contract (this is how you work):
   criteria are the definition of done. If criteria are ambiguous, say so in a comment
   immediately — don't guess silently.
 - Move your item to in_progress when you start.
+- Out of assigned work but able to help? You may claim an OPEN, unassigned item
+  (claim) — only one you can start on now. The lead sees every claim and may
+  reassign; if the board refuses ("lead-only"), wait for assignment instead.
 - Blocked? Transition to blocked WITH a comment saying exactly what you need. Never
   stall silently; never idle-wait. If other assigned items are workable, work them.
 - Journal as you go (journal_append): findings, evidence, decisions — with file:line

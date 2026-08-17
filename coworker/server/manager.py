@@ -89,6 +89,7 @@ from ..teams import JournalStore, Role as TeamRole, TeamStore, board_tools, jour
 from ..teams.model import space_for_workspace
 from ..teams.chat import ChatStore
 from ..teams.registry import TeamRegistry, TeamWorker
+from ..teams.tokens import BoardTokens
 from ..skills import (
     SessionSkillStore,
     SkillLoader,
@@ -212,6 +213,9 @@ class SessionManager:
         self.team_store = TeamStore(base / "teams.db", journal=self.journal_store)
         self.chat_store = ChatStore(base / "chat.db")
         self.teams = TeamRegistry(base / "teams.json")
+        # External board clients (OPE-100): join tokens bind actor+role; the
+        # `/v1/board` API resolves them and the store enforces authority.
+        self.board_tokens = BoardTokens(base / "board-tokens.json")
         self._team_inflight: set[str] = set()
         # Lead-session last-turn timestamps for the check-in backstop (monotonic-ish
         # wall clock; restart resets the clock rather than firing a wake storm).
@@ -1828,6 +1832,13 @@ class SessionManager:
             ),
         }
 
+    def kick_team_tick(self) -> None:
+        """Nudge the wake plumbing from outside the turn loop — e.g. after an
+        external board client writes through the `/v1/board` API, so a review or a
+        new filing reaches the lead now, not at the next 30s scheduler tick."""
+        if self._loop is not None:
+            asyncio.run_coroutine_threadsafe(self.team_tick(), self._loop)
+
     async def team_tick(self) -> int:
         """Drain team queues (called each scheduler tick + kicked after team turns).
         One wake consumes a burst as one digest; durable-until-consumed — the cursor
@@ -1984,6 +1995,14 @@ class SessionManager:
             title = f"#{item_id} {item['title']}" if item else f"#{item_id}"
             if event["kind"] == "item_assigned":
                 if item is None:
+                    continue
+                if payload.get("claimed"):
+                    # A self-claim surfacing in the lead's subscription feed —
+                    # supervision by exception, not an assignment to the reader.
+                    lines.append(
+                        f"{event['actor']} claimed {title} — it's theirs now;"
+                        " reassign or cancel if that's wrong."
+                    )
                     continue
                 lines.append(
                     f"You've been assigned work item {title}.\n"

@@ -33,7 +33,11 @@ How you run a piece of work:
    isn't: who owns what interface, who to ask about which decision.
 4. ASSIGN: assign items to actor ids. The item IS the worker's assignment — its
    description and criteria must stand alone. Respect dependencies (link blocks/parent);
-   don't assign what's blocked.
+   don't assign what's blocked. Workers (including external ones on this board) may
+   also CLAIM open unassigned items themselves — a claim shows up in your digest;
+   let good claims stand, reassign or cancel bad ones. To hold an item back from
+   claiming, assign it to yourself; to turn claiming off board-wide, set the claim
+   policy to lead-only.
 5. VERIFY at review: when an item reaches review, check the result against its
    acceptance criteria. Implementation items should be verified by the test worker when
    one is on the team — a builder never grades its own work: create a linked

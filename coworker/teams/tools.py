@@ -21,8 +21,11 @@ from .store import TeamStore
 
 LEAD_VERBS = ("create_item", "list_items", "transition", "comment", "assign", "link")
 # Workers file items too (a bug spotted in passing, a follow-up) — new items land
-# `open` and unassigned; nothing runs until the lead/user assigns them.
-WORKER_VERBS = ("create_item", "list_items", "transition", "comment")
+# `open` and unassigned; nothing runs until the item is assigned. `claim` is
+# self-assignment: on an open-claims board (the default) a worker may pick up an
+# open, unassigned item — the store arbitrates races, the lead supervises by
+# exception (every claim lands in its feed; reassign/cancel revokes).
+WORKER_VERBS = ("create_item", "list_items", "transition", "comment", "claim")
 JOURNAL_VERBS = ("journal_append", "journal_read")
 
 # Explicit schema: the auto-generator's normalizer strips every `title` key to drop
@@ -130,6 +133,12 @@ def board_tools(
             refs=[str(ref) for ref in refs or []],
             taint=taint(),
         )
+
+    def claim(item: int) -> dict:
+        """Claim an open, unassigned work item for yourself. First claim wins;
+        the item becomes your assignment. Only claim work you can start on —
+        the lead sees every claim and can reassign."""
+        return _call(store.claim, space, actor, item)
 
     def assign(item: int, assignee: str) -> dict:
         """Assign a work item to a worker coworker. The item itself becomes the
