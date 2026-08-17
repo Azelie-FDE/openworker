@@ -1918,6 +1918,34 @@ export function App() {
                 }}
               />
             )}
+            {/* A scheduled agent must never read as a dead one: while a self-wake is
+                pending and no turn is running, say so and offer the obvious action. */}
+            {activeInfo?.liveness === "sleeping" && !running && (
+              <div className="sleep-strip" data-testid="sleep-strip">
+                <span className="sleep-dot" />
+                <span className="sleep-text">
+                  Sleeping
+                  {activeInfo.sleeping_until
+                    ? ` until ${new Date(activeInfo.sleeping_until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                    : ""}
+                  {activeInfo.team?.role === "lead"
+                    ? " while the team works — it also wakes on board activity."
+                    : " — it wakes on its trigger."}{" "}
+                  Talk to it anytime.
+                </span>
+                <button
+                  className="btn sm"
+                  data-testid="sleep-status-btn"
+                  onClick={() =>
+                    send(
+                      "Quick status check, please — what's moving, what's blocked, and does anything need me?",
+                    )
+                  }
+                >
+                  Ask for a status
+                </button>
+              </div>
+            )}
             <Composer
               mode={mode}
               model={model}

@@ -213,6 +213,9 @@ class SessionManager:
         self.chat_store = ChatStore(base / "chat.db")
         self.teams = TeamRegistry(base / "teams.json")
         self._team_inflight: set[str] = set()
+        # Lead-session last-turn timestamps for the check-in backstop (monotonic-ish
+        # wall clock; restart resets the clock rather than firing a wake storm).
+        self._team_last_alive: dict[str, float] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         # Personas: registry + lifecycle state under this manager's data dir. Installed as the
         # process singleton so agents.get_agent resolves persona ids (incl. third-party) here.
@@ -1846,7 +1849,59 @@ class SessionManager:
                 actor=team.lead_actor,
                 is_lead=True,
             )
+            delivered += await self._maybe_backstop_lead(team)
         return delivered
+
+    # The lead owns its cadence (sleep_for, stretch-when-quiet); this backstop only
+    # exists because prompts aren't guarantees. A forgotten timer must never orphan
+    # a running team — and it de-facto covers a worker dying without a transition
+    # (its item goes stale; the backstop wake surfaces it in the digest).
+    TEAM_LEAD_BACKSTOP_SECS = 600
+
+    def _lead_backstop_due(self, team) -> bool:
+        sid = team.lead_session
+        if self.is_running(sid) or sid in self._team_inflight:
+            return False
+        if self.wakes.pending(sid):
+            return False  # a timer is set — the lead is on cadence, not forgotten
+        # Restart-safe: the first observation starts the clock instead of waking.
+        last = self._team_last_alive.setdefault(sid, time.time())
+        if time.time() - last < self.TEAM_LEAD_BACKSTOP_SECS:
+            return False
+        try:
+            items = self.team_store.list_items(team.space, self._user_actor())
+        except Exception:
+            return False
+        return any(
+            i["state"] in ("in_progress", "blocked", "review") for i in items
+        )
+
+    async def _maybe_backstop_lead(self, team) -> int:
+        if not self._lead_backstop_due(team):
+            return 0
+        if not self.teams.count_wake(team.team_id, cap=self.TEAM_WAKE_CAP_PER_HOUR):
+            return 0
+        sid = team.lead_session
+        self._team_last_alive[sid] = time.time()
+        message = (
+            "⏰ Backstop check — work is in flight but you had no check-in timer"
+            " set.\n\n"
+            + (self.team_staleness_digest(sid) or "Board state unavailable.")
+            + "\n\nGlance, act only if something needs you, and set your next"
+            " check-in with sleep_for (start 3–5 minutes; stretch when quiet)."
+        )
+        self._team_inflight.add(sid)
+
+        async def _deliver() -> None:
+            try:
+                await self.deliver_to_session(
+                    sid, message, source=self._board_source(team, message)
+                )
+            finally:
+                self._team_inflight.discard(sid)
+
+        asyncio.create_task(_deliver())
+        return 1
 
     async def _drain_team_member(
         self, team, *, session_id: str, actor: str, is_lead: bool
@@ -3724,6 +3779,8 @@ class SessionManager:
         # Team sessions: a finished turn is the moment new board events exist (an
         # assign, a review transition) — kick the queue drain now instead of waiting
         # for the next scheduler tick. Cheap no-op for teamless sessions.
+        if self.teams.for_lead_session(session_id):
+            self._team_last_alive[session_id] = time.time()
         if self._loop is not None and (
             self.teams.for_lead_session(session_id)
             or self.teams.for_worker_session(session_id)
@@ -4633,6 +4690,9 @@ class SessionManager:
                 # sleeping (a self-wake is pending) / idle — a count-less dot that never bubbles.
                 "attention": len(self.inbox.pending(session_id=r.session_id)),
                 "liveness": self._session_liveness(r.session_id),
+                # When sleeping: the next timer fire (ISO) — drives the "sleeping
+                # until…" strip so a scheduled agent never reads as a dead one.
+                "sleeping_until": self._sleeping_until(r.session_id),
                 # Channels this session listens to (inbound subscriptions) — drives the per-session
                 # "connections" indicator.
                 "subscriptions": [
@@ -4685,6 +4745,14 @@ class SessionManager:
             )
             row["status"] = active["state"] if active else "idle"
         return row
+
+    def _sleeping_until(self, session_id: str) -> Optional[str]:
+        fires = [
+            w.fire_at
+            for w in self.wakes.pending(session_id)
+            if w.kind == "timer" and w.fire_at
+        ]
+        return min(fires) if fires else None
 
     def _session_liveness(self, session_id: str) -> str:
         if self.is_running(session_id):

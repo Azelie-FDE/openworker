@@ -86,6 +86,20 @@ test("enabling chat at the gate adds the # team chat row; posting works with men
   await expect(page.getByTestId("teamchat-view")).toHaveCount(0);
 });
 
+test("a sleeping lead shows the strip; Ask for a status wakes it", async ({ page }) => {
+  await proposeTeam(page);
+  await page.getByTestId("teamreq-approve").click();
+  await expect(page.getByText(/Team created/)).toBeVisible();
+  // open the lead's session — it set a check-in timer, so it's sleeping
+  await page.getByText("Build the statements page").click();
+  const strip = page.getByTestId("sleep-strip");
+  await expect(strip).toBeVisible({ timeout: 12_000 });
+  await expect(strip).toContainText("Sleeping until");
+  await expect(strip).toContainText("while the team works");
+  await page.getByTestId("sleep-status-btn").click();
+  await expect(page.getByText(/Echo: Quick status check/)).toBeVisible();
+});
+
 test("with chat declined at the gate, no chat row renders", async ({ page }) => {
   await proposeTeam(page);
   await page.getByTestId("teamreq-approve").click();

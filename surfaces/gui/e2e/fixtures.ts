@@ -900,6 +900,9 @@ export async function mockApi(page: import("@playwright/test").Page) {
             chat_enabled: !!msg.enable_chat,
             chat_unread: msg.enable_chat ? 1 : 0,
           };
+          // The lead sets its check-in timer after staffing — it shows as sleeping.
+          lead.liveness = "sleeping";
+          lead.sleeping_until = new Date(Date.now() + 4 * 60_000).toISOString();
           for (const [actor, persona, status, item] of [
             ["nia", "swe-worker", "in_progress", "#1 in progress"],
             ["webb", "design-worker", "idle", "idle"],

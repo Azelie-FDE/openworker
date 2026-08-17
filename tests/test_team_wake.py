@@ -346,3 +346,46 @@ def test_cancel_notice_is_addressed_to_the_assignee(store):
     assert len(pending) == 1
     assert pending[0]["kind"] == "item_transitioned"
     assert pending[0]["payload"]["to"] == "canceled"
+
+
+def test_lead_backstop_fires_only_for_forgotten_timers(manager, monkeypatch):
+    import time as _time
+
+    from coworker.agents.base import Agent
+    from coworker.sessions import SessionRecord
+    from coworker.teams.model import space_for_workspace
+
+    worker_agent = Agent(name="swe-worker", title="SWE", system_prompt="p", team="worker")
+    monkeypatch.setattr("coworker.server.manager.get_agent", lambda name: worker_agent)
+    manager.session_store.save(
+        SessionRecord(
+            session_id="lead-sid",
+            workspace=manager.default_workspace,
+            model="m",
+            mode="interactive",
+            messages=[],
+            agent="swe-lead",
+        )
+    )
+    manager.create_team("lead-sid", [{"persona": "swe-worker", "name": "nia"}])
+    team = manager.teams.for_lead_session("lead-sid")
+    space = space_for_workspace(manager.default_workspace)
+    lead = Actor(id=team.lead_actor, role=Role.LEAD)
+
+    # Only an OPEN item → no backstop (nothing is in flight).
+    item = manager.team_store.create_item(space, lead, title="T", criteria="c")
+    manager._team_last_alive["lead-sid"] = _time.time() - 700
+    assert manager._lead_backstop_due(team) is False
+
+    # Active item + stale clock + no timer → due.
+    manager.team_store.assign(space, lead, item["id"], "nia")
+    worker = Actor(id="nia", role=Role.WORKER)
+    manager.team_store.transition(space, worker, item["id"], "in_progress")
+    manager._team_last_alive["lead-sid"] = _time.time() - 700
+    assert manager._lead_backstop_due(team) is True
+
+    # A pending self-wake timer means the lead owns its cadence → never backstop.
+    manager.wakes.add_timer("lead-sid", __import__("datetime").datetime.now(
+        __import__("datetime").timezone.utc
+    ))
+    assert manager._lead_backstop_due(team) is False
