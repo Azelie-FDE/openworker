@@ -26,3 +26,7 @@ __all__ = [
     "board_tools",
     "journal_tools",
 ]
+
+# BoardDialect / LocalDialect / RemoteDialect live in .dialect, BoardTokens in
+# .tokens — imported directly by their consumers (CLI, MCP server, `/v1/board`)
+# to keep this package root light for the common in-app path.

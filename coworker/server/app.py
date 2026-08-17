@@ -162,6 +162,8 @@ from ..inbox import VIS_INBOX, VIS_INLINE, args_preview
 from ..permissions import Mode
 from ..providers import AssistantTurn
 from .. import toolchain
+from ..teams.model import AuthorityError as TeamsAuthorityError
+from ..teams.model import BoardError as TeamsBoardError
 from .manager import SessionManager
 
 
@@ -216,6 +218,10 @@ def create_app(manager: SessionManager) -> FastAPI:
             not api_token
             or request.method == "OPTIONS"
             or request.url.path in tokenless_paths
+            # `/v1/board` carries its own, stronger auth: per-actor board tokens
+            # (identity + access), designed to be handed to external harnesses and
+            # other machines — which can never hold the machine-local sidecar token.
+            or request.url.path.startswith("/v1/board/")
             or _request_authenticated(request)
         ):
             return await call_next(request)
@@ -761,6 +767,242 @@ def create_app(manager: SessionManager) -> FastAPI:
     @app.get("/v1/teams/journal")
     def teams_journal() -> dict[str, Any]:
         return {"cases": manager.journal_overview()}
+
+    # ---- The open board surface (OPE-100): token-authenticated `/v1/board` API.
+    # Identity is the TOKEN (actor+role bound at mint, resolved per request, never
+    # client-asserted); authority is the STORE — the same double gate in-app agents
+    # get. This is the one wire protocol every external front door rides:
+    # RemoteDialect (the `ocw` CLI, the team-board MCP server, headless instances)
+    # today, a hosted board service later. Tokens are required even on loopback —
+    # they carry identity, not just access.
+
+    def _board_actor(request: Request):
+        auth = request.headers.get("authorization", "")
+        token = auth[7:] if auth.lower().startswith("bearer ") else ""
+        return manager.board_tokens.resolve(token)
+
+    def _board(request: Request, handler):
+        actor = _board_actor(request)
+        if actor is None:
+            return JSONResponse(
+                {"error": "board token required (Authorization: Bearer …) — mint"
+                          " one with `ocw board token` on the serving machine"},
+                status_code=401,
+            )
+        try:
+            return handler(actor)
+        except TeamsAuthorityError as error:
+            return JSONResponse({"error": str(error)}, status_code=403)
+        except (TeamsBoardError, ValueError) as error:
+            return JSONResponse({"error": str(error)}, status_code=400)
+
+    @app.get("/v1/board/whoami")
+    def board_whoami(request: Request):
+        return _board(
+            request, lambda actor: {"actor": actor.id, "role": actor.role.value}
+        )
+
+    @app.get("/v1/board/spaces")
+    def board_spaces(request: Request):
+        return _board(request, lambda actor: {"spaces": manager.team_store.spaces()})
+
+    @app.get("/v1/board/items")
+    def board_list_items(
+        request: Request, space: str, state: str = "", assignee: str = ""
+    ):
+        return _board(
+            request,
+            lambda actor: {
+                "items": manager.team_store.list_items(
+                    space, actor, state=state or None, assignee=assignee or None
+                )
+            },
+        )
+
+    @app.get("/v1/board/item")
+    def board_get_item(request: Request, space: str, id: int):
+        return _board(
+            request, lambda actor: manager.team_store.get_item(space, int(id))
+        )
+
+    @app.post("/v1/board/items")
+    def board_create_item(request: Request, body: dict):
+        body = body or {}
+
+        def run(actor):
+            item = manager.team_store.create_item(
+                str(body.get("space", "")),
+                actor,
+                title=str(body.get("title", "")),
+                criteria=str(body.get("criteria", "")),
+                description=str(body.get("description", "")),
+                parent=(
+                    int(body["parent"]) if body.get("parent") is not None else None
+                ),
+                case=str(body.get("case") or "") or None,
+            )
+            manager.kick_team_tick()  # a new filing is lead-subscription news
+            return item
+
+        return _board(request, run)
+
+    @app.post("/v1/board/items/transition")
+    def board_transition_item(request: Request, body: dict):
+        body = body or {}
+
+        def run(actor):
+            item = manager.team_store.transition(
+                str(body.get("space", "")),
+                actor,
+                int(body.get("id", 0)),
+                str(body.get("to", "")),
+                comment=str(body.get("comment", "")),
+                refs=[str(ref) for ref in body.get("refs") or []],
+            )
+            manager.kick_team_tick()  # review/blocked should reach the lead now
+            return item
+
+        return _board(request, run)
+
+    @app.post("/v1/board/items/comment")
+    def board_comment_item(request: Request, body: dict):
+        body = body or {}
+        return _board(
+            request,
+            lambda actor: manager.team_store.comment(
+                str(body.get("space", "")),
+                actor,
+                int(body.get("id", 0)),
+                str(body.get("body", "")),
+                refs=[str(ref) for ref in body.get("refs") or []],
+            ),
+        )
+
+    @app.post("/v1/board/items/assign")
+    def board_assign_item(request: Request, body: dict):
+        body = body or {}
+
+        def run(actor):
+            item = manager.team_store.assign(
+                str(body.get("space", "")),
+                actor,
+                int(body.get("id", 0)),
+                str(body.get("assignee", "")),
+            )
+            manager.kick_team_tick()  # the assignee's queue has news
+            return item
+
+        return _board(request, run)
+
+    @app.post("/v1/board/items/claim")
+    def board_claim_item(request: Request, body: dict):
+        body = body or {}
+
+        def run(actor):
+            item = manager.team_store.claim(
+                str(body.get("space", "")), actor, int(body.get("id", 0))
+            )
+            manager.kick_team_tick()  # claims land in the lead's feed
+            return item
+
+        return _board(request, run)
+
+    @app.post("/v1/board/link")
+    def board_link_items(request: Request, body: dict):
+        body = body or {}
+        return _board(
+            request,
+            lambda actor: manager.team_store.link(
+                str(body.get("space", "")),
+                actor,
+                int(body.get("src", 0)),
+                str(body.get("kind", "")),
+                int(body.get("dst", 0)),
+            ),
+        )
+
+    @app.get("/v1/board/policy")
+    def board_get_policy(request: Request, space: str):
+        return _board(request, lambda actor: manager.team_store.policy(space))
+
+    @app.post("/v1/board/policy")
+    def board_set_policy(request: Request, body: dict):
+        body = body or {}
+        return _board(
+            request,
+            lambda actor: manager.team_store.set_policy(
+                str(body.get("space", "")), actor, claims=str(body.get("claims", ""))
+            ),
+        )
+
+    @app.get("/v1/board/pending")
+    def board_pending(request: Request, limit: int = 200):
+        return _board(
+            request,
+            lambda actor: {
+                "events": manager.team_store.pending_for(actor.id, limit=int(limit))
+            },
+        )
+
+    @app.post("/v1/board/consume")
+    def board_consume(request: Request, body: dict):
+        body = body or {}
+
+        def run(actor):
+            manager.team_store.consume(actor.id, int(body.get("upto_seq", 0)))
+            return {"ok": True}
+
+        return _board(request, run)
+
+    @app.get("/v1/board/journal/cases")
+    def board_journal_cases(request: Request):
+        return _board(
+            request, lambda actor: {"cases": manager.journal_store.overview(actor)}
+        )
+
+    @app.get("/v1/board/journal")
+    def board_journal_read(
+        request: Request,
+        case: str,
+        item: Optional[int] = None,
+        author: str = "",
+        kind: str = "",
+        entity: str = "",
+        include_raw: str = "",
+        limit: int = 100,
+    ):
+        return _board(
+            request,
+            lambda actor: {
+                "entries": manager.journal_store.read(
+                    actor,
+                    case,
+                    item=item,
+                    author=author or None,
+                    kind=kind or None,
+                    entity=entity or None,
+                    include_raw=bool(include_raw),
+                    limit=int(limit),
+                )
+            },
+        )
+
+    @app.post("/v1/board/journal")
+    def board_journal_append(request: Request, body: dict):
+        body = body or {}
+        return _board(
+            request,
+            lambda actor: manager.journal_store.append(
+                actor,
+                str(body.get("case", "")),
+                str(body.get("body", "")),
+                kind=str(body.get("kind") or "note"),
+                space=str(body.get("space") or "") or None,
+                item=int(body["item"]) if body.get("item") is not None else None,
+                entities=[str(e) for e in body.get("entities") or []],
+                refs=[str(ref) for ref in body.get("refs") or []],
+            ),
+        )
 
     @app.get("/v1/memory")
     def memory() -> dict[str, Any]:
