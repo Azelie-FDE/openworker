@@ -230,8 +230,12 @@ def test_team_options_lists_only_enabled_workers(manager):
     tool = manager._team_options_tool()
     workers = {w["persona"] for w in tool()["workers"]}
     assert {"swe-worker", "design-worker", "test-worker"} <= workers
+    # The DevSecOps roster (eighteenth pass) is staffable too.
+    assert {"appsec-worker", "secrets-worker", "posture-worker"} <= workers
     assert "swe-lead" not in workers  # leads staff, they aren't staffed
+    assert "devsecops-lead" not in workers
     assert "security" not in workers  # solo coworkers are not team-eligible
+    assert "cloud-posture" not in workers  # its posture-WORKER variant is
 
 
 def test_turn_saves_never_detach_a_worker_from_its_team(manager, monkeypatch):
