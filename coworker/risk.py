@@ -52,22 +52,36 @@ _STRICTNESS: dict[RiskClass, int] = {
 RiskOverrides = Callable[[str], Optional["RiskClass"]]
 
 
+def _catalog_floor(tool_name: str) -> Optional[RiskClass]:
+    """The floor a connector-catalog tool must not be relaxed below. Catalog writes are
+    EXTERNAL by construction (`approval_for_tool` → `requires_approval=True`), and letting
+    an override drop one to READ would switch off approval, the Auto-Approve reviewer, and
+    read-only mode in a single step (OPE-111). Lazy import: risk.py must stay importable
+    without the connectors package."""
+    try:
+        from .connectors.tool_defs import _KIND_BY_NAME
+    except ImportError:  # pragma: no cover - connectors always ship, but fail open to base
+        return None
+    kind = _KIND_BY_NAME.get(tool_name)
+    return RiskClass.EXTERNAL if kind is not None and kind != "read" else None
+
+
 def classify(
     tool_name: str, metadata: Any = None, overrides: Optional[RiskOverrides] = None
 ) -> RiskClass:
     """Effective risk of a tool call. A user override may *relax* a metadata/MCP tool (the
     intended use — quieting an over-cautious plug-in), but may only ever **tighten** a
-    built-in write/exec/egress tool, never loosen it. Downgrading a built-in write to a read
-    would switch off path scoping AND the read-only gate at once, so it is refused here.
-    Precedence otherwise: the by-name base table, then aisuite metadata
-    (`requires_approval` → external), else read."""
-    base = _BASE.get(tool_name)
+    built-in write/exec/egress tool or a connector-catalog write, never loosen one.
+    Downgrading a write to a read would switch off path scoping AND the read-only gate at
+    once, so it is refused here. Precedence otherwise: the by-name base table, then aisuite
+    metadata (`requires_approval` → external), else read."""
+    base = _BASE.get(tool_name) or _catalog_floor(tool_name)
     if overrides is not None:
         ov = overrides(tool_name)
         if ov is not None:
             if base is None or _STRICTNESS[ov] >= _STRICTNESS[base]:
                 return ov
-            # A loosening override on a built-in is ignored: fall through to the base class.
+            # A loosening override on a floored tool is ignored: fall through to the base.
     if base is not None:
         return base
     if bool(getattr(metadata, "requires_approval", False)):

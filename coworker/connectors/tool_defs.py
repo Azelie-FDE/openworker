@@ -34,9 +34,11 @@ TOOL_DEFS: tuple[ConnectorToolDef, ...] = (
     ),
     ConnectorToolDef(
         "browser",
+        # Egress, not a read: the URL is model-chosen, so the request itself can carry
+        # data off-machine (same reasoning as web_fetch, OPE-111).
         "browser_open_url",
         "Open URL",
-        "read",
+        "write",
         "Open a URL in the Playwright browser.",
     ),
     ConnectorToolDef(
@@ -86,9 +88,11 @@ TOOL_DEFS: tuple[ConnectorToolDef, ...] = (
     ),
     ConnectorToolDef(
         "browser",
+        # Writes an image file to a resolved path (creating parents) — a local write,
+        # whatever the pane shows (OPE-111).
         "browser_screenshot",
         "Screenshot",
-        "read",
+        "write",
         "Capture a browser screenshot.",
     ),
     ConnectorToolDef(
@@ -142,16 +146,18 @@ TOOL_DEFS: tuple[ConnectorToolDef, ...] = (
     ),
     ConnectorToolDef(
         "github",
+        # Writes a whole tree to local disk — reading GitHub, writing the machine (OPE-111).
         "github_clone",
         "Clone a repo",
-        "read",
+        "write",
         "Clone a repository into a session folder to explore the code.",
     ),
     ConnectorToolDef(
         "github",
+        # Mutates an existing working tree (OPE-111).
         "github_pull",
         "Update a clone",
-        "read",
+        "write",
         "Fast-forward an existing clone to the latest commits.",
     ),
     ConnectorToolDef(

@@ -119,6 +119,68 @@ def test_override_may_tighten(tmp_path):
     assert classify("mcp__x__run", None, ov) is RiskClass.EXEC
 
 
+# -- catalog effects vs UX labels (OPE-111) -------------------------------------
+# These connector tools were catalogued "read" while actually writing to disk or
+# carrying model-chosen egress, which routed them around approval, the reviewer,
+# root scoping, and read-only mode all at once. The names are pinned here so a
+# future catalog edit can't quietly reopen the hole.
+_CATALOG_WRITES_IN_DISGUISE = (
+    "github_clone",  # writes a repo tree to disk
+    "github_pull",  # mutates a working tree
+    "browser_open_url",  # model-chosen URL = egress, like web_fetch
+    "browser_screenshot",  # writes an image file, creating parent dirs
+    "browser_upload_file",  # sends a local file's contents off-machine
+)
+
+
+def test_disguised_catalog_writes_gate():
+    from coworker.connectors.tool_defs import approval_for_tool
+
+    for name in _CATALOG_WRITES_IN_DISGUISE:
+        assert approval_for_tool(name) is True, name
+        assert classify(name) is RiskClass.EXTERNAL, name
+
+
+def test_catalog_floor_holds_even_with_lying_metadata():
+    # The floor keys off the catalog, not the attached metadata — a mis-built
+    # requires_approval=False cannot un-gate a catalog write.
+    from types import SimpleNamespace
+
+    meta = SimpleNamespace(requires_approval=False)
+    assert classify("github_clone", meta) is RiskClass.EXTERNAL
+
+
+def test_override_cannot_relax_a_catalog_write(tmp_path):
+    ov = _override({"github_clone": RiskClass.READ})
+    assert classify("github_clone", None, ov) is RiskClass.EXTERNAL
+
+    eng = PermissionEngine(workspace_root=tmp_path, mode=Mode.PLAN, risk_overrides=ov)
+    d = eng.evaluate("github_clone", {"repo": "octo/repo"}, None)
+    assert not d.allowed  # read-only mode still applies; the downgrade did nothing
+
+
+def test_catalog_reads_stay_relaxed_and_unprompted(tmp_path):
+    from coworker.connectors.tool_defs import approval_for_tool
+
+    for name in ("browser_read_url", "email_search", "github_get_issue"):
+        assert approval_for_tool(name) is False, name
+        assert classify(name) is RiskClass.READ, name
+    # And the plugin-relaxation path is untouched for genuine reads.
+    ov = _override({"email_search": RiskClass.READ})
+    assert classify("email_search", None, ov) is RiskClass.READ
+
+
+def test_disguised_writes_blocked_in_read_only_modes(tmp_path):
+    from types import SimpleNamespace
+
+    meta = SimpleNamespace(requires_approval=True)
+    for mode in (Mode.DISCUSS, Mode.PLAN):
+        eng = PermissionEngine(workspace_root=tmp_path, mode=mode)
+        for name in _CATALOG_WRITES_IN_DISGUISE:
+            d = eng.evaluate(name, {}, meta)
+            assert not d.allowed, f"{name} ran in {mode.value} mode"
+
+
 # -- write-path extraction / scoping -------------------------------------------
 def test_write_paths_simple_tools():
     assert write_paths("write_file", {"path": "a.txt"}) == (["a.txt"], True)
