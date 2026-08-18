@@ -15,27 +15,36 @@ async function planTheWork(page: import("@playwright/test").Page) {
   await expect(page.getByText(/filed 5 work items/)).toBeVisible();
 }
 
+// Seventeenth pass: every drawer section starts collapsed — expanding the Board
+// section is now an explicit step wherever a test reads the rail's rows.
+async function openBoardSection(page: import("@playwright/test").Page) {
+  await page.getByTestId("rail-toggle-board").click();
+  await expect(page.getByTestId("board-rail")).toBeVisible();
+}
+
 test("plain sessions carry zero board chrome", async ({ page }) => {
   await page.goto("/");
   await page.getByPlaceholder(/Ask the coworker/).fill("hello");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText("Echo: hello")).toBeVisible();
   await expect(page.getByTestId("board-rail")).toHaveCount(0);
+  await expect(page.getByTestId("rail-toggle-board")).toHaveCount(0);
 });
 
 test("filed items appear grouped in the rail, blocked on top, queued items listed", async ({
   page,
 }) => {
   await planTheWork(page);
+  // collapsed by default: the header chip is the maximum signal
+  await expect(page.getByTestId("board-rail")).toHaveCount(0);
+  await expect(page.getByTestId("rail-toggle-board")).toContainText("1 blocked · 1 review");
+  await openBoardSection(page);
   const rail = page.getByTestId("board-rail");
   await expect(rail).toBeVisible();
   const groups = rail.locator(".board-group");
   await expect(groups.first()).toHaveText("Blocked");
   await expect(rail).toContainText("Queued");
   await expect(rail.getByText("Secrets — git history, both repos")).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /Board · 1 blocked · 1 review · 1 in progress · 2 open/ }),
-  ).toBeVisible();
 });
 
 test("the overlay lists raw-state sections; verdicts flow through the detail pane", async ({
@@ -72,6 +81,7 @@ test("the overlay lists raw-state sections; verdicts flow through the detail pan
 
 test("finished items leave the rail; a quiet toggle reveals them", async ({ page }) => {
   await planTheWork(page);
+  await openBoardSection(page);
   const rail = page.getByTestId("board-rail");
   await expect(rail.getByText("Report rollup")).toBeVisible(); // review = active
   await page.getByTestId("board-expand").click();
@@ -92,6 +102,7 @@ test("item detail: timeline with attachment, worker link, request changes", asyn
   page,
 }) => {
   await planTheWork(page);
+  await openBoardSection(page);
   // a rail row deep-opens the overlay on that item's detail
   await page.getByTestId("board-rail").getByText("Report rollup").click();
   const detail = page.getByTestId("board-detail");
@@ -122,6 +133,7 @@ test("Add a note is a pure append — it lands in the timeline, state untouched"
   page,
 }) => {
   await planTheWork(page);
+  await openBoardSection(page);
   await page.getByTestId("board-rail").getByText("Report rollup").click();
   const detail = page.getByTestId("board-detail");
   await expect(detail).toContainText("In review");
@@ -135,11 +147,16 @@ test("Add a note is a pure append — it lands in the timeline, state untouched"
   await expect(detail.getByRole("button", { name: "Mark done" })).toBeVisible();
 });
 
-test("journal section lists cases once a board exists", async ({ page }) => {
+test("journal folds behind More; expanding lists cases once a board exists", async ({ page }) => {
   await planTheWork(page);
-  await page.getByRole("button", { name: /Journal/ }).click();
+  // Journal is not a primary section — it sits behind the quiet More row.
+  await expect(page.getByTestId("rail-toggle-journal")).toHaveCount(0);
+  await page.getByTestId("rail-more-toggle").click();
+  await page.getByTestId("rail-toggle-journal").click();
   const journal = page.getByTestId("journal-list");
   await expect(journal).toBeVisible();
   await expect(journal).toContainText("findings");
   await expect(journal).toContainText("12 entries");
+  // Access folds with it — the drawer keeps three primary sections.
+  await expect(page.getByTestId("access-section")).toBeVisible();
 });

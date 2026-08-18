@@ -11,13 +11,13 @@ import {
   type Board,
   type JournalCase,
 } from "../api";
-import type { TodoItem } from "../types";
+import type { SessionInfo, TodoItem } from "../types";
 import { AccessSection } from "./AccessSection";
-import { BoardSection, boardSummary } from "./BoardPanel";
+import { BoardSection } from "./BoardPanel";
 import { Icon } from "./Icon";
 import { Markdown, OPEN_ARTIFACT_EVENT } from "./Markdown";
 
-type Panel = "progress" | "artifacts" | "board" | "journal";
+type Panel = "progress" | "artifacts" | "board" | "journal" | "team";
 
 // Quiet file-type icons for the artifact list (the colored kind pills read as noisy).
 function kindIcon(kind: string): "file" | "fileCode" | "image" | "table" {
@@ -66,6 +66,17 @@ interface Props {
   board?: Board | null;
   onExpandBoard?: () => void;
   onOpenBoardItem?: (id: number) => void;
+  // Drawer restructure (seventeenth pass): the team lives HERE, not in the sidebar —
+  // member rows + the # team chat row. `isLead` also suppresses Progress (the board
+  // is the lead's progress surface).
+  isLead?: boolean;
+  teamMembers?: SessionInfo[];
+  teamChatEnabled?: boolean;
+  teamChatUnread?: number;
+  onOpenTeamChat?: () => void;
+  onOpenWorker?: (s: SessionInfo) => void;
+  // Bumped when a [.](board:) chip in the transcript is clicked — expands the Board section.
+  openBoardKey?: number;
 }
 
 export function RightRail({
@@ -87,22 +98,47 @@ export function RightRail({
   board,
   onExpandBoard,
   onOpenBoardItem,
+  isLead = false,
+  teamMembers = [],
+  teamChatEnabled = false,
+  teamChatUnread = 0,
+  onOpenTeamChat,
+  onOpenWorker,
+  openBoardKey = 0,
 }: Props) {
-  // Progress starts collapsed (owner call 2026-08-16 — rail space goes to the
-  // board/artifacts); it still auto-opens the first time a live turn has todos.
+  // Seventeenth pass: every panel starts collapsed and nothing auto-expands — a count
+  // chip is the maximum signal. One exception survives (solo sessions only): Progress
+  // still auto-opens the first time a live turn has todos.
   const [open, setOpen] = useState<Record<Panel, boolean>>({
     progress: false,
-    artifacts: true,
-    board: true,
+    artifacts: false,
+    board: false,
     journal: false,
+    team: false,
   });
+  // Journal + Access sit behind a quiet "More" row (three primary sections max).
+  const [moreOpen, setMoreOpen] = useState(false);
   const autoOpenedProgress = useRef(false);
   useEffect(() => {
-    if (running && todo.length > 0 && !autoOpenedProgress.current) {
+    if (!isLead && running && todo.length > 0 && !autoOpenedProgress.current) {
       autoOpenedProgress.current = true;
       setOpen((prev) => ({ ...prev, progress: true }));
     }
-  }, [running, todo.length]);
+  }, [running, todo.length, isLead]);
+  // A board chip in the transcript deep-links here: expand the Board section.
+  const seenBoardKey = useRef(openBoardKey);
+  useEffect(() => {
+    if (openBoardKey === seenBoardKey.current) return;
+    seenBoardKey.current = openBoardKey;
+    setOpen((prev) => ({ ...prev, board: true }));
+  }, [openBoardKey]);
+  // Access deep links (intro "Configure ›" etc.) must survive the More fold.
+  const seenAccessKey = useRef(openAccessKey);
+  useEffect(() => {
+    if (openAccessKey === seenAccessKey.current) return;
+    seenAccessKey.current = openAccessKey;
+    setMoreOpen(true);
+  }, [openAccessKey]);
   const [artifacts, setArtifacts] = useState<ArtifactInfo[]>([]);
   const [journal, setJournal] = useState<JournalCase[]>([]);
   const [selected, setSelected] = useState<ArtifactInfo | null>(null);
@@ -208,15 +244,20 @@ export function RightRail({
         />
       ) : (
         <>
-          <RailSection title="Progress" open={open.progress} onToggle={() => setOpen({ ...open, progress: !open.progress })}>
-            <ProgressSummary running={running} toolNames={toolNames} todo={todo} />
-          </RailSection>
+          {/* Leads carry no Progress panel — the board IS the lead's progress surface. */}
+          {!isLead && (
+            <RailSection title="Progress" open={open.progress} onToggle={() => setOpen({ ...open, progress: !open.progress })}>
+              <ProgressSummary running={running} toolNames={toolNames} todo={todo} />
+            </RailSection>
+          )}
 
           {/* Agent teams (OPE-96): board summary — grouped by state, blocked on top.
               Hidden entirely until the workspace has items (no chrome for plain sessions). */}
           {board?.space && (
             <RailSection
-              title={`Board${boardSummary(board) ? ` · ${boardSummary(board)}` : ""}`}
+              title="Board"
+              count={boardChip(board).text}
+              countAttention={boardChip(board).attention}
               open={open.board}
               onToggle={() => setOpen({ ...open, board: !open.board })}
               action={
@@ -241,27 +282,46 @@ export function RightRail({
             </RailSection>
           )}
 
-          {board?.space && journal.length > 0 && (
+          {/* The team panel: who's working, on what, and the way into their sessions —
+              the altitude-3 escape hatch, moved here from the sidebar (RECENT keeps ONE
+              entry per team: the lead). */}
+          {teamMembers.length > 0 && (
             <RailSection
-              title={`Journal (${journal.length})`}
-              open={open.journal}
-              onToggle={() => setOpen({ ...open, journal: !open.journal })}
+              title="Team"
+              open={open.team}
+              onToggle={() => setOpen({ ...open, team: !open.team })}
+              count={String(teamMembers.length)}
             >
-              <div className="journal-list" data-testid="journal-list">
-                {journal.map((c) => (
-                  <div className="journal-row" key={c.case}>
-                    <Icon name="file" size={13} />
-                    <span className="journal-case">{c.case}</span>
-                    <span className="journal-count">{c.entries} entr{c.entries === 1 ? "y" : "ies"}</span>
-                  </div>
+              <div className="rail-team" data-testid="team-panel">
+                {teamMembers.map((w) => (
+                  <button
+                    className="rail-team-row"
+                    key={w.session_id}
+                    data-testid={`team-row-${w.team?.actor || w.session_id}`}
+                    onClick={() => onOpenWorker?.(w)}
+                    title={`Open ${w.team?.actor || "worker"}'s session`}
+                  >
+                    <span className={"team-dot " + (w.team?.status || "idle")} />
+                    <span className="rail-team-name">{w.team?.actor || w.agent}</span>
+                    <span className="rail-team-item">{w.team?.current_item || "sleeping"}</span>
+                    <span className="rail-team-open">open ↗</span>
+                  </button>
                 ))}
+                {teamChatEnabled && onOpenTeamChat && (
+                  <button className="rail-team-row rail-chat-row" data-testid="team-chat-row" onClick={onOpenTeamChat}>
+                    <span className="team-hash">#</span>
+                    <span className="rail-team-name">team chat</span>
+                    {teamChatUnread > 0 && <span className="team-chat-badge">{teamChatUnread}</span>}
+                  </button>
+                )}
               </div>
             </RailSection>
           )}
 
           {showArtifacts && (
           <RailSection
-            title={`Artifacts${artifacts.length ? ` (${artifacts.length})` : ""}`}
+            title="Artifacts"
+            count={artifacts.length ? String(artifacts.length) : undefined}
             open={open.artifacts}
             onToggle={() => setOpen({ ...open, artifacts: !open.artifacts })}
             action={
@@ -300,23 +360,68 @@ export function RightRail({
           </RailSection>
           )}
 
+          {/* Seventeenth pass: three primary sections max — Journal and Access fold
+              behind a quiet "More" row. Deep links (Access openKey) unfold it. */}
+          <button
+            className="rail-more-row"
+            data-testid="rail-more-toggle"
+            onClick={() => setMoreOpen((v) => !v)}
+          >
+            <Icon name={moreOpen ? "chevronDown" : "chevronRight"} size={13} className="rail-chev" />
+            <span>More</span>
+          </button>
+          {moreOpen && board?.space && journal.length > 0 && (
+            <RailSection
+              title="Journal"
+              count={String(journal.length)}
+              open={open.journal}
+              onToggle={() => setOpen({ ...open, journal: !open.journal })}
+            >
+              <div className="journal-list" data-testid="journal-list">
+                {journal.map((c) => (
+                  <div className="journal-row" key={c.case}>
+                    <Icon name="file" size={13} />
+                    <span className="journal-case">{c.case}</span>
+                    <span className="journal-count">{c.entries} entr{c.entries === 1 ? "y" : "ies"}</span>
+                  </div>
+                ))}
+              </div>
+            </RailSection>
+          )}
           {/* §32: Access — the former Session-settings drawer, one section among peers.
-              key: its data ownership resets with the conversation, like the old row did. */}
-          <AccessSection
-            key={sessionId}
-            sessionId={sessionId}
-            personaId={personaId}
-            projectScoped={projectScoped}
-            workspace={workspace}
-            branch={branch}
-            scratchPrimary={scratchPrimary}
-            openKey={openAccessKey}
-            onOpenIntegrations={onOpenIntegrations}
-          />
+              key: its data ownership resets with the conversation, like the old row did.
+              Stays MOUNTED behind the More fold (hidden, not unmounted) so its openKey
+              deep links (intro "Configure ›", onboarding "Start working") keep firing. */}
+          <div style={moreOpen ? undefined : { display: "none" }}>
+            <AccessSection
+              key={sessionId}
+              sessionId={sessionId}
+              personaId={personaId}
+              projectScoped={projectScoped}
+              workspace={workspace}
+              branch={branch}
+              scratchPrimary={scratchPrimary}
+              openKey={openAccessKey}
+              onOpenIntegrations={onOpenIntegrations}
+            />
+          </div>
         </>
       )}
     </aside>
   );
+}
+
+// The Board section's header chip: the attention states (blocked/review) when present,
+// otherwise a quiet active count. Full per-state summary stays on the topbar button.
+function boardChip(board: Board): { text: string; attention: boolean } {
+  const counts: Record<string, number> = {};
+  for (const item of board.items) counts[item.state] = (counts[item.state] || 0) + 1;
+  const attn: string[] = [];
+  if (counts.blocked) attn.push(`${counts.blocked} blocked`);
+  if (counts.review) attn.push(`${counts.review} review`);
+  if (attn.length) return { text: attn.join(" · "), attention: true };
+  const active = (counts.in_progress || 0) + (counts.open || 0);
+  return { text: active ? `${active} active` : "", attention: false };
 }
 
 function ProgressSummary({ running, toolNames, todo }: { running: boolean; toolNames: string[]; todo: TodoItem[] }) {
@@ -357,19 +462,32 @@ function RailSection({
   onToggle,
   children,
   action,
+  count,
+  countAttention,
 }: {
   title: string;
   open: boolean;
   onToggle: () => void;
   children: ReactNode;
   action?: ReactNode;
+  // The header's maximum signal: a small count chip; amber when it carries attention
+  // states (blocked/review). Panels never shout louder than this.
+  count?: string;
+  countAttention?: boolean;
 }) {
   return (
     <section className="rail-section">
       <div className="rail-section-head">
-        <button className="rail-section-toggle" onClick={onToggle}>
+        <button
+          className="rail-section-toggle"
+          data-testid={`rail-toggle-${title.toLowerCase()}`}
+          onClick={onToggle}
+        >
           <Icon name={open ? "chevronDown" : "chevronRight"} size={14} className="rail-chev" />
           <span>{title}</span>
+          {count && (
+            <span className={"rail-count" + (countAttention ? " attention" : "")}>{count}</span>
+          )}
         </button>
         {action}
       </div>

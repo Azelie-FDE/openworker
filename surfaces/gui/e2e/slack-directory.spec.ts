@@ -50,6 +50,7 @@ test("channel typeahead: a NAME resolves to the workspace's id-address", async (
 }) => {
   await page.goto("/");
   await page.getByText("Draft the launch note").first().click();
+  await page.getByTestId("rail-more-toggle").click(); // Access folds behind More (17th pass)
   await page.getByTestId("access-toggle").click();
   await page.getByRole("button", { name: /Channels · 0/ }).click();
 
@@ -71,6 +72,7 @@ test("channel typeahead: a NAME resolves to the workspace's id-address", async (
 test("channel typeahead: private and not-a-member states are honest", async ({ page }) => {
   await page.goto("/");
   await page.getByText("Draft the launch note").first().click();
+  await page.getByTestId("rail-more-toggle").click(); // Access folds behind More (17th pass)
   await page.getByTestId("access-toggle").click();
   await page.getByRole("button", { name: /Channels · 0/ }).click();
 

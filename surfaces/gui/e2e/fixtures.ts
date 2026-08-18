@@ -618,6 +618,9 @@ export async function mockApi(page: import("@playwright/test").Page) {
   await page.routeWebSocket(/\/ws\/session\//, (ws) => {
     const send = (type: string, data: Record<string, unknown> = {}) =>
       ws.send(JSON.stringify({ type, data }));
+    // The page's session id, from the socket URL — team approval stamps THIS session
+    // as the lead (the active conversation IS the lead; workers hang off it).
+    const sid = ws.url().split("/ws/session/")[1]?.split("?")[0] || "sess-lead";
     send("ready");
     let pendingTool = "run_shell"; // which proposal the next approval decision resolves
     let epicTimer: ReturnType<typeof setInterval> | null = null; // the slow stream, stoppable via interrupt
@@ -905,7 +908,7 @@ export async function mockApi(page: import("@playwright/test").Page) {
         if (msg.approved) {
           seedBoard(); // "created on the board" — the board fetch now shows them
           send("assistant_message", {
-            text: "Items created on the board — staffing next.",
+            text: "Items created on the board — [Board · 5 items](board:) if you want to watch. Staffing next.",
           });
         } else {
           send("assistant_message", { text: "Understood — reworking the split." });
@@ -913,22 +916,23 @@ export async function mockApi(page: import("@playwright/test").Page) {
         send("turn_done");
       } else if (msg.type === "team_response") {
         if (msg.approved) {
-          // Server-side create_team pre-spawned the workers; surface them in the
-          // sessions fixture so the sidebar's expandable entry has children.
-          const lead = sessions.find((s) => s.session_id === "sess-lead") || {
-            session_id: "sess-lead",
-            title: "Build the statements page",
-            workspace: "/Users/test/OpenWorker/launch-note",
-            // The fixture keeps the lead on the default persona so it renders inside
-            // the already-open accordion; the expandable entry is what's under test.
-            agent: "cowork",
-            model: "m",
-            mode: "interactive",
-            updated_at: new Date().toISOString(),
-            messages: 2,
-            team: { role: "lead", team_id: "t1" },
-          };
-          if (!sessions.includes(lead)) sessions.unshift(lead);
+          // Server-side create_team pre-spawned the workers. The ACTIVE session IS
+          // the lead (seventeenth pass): stamp it in the sessions list — RECENT keeps
+          // this ONE entry — and hang the workers off it for the drawer's Team panel.
+          let lead = sessions.find((s) => s.session_id === sid);
+          if (!lead) {
+            lead = {
+              session_id: sid,
+              workspace: "/Users/test/OpenWorker/launch-note",
+              agent: "cowork",
+              model: "m",
+              mode: "interactive",
+              messages: 2,
+            };
+            sessions.unshift(lead);
+          }
+          lead.title = "Build the statements page";
+          lead.updated_at = new Date().toISOString();
           lead.team = {
             role: "lead",
             team_id: "t1",
@@ -955,7 +959,7 @@ export async function mockApi(page: import("@playwright/test").Page) {
               team: {
                 role: "worker",
                 team_id: "t1",
-                lead_session: "sess-lead",
+                lead_session: sid,
                 actor,
                 status,
                 current_item: item,

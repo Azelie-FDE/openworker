@@ -8,6 +8,7 @@ test("Slack channels drill-down: gating, add (auto-prefixed), remove", async ({ 
 
   // Open the pinned cowork session, then expand the rail's Access section.
   await page.getByText("Draft the launch note").first().click();
+  await page.getByTestId("rail-more-toggle").click(); // Access folds behind More (17th pass)
   await page.getByTestId("access-toggle").click();
 
   const body = page.getByRole("region", { name: "Session access" });
@@ -42,6 +43,7 @@ test("Slack channels drill-down: gating, add (auto-prefixed), remove", async ({ 
 test("recent channels popover: opens on focus, filters, picks", async ({ page }) => {
   await page.goto("/");
   await page.getByText("Draft the launch note").first().click();
+  await page.getByTestId("rail-more-toggle").click(); // Access folds behind More (17th pass)
   await page.getByTestId("access-toggle").click();
   await page.getByRole("button", { name: /Channels · 0/ }).click();
 
@@ -80,6 +82,7 @@ test("channel add: link URLs resolve, bare #names are rejected with a hint", asy
 }) => {
   await page.goto("/");
   await page.getByText("Draft the launch note").first().click();
+  await page.getByTestId("rail-more-toggle").click(); // Access folds behind More (17th pass)
   await page.getByTestId("access-toggle").click();
   await page.getByRole("button", { name: /Channels · 0/ }).click();
 

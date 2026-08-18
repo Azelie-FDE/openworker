@@ -1,7 +1,8 @@
-// Agent teams (OPE-97): the staffing gate + the sidebar's expandable team entry.
-// The fake lead proposes a roster on "staff the team" and suspends; approval
+// Agent teams (OPE-97): the staffing gate + the drawer's Team panel (seventeenth
+// pass). The fake lead proposes a roster on "staff the team" and suspends; approval
 // "pre-spawns" workers (the fixture mirrors create_team by adding worker sessions),
-// which then nest under the lead's ONE expandable RECENT entry.
+// which surface in the right drawer's Team section — the sidebar keeps ONE entry
+// per team (the lead), with no expansion.
 import { expect } from "@playwright/test";
 import { test } from "./fixtures";
 
@@ -37,6 +38,10 @@ test("the decomposition gate shows items with criteria; approval lands them on t
 
   await page.getByTestId("itemsreq-approve").click();
   await expect(page.getByText(/Items created on the board/)).toBeVisible();
+  // Sections start collapsed (a count chip is the maximum signal) — but the lead's
+  // one-time [Board · N items](board:) chip expands the drawer's Board section.
+  await expect(page.getByTestId("board-rail")).toHaveCount(0);
+  await page.getByTestId("board-chip").click();
   await expect(page.getByTestId("board-rail")).toBeVisible();
 });
 
@@ -115,8 +120,10 @@ test("enabling chat at the gate adds the # team chat row; posting works with men
   await page.getByTestId("teamreq-approve").click();
   await expect(page.getByText(/Team created/)).toBeVisible();
 
-  await page.getByTestId("team-toggle-sess-lead").click();
-  const chatRow = page.getByTestId("team-chat-row-sess-lead");
+  // The chat row lives in the drawer's Team panel now (sessions poll: allow a cycle).
+  await expect(page.getByTestId("rail-toggle-team")).toBeVisible({ timeout: 12_000 });
+  await page.getByTestId("rail-toggle-team").click();
+  const chatRow = page.getByTestId("team-chat-row");
   await expect(chatRow).toBeVisible();
   await expect(chatRow).toContainText("1"); // unread badge
 
@@ -139,7 +146,7 @@ test("a sleeping lead shows the strip; Ask for a status wakes it", async ({ page
   await page.getByTestId("teamreq-approve").click();
   await expect(page.getByText(/Team created/)).toBeVisible();
   // open the lead's session — it set a check-in timer, so it's sleeping
-  await page.getByText("Build the statements page").click();
+  await page.locator(".sidebar").getByText("Build the statements page").click();
   const strip = page.getByTestId("sleep-strip");
   await expect(strip).toBeVisible({ timeout: 12_000 });
   await expect(strip).toContainText("Sleeping until");
@@ -152,9 +159,10 @@ test("with chat declined at the gate, no chat row renders", async ({ page }) => 
   await proposeTeam(page);
   await page.getByTestId("teamreq-approve").click();
   await expect(page.getByText(/Team created/)).toBeVisible();
-  await page.getByTestId("team-toggle-sess-lead").click();
-  await expect(page.getByTestId("team-children-sess-lead")).toBeVisible();
-  await expect(page.getByTestId("team-chat-row-sess-lead")).toHaveCount(0);
+  await expect(page.getByTestId("rail-toggle-team")).toBeVisible({ timeout: 12_000 });
+  await page.getByTestId("rail-toggle-team").click();
+  await expect(page.getByTestId("team-panel")).toBeVisible();
+  await expect(page.getByTestId("team-chat-row")).toHaveCount(0);
 });
 
 test("declining the roster returns the turn to the lead", async ({ page }) => {
@@ -164,27 +172,41 @@ test("declining the roster returns the turn to the lead", async ({ page }) => {
   await expect(page.getByTestId("teamreq-card")).toHaveCount(0);
 });
 
-test("approval creates the team; workers nest under the lead's expandable entry", async ({
+test("approval creates the team; members live in the drawer, RECENT keeps one entry", async ({
   page,
 }) => {
   await proposeTeam(page);
   await page.getByTestId("teamreq-approve").click();
   await expect(page.getByText(/Team created/)).toBeVisible();
 
-  // The workers exist as sessions now — but never as top-level RECENT rows.
-  // (The sidebar refreshes on its 5s poll, so allow one full cycle.)
-  await expect(page.getByTestId("team-toggle-sess-lead")).toBeVisible({ timeout: 12_000 });
-  await expect(page.getByText("Build the statements page")).toBeVisible();
-  await expect(page.getByTestId("team-children-sess-lead")).toHaveCount(0);
+  // The drawer grows a collapsed Team section with a member-count chip.
+  // (Sessions poll every 5s, so allow one full cycle.)
+  const teamToggle = page.getByTestId("rail-toggle-team");
+  await expect(teamToggle).toBeVisible({ timeout: 12_000 });
+  await expect(teamToggle).toContainText("3");
+  await expect(page.getByTestId("team-panel")).toHaveCount(0); // collapsed by default
 
-  await page.getByTestId("team-toggle-sess-lead").click();
-  const children = page.getByTestId("team-children-sess-lead");
-  await expect(children).toBeVisible();
-  await expect(children).toContainText("nia · #1 in progress");
-  await expect(children).toContainText("webb · idle");
-  await expect(children).toContainText("checks · #4 blocked");
+  // The lead is the SESSION — Progress yields its slot (the board is the lead's
+  // progress surface).
+  await expect(page.getByTestId("rail-toggle-progress")).toHaveCount(0);
 
-  // Collapse hides them again — the team is one entry, not a panel.
-  await page.getByTestId("team-toggle-sess-lead").click();
-  await expect(page.getByTestId("team-children-sess-lead")).toHaveCount(0);
+  // Workers never appear as top-level RECENT rows — one entry per team, no expansion.
+  const sidebar = page.locator(".sidebar");
+  await expect(sidebar.getByText("Build the statements page")).toBeVisible();
+  await expect(sidebar.getByText("nia", { exact: true })).toHaveCount(0);
+  await expect(sidebar.locator("[data-testid^=team-toggle-]")).toHaveCount(0);
+
+  // Expanding the Team panel shows member rows: dot + callname + current item.
+  await teamToggle.click();
+  const panel = page.getByTestId("team-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId("team-row-nia")).toContainText("#1 in progress");
+  await expect(panel.getByTestId("team-row-webb")).toContainText("idle");
+  await expect(panel.getByTestId("team-row-checks")).toContainText("#4 blocked");
+
+  // A member row is the escape hatch — clicking opens that worker's session, where
+  // the drawer is a plain worker drawer again (Progress back, no Team panel).
+  await panel.getByTestId("team-row-nia").click();
+  await expect(page.getByTestId("rail-toggle-progress")).toBeVisible();
+  await expect(page.getByTestId("rail-toggle-team")).toHaveCount(0);
 });

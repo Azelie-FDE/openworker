@@ -17,8 +17,9 @@ test("no topbar opener; the Access header IS the ambient glance; expanding edits
   await expect(page.getByRole("button", { name: "Open session settings" })).toHaveCount(0);
   await expect(page.getByTestId("session-settings-row")).toHaveCount(0);
 
-  // The trust surface is ambient: the collapsed header always shows the summary — and no
-  // nudge text ever renders at rest (§23's rule carried over).
+  // The trust surface is ambient once More is unfolded: the collapsed header always shows
+  // the summary — and no nudge text ever renders at rest (§23's rule carried over).
+  await page.getByTestId("rail-more-toggle").click();
   const section = page.getByTestId("access-section");
   await expect(section.getByTestId("access-summary")).toHaveText("Browser, Slack +1 · 1 folder");
   await expect(section.getByText(/recommended/i)).toHaveCount(0);
@@ -44,6 +45,7 @@ test("+ Add a source: full catalog on focus, filter as you type → connect-in-c
 }) => {
   await page.goto("/");
   await page.getByText("Draft the launch note").first().click();
+  await page.getByTestId("rail-more-toggle").click();
   await page.getByTestId("access-toggle").click();
 
   // Focusing the empty input shows the FULL catalog (FB-012) — every available connector
@@ -86,6 +88,7 @@ test("per-session mute round-trips; the summary follows", async ({ page }) => {
   await page.goto("/");
   await page.getByText("Draft the launch note").first().click();
 
+  await page.getByTestId("rail-more-toggle").click();
   const section = page.getByTestId("access-section");
   await section.getByTestId("access-toggle").click();
   const body = page.getByRole("region", { name: "Session access" });

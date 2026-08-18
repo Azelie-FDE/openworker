@@ -10,6 +10,8 @@ async function openReport(page: import("@playwright/test").Page) {
   await page.goto("/");
   await page.getByPlaceholder(/Ask the coworker/).fill("hello");
   await page.getByRole("button", { name: "Send" }).click();
+  // Seventeenth pass: sections start collapsed — expand Artifacts to reach the list.
+  await page.getByTestId("rail-toggle-artifacts").click();
   await page.locator(".artifact-row", { hasText: "security-review.html" }).click();
 }
 

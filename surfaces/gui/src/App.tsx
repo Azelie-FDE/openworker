@@ -347,6 +347,17 @@ export function App() {
     window.addEventListener("ocw-open-artifact", show);
     return () => window.removeEventListener("ocw-open-artifact", show);
   }, []);
+  // Seventeenth pass: the lead's one-time [Board · N items](board:) chip — un-hide the
+  // rail and bump the key that expands its Board section.
+  const [boardRailKey, setBoardRailKey] = useState(0);
+  useEffect(() => {
+    const show = () => {
+      setRailHidden(false);
+      setBoardRailKey((k) => k + 1);
+    };
+    window.addEventListener("ocw-open-board", show);
+    return () => window.removeEventListener("ocw-open-board", show);
+  }, []);
   // The command-palette search, openable from the collapsed-sidebar topbar cluster (§22). The
   // expanded sidebar owns its own instance; this one exists so search never disappears with it.
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1004,6 +1015,13 @@ export function App() {
     await refreshBoard();
   };
 
+  // Seventeenth pass: the drawer's Team panel — this session's staff (workers whose
+  // lead is the current session). The sidebar shows ONE entry per team; members live here.
+  const curSession = sessions.find((s) => s.session_id === sessionId);
+  const teamMembers = sessions.filter(
+    (s) => s.team?.role === "worker" && s.team.lead_session === sessionId,
+  );
+
   // Keep the active session's pending Inbox items fresh (answer-in-context card). Loads on session
   // change + after each turn, plus a slow poll so an unattended agent's new question surfaces.
   useEffect(() => {
@@ -1625,7 +1643,6 @@ export function App() {
         sessions={sessions}
         projects={projects}
         activeSession={sessionId}
-        onOpenTeamChat={(teamId) => setChatTeam(teamId)}
         onSwitchAgent={switchAgent}
         onNewSession={startNewSession}
         onSelectSession={selectSession}
@@ -2067,6 +2084,13 @@ export function App() {
               setBoardDetailId(id);
               setBoardOpen(true);
             }}
+            isLead={teamMembers.length > 0 || (!!curSession?.team && curSession.team.role !== "worker")}
+            teamMembers={teamMembers}
+            teamChatEnabled={!!curSession?.team?.chat_enabled}
+            teamChatUnread={curSession?.team?.chat_unread || 0}
+            onOpenTeamChat={() => setChatTeam(curSession?.team?.team_id || "")}
+            onOpenWorker={(w) => void selectSession(w.session_id, w.workspace, w.agent)}
+            openBoardKey={boardRailKey}
           />
           {boardOpen && board && board.space && (
             <BoardOverlay

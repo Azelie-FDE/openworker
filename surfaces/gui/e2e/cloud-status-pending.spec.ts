@@ -9,6 +9,7 @@ import { test } from "./fixtures";
 const openGmailPane = async (page: import("@playwright/test").Page) => {
   await page.goto("/");
   await page.getByText("Draft the launch note").first().click();
+  await page.getByTestId("rail-more-toggle").click(); // Access folds behind More (17th pass)
   await page.getByTestId("access-toggle").click();
   await page.getByTestId("access-add-source").click();
   await page.getByTestId("access-add-gmail").click();
