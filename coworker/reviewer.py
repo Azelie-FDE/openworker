@@ -82,8 +82,13 @@ CONTEXT YOU ARE GIVEN
                It is a boundary, NOT a safety claim - deleting the entire workspace happens
                inside these folders and is still wrong, and a file being in scope says
                nothing about whether touching it is part of what the user asked for.
-               Writes outside these folders are already blocked before you are consulted,
-               so you will never be asked to judge one; do not spend the verdict on that.
+               For file tools, writes outside these folders are blocked before you are
+               consulted. Shell commands are different: nothing scopes what a command
+               touches. A command can read, write, or send anything the user's account can
+               reach - your verdict is the only check on where it reaches. A command that
+               touches anything outside these folders - the home directory, credential
+               files, shell profiles, system paths - is "unsure" at best, and "allow" only
+               when the user themselves named that exact destination.
   Git remotes  the remotes configured when this session started, with their URLs. A push
                or fetch aimed at a remote that is not one of these is going somewhere the
                user was not working with - weigh that against what they actually asked for.

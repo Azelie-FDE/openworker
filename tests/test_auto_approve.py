@@ -161,6 +161,23 @@ def test_messages_are_cache_shaped_one_action_last():
     assert "PROPOSED ACTION" in user and user.count("PROPOSED ACTION") == 1
 
 
+def test_prompt_never_claims_shell_writes_are_pre_blocked():
+    # OPE-113: the prompt once told the reviewer "writes outside these folders are already
+    # blocked before you are consulted" — true for WRITE_LOCAL tools, false for run_shell
+    # (root scoping is gated on is_write; EXEC never enters it). That sentence biased the
+    # reviewer toward allowing out-of-root shell effects. Guard both directions: the blanket
+    # claim must stay gone, and the shell caveat must stay present.
+    # The prompt is hard-wrapped, so collapse whitespace before matching phrases.
+    text = " ".join(reviewer_mod.INSTRUCTIONS.split())
+    assert "you will never be asked to judge one" not in text
+    assert "do not spend the verdict on that" not in text
+    # The per-tool-class split: file tools keep the true guarantee...
+    assert "For file tools, writes outside these folders are blocked" in text
+    # ...and shell is named as unscoped, with the reviewer as the only check.
+    assert "nothing scopes what a command touches" in text
+    assert "your verdict is the only check" in text
+
+
 def test_history_is_clipped_hard_with_marker():
     long = "paste " * 200
     rendered = reviewer_mod.render_history([{"text": long}])
