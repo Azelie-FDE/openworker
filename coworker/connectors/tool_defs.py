@@ -27,9 +27,11 @@ class ConnectorToolDef:
 TOOL_DEFS: tuple[ConnectorToolDef, ...] = (
     ConnectorToolDef(
         "browser",
+        # web_fetch by another name: the URL is model-chosen, so this gates as egress —
+        # a "read" kind here would bypass the web_fetch gate entirely (OPE-111).
         "browser_read_url",
         "Read public URL",
-        "read",
+        "write",
         "Fetch readable text from a public URL.",
     ),
     ConnectorToolDef(

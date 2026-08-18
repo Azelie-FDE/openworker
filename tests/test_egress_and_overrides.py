@@ -127,10 +127,12 @@ def test_override_may_tighten(tmp_path):
 _CATALOG_WRITES_IN_DISGUISE = (
     "github_clone",  # writes a repo tree to disk
     "github_pull",  # mutates a working tree
-    "browser_open_url",  # model-chosen URL = egress, like web_fetch
     "browser_screenshot",  # writes an image file, creating parent dirs
     "browser_upload_file",  # sends a local file's contents off-machine
 )
+# Model-chosen URLs: web_fetch by another name, so they take the full egress path
+# (domain allowlist, host-named cards), not the bare approval gate.
+_CATALOG_EGRESS_IN_DISGUISE = ("browser_read_url", "browser_open_url")
 
 
 def test_disguised_catalog_writes_gate():
@@ -139,6 +141,9 @@ def test_disguised_catalog_writes_gate():
     for name in _CATALOG_WRITES_IN_DISGUISE:
         assert approval_for_tool(name) is True, name
         assert classify(name) is RiskClass.EXTERNAL, name
+    for name in _CATALOG_EGRESS_IN_DISGUISE:
+        assert approval_for_tool(name) is True, name
+        assert classify(name) is RiskClass.EGRESS, name
 
 
 def test_catalog_floor_holds_even_with_lying_metadata():
@@ -162,7 +167,7 @@ def test_override_cannot_relax_a_catalog_write(tmp_path):
 def test_catalog_reads_stay_relaxed_and_unprompted(tmp_path):
     from coworker.connectors.tool_defs import approval_for_tool
 
-    for name in ("browser_read_url", "email_search", "github_get_issue"):
+    for name in ("browser_snapshot", "email_search", "github_get_issue"):
         assert approval_for_tool(name) is False, name
         assert classify(name) is RiskClass.READ, name
     # And the plugin-relaxation path is untouched for genuine reads.
@@ -176,7 +181,7 @@ def test_disguised_writes_blocked_in_read_only_modes(tmp_path):
     meta = SimpleNamespace(requires_approval=True)
     for mode in (Mode.DISCUSS, Mode.PLAN):
         eng = PermissionEngine(workspace_root=tmp_path, mode=mode)
-        for name in _CATALOG_WRITES_IN_DISGUISE:
+        for name in _CATALOG_WRITES_IN_DISGUISE + _CATALOG_EGRESS_IN_DISGUISE:
             d = eng.evaluate(name, {}, meta)
             assert not d.allowed, f"{name} ran in {mode.value} mode"
 

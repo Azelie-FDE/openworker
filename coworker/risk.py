@@ -30,7 +30,10 @@ SHELL_TOOL = "run_shell"
 # URL's path/query can carry data outbound, so it is NOT a pure read — it must reach the
 # gate. `web_search` reaches a FIXED destination (the configured provider), but its query
 # is model-chosen free text — the same outbound channel — so it gates too (spec §2.2).
-EGRESS_TOOLS = {"web_fetch", "web_search"}
+# The browser connector's URL tools are the same channel by another name (OPE-111):
+# classifying them here gives them the full egress treatment (domain allowlist, host-named
+# cards) instead of a bare approval gate.
+EGRESS_TOOLS = {"web_fetch", "web_search", "browser_read_url", "browser_open_url"}
 
 _BASE: dict[str, RiskClass] = {
     **{name: RiskClass.WRITE_LOCAL for name in WRITE_TOOLS},
