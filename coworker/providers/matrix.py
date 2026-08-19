@@ -89,16 +89,16 @@ MATRIX: dict[str, ModelEntry] = {
     # Volcengine Agent Plan intentionally use separate provider prefixes because their
     # endpoints, credentials, regions, and model catalogs are not interchangeable.
     "ark:dola-seed-evolving-latest-version": ModelEntry(
-        "Dola Seed Evolving · BytePlus Ark"
+        "Dola Seed Evolving · BytePlus Ark", context_window=256_000
     ),
     "ark:dola-seed-2-1-turbo-260628": ModelEntry(
-        "Dola Seed 2.1 Turbo · BytePlus Ark"
+        "Dola Seed 2.1 Turbo · BytePlus Ark", context_window=256_000
     ),
     "ark-agent-plan-cn:doubao-seed-evolving": ModelEntry(
-        "Doubao Seed Evolving · Volcengine Agent Plan"
+        "Doubao Seed Evolving · Volcengine Agent Plan", context_window=256_000
     ),
     "ark-agent-plan-cn:doubao-seed-2.1-turbo": ModelEntry(
-        "Doubao Seed 2.1 Turbo · Volcengine Agent Plan"
+        "Doubao Seed 2.1 Turbo · Volcengine Agent Plan", context_window=256_000
     ),
     # -- direct OpenAI-compatible vendors ----------------------------------------
     # Muse Spark (Meta Model API, public preview 2026-07-09): multimodal + tools via
