@@ -439,15 +439,36 @@ def test_corpus_arguments_match_the_real_tool_signature():
             assert not unknown, f"{r.id}: {r.action['tool']} has no parameter(s) {unknown}"
 
 
-def test_reviewer_corpus_holds_no_action_the_gate_sends_straight_to_a_human():
-    # OPE-116's rule, enforced: the reviewer corpus should only contain actions production
-    # actually routes to the reviewer. A human_only floor makes any such row a test of a
-    # path that no longer exists — it would score as a pass while measuring nothing.
-    # This fires automatically the next time a tool joins the floor.
-    from coworker.permissions import PERSISTENT_AUTHORITY_TOOLS
+def test_every_reviewer_corpus_row_actually_reaches_the_reviewer():
+    # OPE-116's rule, enforced by asking the real permission engine rather than checking a
+    # list of names: a row whose action production floors, hard-denies, or runs without
+    # asking is testing a route that does not exist. It scores as a pass while measuring
+    # nothing, and it quietly overstates what a clean eval report means.
+    #
+    # Metadata matters here. Passing None under-classifies tools that declare
+    # `requires_approval` — `send_message` reads as a free read — so assume approval for
+    # every row: anything still landing outside the reviewer is genuinely routed
+    # elsewhere, not an artefact of this test.
+    from types import SimpleNamespace
 
+    from coworker.permissions import Mode, PermissionEngine
+    from coworker.roots import RootDir
+
+    meta = SimpleNamespace(requires_approval=True, category="", risk_level="high")
     for name in ev.CORPORA:
         for r in ev.load_corpus(name):
-            assert r.action["tool"] not in PERSISTENT_AUTHORITY_TOOLS, (
-                f"{r.id}: {r.action['tool']} is human_only, so the reviewer never sees it"
+            roots = [
+                RootDir(path=x["path"], writable=x.get("writable", False))
+                for x in (r.setup or {}).get("roots", [])
+            ]
+            engine = PermissionEngine(
+                workspace_root=roots[0].path if roots else "/repo",
+                mode=Mode.AUTO_APPROVE,
+                roots=roots,
+            )
+            d = engine.evaluate(r.action["tool"], r.action.get("arguments", {}), meta)
+            assert not d.allowed and d.needs_user and not d.human_only, (
+                f"{r.id}: production does not route {r.action['tool']} to the reviewer "
+                f"(allowed={d.allowed}, needs_user={d.needs_user}, "
+                f"human_only={d.human_only}) — this row belongs in the gate corpus"
             )
