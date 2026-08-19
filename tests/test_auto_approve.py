@@ -868,3 +868,77 @@ def test_a_failed_write_leaves_nothing_to_flag(tmp_path):
 
     engine._record_result(call, "written", "ok")
     assert "setup.py was created by the agent" in engine._provenance(run)
+
+
+# -- authority that outlives the session (OPE-117) --------------------------------
+# A skill is instructions the agent follows in LATER conversations; a scheduled task runs
+# on its own afterwards. Both land after the conversation that authorised them has ended,
+# so the person who bears the consequence is not in the room — the same argument that
+# already makes git hooks and CI configs human-only.
+
+_PERSISTENT = [
+    ("save_skill", {"name": "helper", "description": "d", "instructions": "do things"}),
+    ("create_scheduled_task", {"title": "T", "instructions": "i", "cron": "0 9 * * *"}),
+    ("update_scheduled_task", {"id": "t1", "instructions": "something else"}),
+    ("delete_scheduled_task", {"id": "t1"}),
+]
+
+
+@pytest.mark.parametrize("tool,args", _PERSISTENT)
+def test_persistent_authority_is_human_only(tmp_path, tool, args):
+    d = _gate(tmp_path).evaluate(tool, args, _Meta(requires_approval=True))
+    assert not d.allowed and d.needs_user and d.human_only
+
+
+@pytest.mark.parametrize("tool,args", _PERSISTENT)
+def test_persistent_authority_floor_holds_even_in_bypass(tmp_path, tool, args):
+    # Bypass-approvals is "no cards for ordinary work", not "no floors" — the same
+    # position the git-hook floor already occupies.
+    gate = PermissionEngine(workspace_root=tmp_path, mode=Mode.BYPASS_APPROVALS)
+    d = gate.evaluate(tool, args, _Meta(requires_approval=True))
+    assert not d.allowed and d.human_only
+
+
+@pytest.mark.parametrize("mode", [Mode.DISCUSS, Mode.PLAN])
+def test_read_only_modes_still_refuse_outright_rather_than_asking(tmp_path, mode):
+    # A floor must not soften a hard deny: read-only means refused, not "ask someone".
+    gate = PermissionEngine(workspace_root=tmp_path, mode=mode)
+    d = gate.evaluate("save_skill", {"name": "x"}, _Meta(requires_approval=True))
+    assert not d.allowed and not d.needs_user
+
+
+def test_ordinary_work_is_untouched_by_the_floor(tmp_path):
+    gate = _gate(tmp_path)
+    assert not gate.evaluate("run_shell", {"command": "pytest -q"}, None).human_only
+    assert not gate.evaluate(
+        "write_file", {"path": "a.txt", "content": "x"}, None
+    ).human_only
+    # Reading the task list grants nothing and stays out of the way entirely.
+    assert gate.evaluate("list_scheduled_tasks", {}, None).allowed
+
+
+def test_the_reviewer_is_never_asked_about_a_skill_save(tmp_path):
+    engine, rows, approvals = _engine(
+        tmp_path,
+        [
+            _tool_turn(("save_skill", {"name": "helper", "instructions": "do things"})),
+            AssistantTurn(text="saved", finish_reason="stop"),
+        ],
+    )
+
+    def save_skill(name: str, instructions: str = "") -> str:
+        """Save a skill.
+
+        Args:
+            name: the name
+            instructions: what it does
+        """
+        return "saved"
+
+    engine.registry.register(save_skill, metadata=_Meta(requires_approval=True))
+    engine.reviewer = _FakeReviewer({"save_skill": "allow"})
+    _run(engine, "save this workflow as a skill")
+
+    # The human decided, and not a single reviewer token was spent asking.
+    assert approvals == ["save_skill"]
+    assert engine.reviewer.asked == []

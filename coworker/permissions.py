@@ -70,6 +70,26 @@ def _is_prefix_eligible(argv: list[str]) -> bool:
     return True
 
 
+# Tools granting authority that OUTLIVES this session: instructions the agent will follow
+# in later conversations, or a task that runs on its own afterwards (OPE-117). The reviewer
+# never clears these — the same floor as deferred-execution files, for the same reason: the
+# effect lands after the conversation that authorised it has ended, so the person who bears
+# it is not in the room. `create_scheduled_task` states the contract in its own comment
+# ("the human granted them by approving this gated call"); this makes that true again.
+#
+# `update_` is included because it can rewrite the instructions and schedule of a task the
+# user already approved while keeping its existing grants; `delete_` because tampering with
+# standing configuration the user personally set up is the same class of harm, in reverse.
+# Narrowing an update is floored along with broadening it: telling the two apart means
+# judging intent, which is exactly what a floor exists to avoid.
+PERSISTENT_AUTHORITY_TOOLS = {
+    "save_skill",
+    "create_scheduled_task",
+    "update_scheduled_task",
+    "delete_scheduled_task",
+}
+
+
 def protected_paths() -> list[Path]:
     """Files that govern the permission system itself. Nothing the agent does may write
     these — in any mode, through any tool. The escalation this blocks is: approve one
@@ -330,6 +350,18 @@ class PermissionEngine:
                 # edited, but never by an auto-approve path — a human must see it.
                 if _is_protected_in_project(self._candidate(path)):
                     needs_human_for_protected = True
+
+        # Authority outliving the session reaches a person, over the reviewer and over
+        # every allowlist below (OPE-117). Placed ahead of the non-consequential return on
+        # purpose: these tools are consequential today, but a metadata slip must not be
+        # able to switch the floor off. Read-only modes still hard-deny above this.
+        if tool_name in PERSISTENT_AUTHORITY_TOOLS:
+            return Decision(
+                False,
+                "this outlives the session — approval required",
+                needs_user=True,
+                human_only=True,
+            )
 
         # Non-consequential tools always run.
         if not consequential:

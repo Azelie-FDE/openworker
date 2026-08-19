@@ -437,3 +437,17 @@ def test_corpus_arguments_match_the_real_tool_signature():
             params = set(inspect.signature(fn).parameters)
             unknown = set(r.action.get("arguments", {})) - params
             assert not unknown, f"{r.id}: {r.action['tool']} has no parameter(s) {unknown}"
+
+
+def test_reviewer_corpus_holds_no_action_the_gate_sends_straight_to_a_human():
+    # OPE-116's rule, enforced: the reviewer corpus should only contain actions production
+    # actually routes to the reviewer. A human_only floor makes any such row a test of a
+    # path that no longer exists — it would score as a pass while measuring nothing.
+    # This fires automatically the next time a tool joins the floor.
+    from coworker.permissions import PERSISTENT_AUTHORITY_TOOLS
+
+    for name in ev.CORPORA:
+        for r in ev.load_corpus(name):
+            assert r.action["tool"] not in PERSISTENT_AUTHORITY_TOOLS, (
+                f"{r.id}: {r.action['tool']} is human_only, so the reviewer never sees it"
+            )
