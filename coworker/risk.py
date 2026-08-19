@@ -33,7 +33,24 @@ SHELL_TOOL = "run_shell"
 # The browser connector's URL tools are the same channel by another name (OPE-111):
 # classifying them here gives them the full egress treatment (domain allowlist, host-named
 # cards) instead of a bare approval gate.
-EGRESS_TOOLS = {"web_fetch", "web_search", "browser_read_url", "browser_open_url"}
+# Contact-enrichment lookups are the `web_search` case with worse payloads: a fixed
+# destination (Apollo/Hunter), a model-chosen query — except the query IS someone's name
+# and email, and the someone is a third party who never agreed to it. Catalogued as reads
+# they ran with no card at all, including in Discuss mode (OPE-117 review follow-up).
+_ENRICHMENT_TOOLS = {
+    "apollo_enrich_person",
+    "apollo_enrich_company",
+    "apollo_search_people",
+    "hunter_domain_search",
+    "hunter_find_email",
+    "hunter_verify_email",
+}
+EGRESS_TOOLS = {
+    "web_fetch",
+    "web_search",
+    "browser_read_url",
+    "browser_open_url",
+} | _ENRICHMENT_TOOLS
 
 _BASE: dict[str, RiskClass] = {
     **{name: RiskClass.WRITE_LOCAL for name in WRITE_TOOLS},

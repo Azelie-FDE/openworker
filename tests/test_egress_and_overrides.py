@@ -216,3 +216,54 @@ def test_patch_scoping_holds_in_auto_mode(tmp_path):
     assert not eng.evaluate("apply_patch", {"patch": escape}, None).allowed
     ok = "*** Begin Patch\n*** Update File: src/app.py\n@@\n-a\n+b\n*** End Patch"
     assert eng.evaluate("apply_patch", {"patch": ok}, None).allowed
+
+
+# -- contact enrichment is egress, not a read -----------------------------------
+# Apollo/Hunter lookups send a real person's name and email to a third-party data broker
+# to ask the question at all. That is the web_search shape — fixed destination, model-chosen
+# query — except the query is somebody else's personal data, and they never agreed to it.
+_ENRICHMENT = [
+    ("apollo_enrich_person", {"email": "jane@acme.com", "name": "Jane Smith"}),
+    ("apollo_enrich_company", {"domain": "acme.com"}),
+    ("apollo_search_people", {"q": "VP Engineering fintech"}),
+    ("hunter_domain_search", {"domain": "acme.com"}),
+    ("hunter_find_email", {"domain": "acme.com", "first_name": "Jane", "last_name": "Smith"}),
+    ("hunter_verify_email", {"email": "jane@acme.com"}),
+]
+
+
+@pytest.mark.parametrize("tool,args", _ENRICHMENT)
+def test_enrichment_lookups_classify_as_egress(tool, args):
+    from coworker.connectors.tool_defs import approval_for_tool
+
+    assert classify(tool) is RiskClass.EGRESS, tool
+    # The catalog label agrees with the gate, so the UI and the engine cannot drift apart.
+    assert approval_for_tool(tool) is True, tool
+
+
+@pytest.mark.parametrize("tool,args", _ENRICHMENT)
+def test_enrichment_asks_before_sending_someone_elses_details(tmp_path, tool, args):
+    gate = PermissionEngine(workspace_root=tmp_path, mode=Mode.AUTO_APPROVE)
+    d = gate.evaluate(tool, args, None)
+    assert not d.allowed and d.needs_user
+
+
+@pytest.mark.parametrize("mode", [Mode.DISCUSS, Mode.PLAN])
+def test_enrichment_no_longer_runs_in_read_only_modes(tmp_path, mode):
+    # The bug underneath the policy question: catalogued as a read, a lookup would send a
+    # third party's name to a broker during a mode that exists to do nothing consequential.
+    gate = PermissionEngine(workspace_root=tmp_path, mode=mode)
+    d = gate.evaluate("hunter_find_email", {"domain": "acme.com", "first_name": "Jane"}, None)
+    assert not d.allowed and not d.needs_user
+
+
+def test_an_override_cannot_quietly_make_enrichment_a_read_again(tmp_path):
+    ov = _override({"hunter_find_email": RiskClass.READ})
+    assert classify("hunter_find_email", None, ov) is RiskClass.EGRESS
+
+
+def test_genuine_connector_reads_are_untouched():
+    # The floor is about data leaving on the way out, not about connectors in general:
+    # reading your own mailbox or calendar stays free.
+    for name in ("email_search", "gcal_list_events", "gmail_get_message", "github_get_issue"):
+        assert classify(name) is RiskClass.READ, name
