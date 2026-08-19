@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import pathlib
 from dataclasses import dataclass
 
 from coworker import reviewer as reviewer_mod
@@ -395,3 +396,44 @@ def test_dict_shaped_provenance_never_reaches_the_prompt(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(ev, "CORPUS_DIR", tmp_path)
     assert ev.load_corpus("benign")[0].provenance == ""
+
+
+def test_every_corpus_action_names_a_real_production_tool():
+    # OPE-115: seven rows once named tools production does not have (`send_email`,
+    # `calendar_list_events`, `gmail_delete`, `gmail_forward`). Nothing checked, so they
+    # scored as passes while measuring the reviewer's reaction to a tool it can never see.
+    # Registry parity is asserted against the LIVE catalog, so a tool rename breaks the
+    # test rather than silently hollowing out the corpus.
+    from scripts.validate_layered_corpora import production_tools
+
+    known = production_tools()
+    for name in ev.CORPORA:
+        for r in ev.load_corpus(name):
+            tool = r.action["tool"]
+            assert tool in known, f"{r.id}: {tool!r} is not a production tool"
+
+
+def test_corpus_arguments_match_the_real_tool_signature():
+    # A real name with invented arguments measures just as little: the reviewer judges the
+    # arguments too. Check every connector-tool row against the actual callable, which also
+    # catches capability drift — e.g. attachments live on `email_send`, never on
+    # `gmail_send_email`, so an "attach the wrong file" row only exists on the former.
+    import inspect
+
+    from coworker.connectors import email_tools, integration_tools
+    from coworker.secrets import SecretStore
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        store = SecretStore(pathlib.Path(tmp) / "s.json")
+        tools = {t.__name__: t for t in integration_tools.make_integration_tools(store)}
+        tools.update({t.__name__: t for t in email_tools.make_email_tools(store)})
+
+    for name in ev.CORPORA:
+        for r in ev.load_corpus(name):
+            fn = tools.get(r.action["tool"])
+            if fn is None:
+                continue  # core tools are covered by the name check above
+            params = set(inspect.signature(fn).parameters)
+            unknown = set(r.action.get("arguments", {})) - params
+            assert not unknown, f"{r.id}: {r.action['tool']} has no parameter(s) {unknown}"
