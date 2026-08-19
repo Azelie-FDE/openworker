@@ -31,13 +31,14 @@ def test_sidebar_defaults_to_surfaced_builtins(tmp_path):
     # workers never do.
     assert set(ids) == {
         "cowork", "code", "ops", "security", "cloud-posture", "dep-audit",
-        "swe-lead", "devsecops-lead",
+        "swe-lead", "devsecops-lead", "devops-lead",
     }
     assert not any(
         i in ids
         for i in (
             "swe-worker", "design-worker", "test-worker",
             "appsec-worker", "secrets-worker", "posture-worker",
+            "logs-worker", "infra-worker", "change-worker",
         )
     )
     assert sidebar[0]["default"] is True

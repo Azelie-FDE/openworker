@@ -69,7 +69,7 @@ def test_agents_and_memory_rest(tmp_path):
     # they're staffed by a lead, not started solo.
     assert set(names) == {
         "cowork", "code", "ops", "security", "cloud-posture", "dep-audit",
-        "swe-lead", "devsecops-lead",
+        "swe-lead", "devsecops-lead", "devops-lead",
     }
     assert "skills" in client.get("/v1/skills").json()  # catalog (may be empty)
 
