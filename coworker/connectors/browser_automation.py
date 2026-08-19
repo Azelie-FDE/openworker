@@ -326,8 +326,39 @@ def _snapshot(page, max_chars: int) -> dict[str, Any]:
     }
 
 
-def make_browser_automation_tools() -> list[Callable[..., Any]]:
+def make_browser_automation_tools(
+    *, roots: Optional[list[Any]] = None
+) -> list[Callable[..., Any]]:
     tools: list[Callable[..., Any]] = []
+
+    def _readable_source(raw: str) -> tuple[Any, dict[str, Any] | None]:
+        """A local file to upload, resolved inside a granted root (OPE-122).
+
+        These tools touch the filesystem but classify EXTERNAL, so the permission engine's
+        root scoping — which only runs for WRITE_LOCAL — never sees them. Without this
+        check the only thing between `~/.ssh/id_rsa` and a web form is someone reading the
+        approval card. Mirrors `email_send`'s attachment rule, which solves the same
+        problem for outgoing mail."""
+        allowed = [r.path for r in (roots or [])]
+        if not allowed:
+            return None, {"error": "no session directory is available to upload from"}
+        path = Path(str(raw)).expanduser().resolve()
+        if not any(path.is_relative_to(root) for root in allowed):
+            return None, {"error": f"{path} is outside the session's directories"}
+        return path, None
+
+    def _writable_target(raw: str) -> tuple[Any, dict[str, Any] | None]:
+        """Where a screenshot may land: inside a WRITABLE granted root. An unnamed target
+        keeps the temp-file default, which is not a place the user asked us to protect."""
+        writable = [r.path for r in (roots or []) if r.writable]
+        if not writable:
+            return None, {"error": "no writable session directory for the screenshot"}
+        path = Path(str(raw)).expanduser().resolve()
+        if not any(path.is_relative_to(root) for root in writable):
+            return None, {
+                "error": f"{path} is outside the session's writable directories"
+            }
+        return path, None
 
     def browser_open_url(
         url: str, wait_until: str = "domcontentloaded"
@@ -484,7 +515,9 @@ def make_browser_automation_tools() -> list[Callable[..., Any]]:
     )
 
     def browser_upload_file(target: str, path: str) -> dict[str, Any]:
-        file_path = Path(path).expanduser().resolve()
+        file_path, err = _readable_source(path)
+        if err:
+            return err
         if not file_path.exists():
             return {"error": f"file not found: {file_path}"}
         return _BROWSER.call(
@@ -538,13 +571,19 @@ def make_browser_automation_tools() -> list[Callable[..., Any]]:
     )
 
     def browser_screenshot(path: str = "") -> dict[str, Any]:
+        if path:
+            _target, target_err = _writable_target(path)
+            if target_err:
+                return target_err
+
         def run(page):
             out = (
-                Path(path).expanduser()
+                _target
                 if path
-                else Path(tempfile.gettempdir()) / "coworker-browser-screenshot.png"
+                else (
+                    Path(tempfile.gettempdir()) / "coworker-browser-screenshot.png"
+                ).resolve()
             )
-            out = out.resolve()
             out.parent.mkdir(parents=True, exist_ok=True)
             page.screenshot(path=str(out), full_page=True)
             return {"ok": True, "path": str(out), "url": page.url}
