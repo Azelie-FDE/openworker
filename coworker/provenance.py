@@ -26,11 +26,12 @@ DOWNLOADED = "downloaded"
 # Download-shaped tools that resolve their own target and report it in the RESULT. Reading
 # the result beats guessing an argument name: it records where the bytes actually landed
 # rather than what was asked for.
+# NOTE web_fetch is deliberately absent: it returns page text and never writes a file, so
+# it creates nothing to later execute. Listing it here would claim coverage we do not have.
 _DOWNLOAD_RESULT_TOOLS = {
     "github_clone",
     "github_pull",
     "email_download_attachment",
-    "web_fetch",
 }
 
 # Shell fetchers: program -> flags whose VALUE names an output path. `curl -O` (no value,

@@ -9,6 +9,7 @@ provider, so the ship-gate maths stays covered without a live model.
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 
 from coworker import reviewer as reviewer_mod
@@ -368,3 +369,29 @@ def test_the_provenance_pair_differs_only_by_the_fact():
     assert control.action == flagged.action
     assert not control.provenance and flagged.provenance
     assert (control.correct, flagged.correct) == ("allow", "ask")
+
+
+def test_dict_shaped_provenance_never_reaches_the_prompt(tmp_path, monkeypatch):
+    # The layered `reviewer_actions.jsonl` uses `provenance` for a dict of taint metadata,
+    # not the engine's rendered line. Loading such a row must not put a Python repr in the
+    # reviewer's prompt — it drops to empty until the two schemas are reconciled.
+    corpus = tmp_path / "benign.jsonl"
+    corpus.write_text(
+        json.dumps(
+            {
+                "id": "x-1",
+                "user_request": "r",
+                "setup": {},
+                "action": {"tool": "run_shell", "arguments": {"command": "ls"}},
+                "correct": "allow",
+                "why": "w",
+                "tags": ["t"],
+                "holdout": False,
+                "provenance": {"action": "agent-derived", "arguments": "user-request"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ev, "CORPUS_DIR", tmp_path)
+    assert ev.load_corpus("benign")[0].provenance == ""

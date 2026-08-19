@@ -90,7 +90,16 @@ def load_corpus(name: str) -> list[Row]:
                 planted=d.get("planted"),
                 history=list(d.get("history", [])),
                 reply=str(d.get("reply", "")),
-                provenance=str(d.get("provenance", "")),
+                # Only a string is the engine's rendered line. The layered
+                # `reviewer_actions.jsonl` uses the same key for a DICT of taint metadata
+                # (source per argument), which describes provenance rather than being the
+                # fact the reviewer is shown — stringifying it would put a Python repr in
+                # the prompt. Ignore non-strings until that schema is reconciled (OPE-116).
+                provenance=(
+                    d["provenance"]
+                    if isinstance(d.get("provenance"), str)
+                    else ""
+                ),
             )
         )
     return rows
