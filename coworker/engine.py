@@ -15,11 +15,12 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
 from . import compaction as _compaction
+from . import provenance
 from . import session_facts
 from .events import Event, EventType
 from .permissions import Mode, PermissionEngine
@@ -158,6 +159,14 @@ class TurnEngine:
         self.approval_extras: Optional[
             Callable[[str, dict[str, Any]], dict[str, Any]]
         ] = None
+        # What the agent itself created this session (OPE-114 §1). The reviewer never sees
+        # file contents, so `python scripts/setup.py` is unjudgeable from its text — but the
+        # engine knows whether it wrote or downloaded that file moments ago, and says so on
+        # the card and in the reviewer's request. Runtime-only, like `_ask_replies`: a
+        # restart costs context (more cards), never correctness.
+        self._agent_files = provenance.SessionFiles(permissions.workspace_root)
+        # Completed tool calls so far, so a fact can say how many steps back the write was.
+        self._step = 0
         self._last_context_tokens: Optional[int] = None
         self.audit_context: dict[str, Any] = {}
         if instructions and not (
@@ -787,6 +796,24 @@ class TurnEngine:
         )
         return texts[-1], history
 
+    def _downloaded_target(self, tool_call: ToolCall) -> Optional[Any]:
+        """A file this call would run that the agent DOWNLOADED this session, or None.
+        Fetch-then-execute has no quiet legitimate form, so it reaches a person over both
+        the reviewer and any command allowlist (OPE-114 §1)."""
+        match = self._agent_files.match(
+            tool_call.name, tool_call.arguments, step=self._step
+        )
+        return match if match is not None and match.downloaded else None
+
+    def _provenance(self, tool_call: ToolCall) -> str:
+        """One line naming a file this call would run that the agent itself created, or ""
+        (§8.2). Fixed vocabulary — never file contents, never outside-authored text, so the
+        no-untrusted-content rule holds."""
+        match = self._agent_files.match(
+            tool_call.name, tool_call.arguments, step=self._step
+        )
+        return match.render() if match else ""
+
     async def _preconsult_reviewer(self, tool_calls: list[ToolCall]) -> None:
         """Fire one reviewer request per call that will escalate, all concurrently, and
         park the verdicts for `_authorize` to consume. One action per request — there is
@@ -807,7 +834,12 @@ class TurnEngine:
                 tool_call.name, tool_call.arguments, spec.metadata
             )
             # human_only asks never reach the reviewer — same rule as `_authorize`.
-            if not decision.allowed and decision.needs_user and not decision.human_only:
+            if (
+                not decision.allowed
+                and decision.needs_user
+                and not decision.human_only
+                and self._downloaded_target(tool_call) is None
+            ):
                 pending.append(tool_call)
         if not pending:
             return
@@ -819,6 +851,7 @@ class TurnEngine:
                     history=history,
                     tool_name=tc.name,
                     arguments=tc.arguments,
+                    provenance=self._provenance(tc),
                 )
                 for tc in pending
             ]
@@ -837,6 +870,7 @@ class TurnEngine:
             history=history,
             tool_name=tool_call.name,
             arguments=tool_call.arguments,
+            provenance=self._provenance(tool_call),
         )
 
     @staticmethod
@@ -887,12 +921,14 @@ class TurnEngine:
         if self.reviewer is None or not self.reviewer_shadow:
             return
         request, history = self._user_history()
+        prov = self._provenance(tool_call)
 
         async def _shadow() -> None:
             try:
                 verdict = await self.reviewer.review(
                     request=request,
                     history=history,
+                    provenance=prov,
                     tool_name=tool_call.name,
                     arguments=tool_call.arguments,
                 )
@@ -931,6 +967,28 @@ class TurnEngine:
         )
         allowed = decision.allowed
         reason = decision.reason
+
+        # OPE-114 §1: running something the agent DOWNLOADED this session is the classic
+        # fetch-then-execute chain, and there is no quiet legitimate version of it — so it
+        # goes to a person, over both the reviewer and any command allowlist that would
+        # otherwise wave it through (a `python` prefix rule must not vouch for a script
+        # pulled off the internet a moment ago). A hard deny is left untouched: this floor
+        # only ever tightens an allow, never loosens a block. Agent-WRITTEN files are not
+        # floored — "write this script and run it" is ordinary work — they travel as a fact
+        # for the reviewer to weigh instead.
+        provenance_note = self._provenance(tool_call)
+        if self._downloaded_target(tool_call) is not None and (
+            decision.needs_user or allowed
+        ):
+            allowed = False
+            reason = f"this file was downloaded by the agent this session — {provenance_note}"
+            decision = replace(
+                decision,
+                allowed=False,
+                reason=reason,
+                needs_user=True,
+                human_only=True,
+            )
 
         if allowed and decision.rule:
             # A task-scoped standing rule auto-allowed this call: audit the exact rule
@@ -1019,6 +1077,9 @@ class TurnEngine:
                     # The exact target a standing rule could pin, or None when the call
                     # isn't eligible (no declared target arg / exec risk). Surfaces use it
                     # to offer "Allow every time" on automation-run approval cards only.
+                    # OPE-114 §1: the fact neither the reviewer nor the human could get
+                    # from the command text alone.
+                    "provenance": provenance_note,
                     "standing_target": standing_rule_candidate(
                         tool_call.name,
                         tool_call.arguments,
@@ -1117,6 +1178,12 @@ class TurnEngine:
             return {"error": str(exc), "error_type": type(exc).__name__}, "error"
 
     def _record_result(self, tool_call: ToolCall, result: Any, status: str) -> Event:
+        self._step += 1
+        if status == "ok":
+            # Only successful calls: a write that raised left nothing on disk to run.
+            self._agent_files.record(
+                tool_call.name, tool_call.arguments, result, step=self._step
+            )
         # A `_display` key on a tool result is user-facing metadata the AGENT must
         # never see (e.g. how many gmail hits the privacy filters hid — a count
         # the model could probe around). Lift it onto the message as a sidecar

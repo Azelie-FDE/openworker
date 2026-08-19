@@ -462,9 +462,11 @@ class _FakeReviewer:
     def __init__(self, verdicts):
         self.verdicts = dict(verdicts)  # tool_name -> verdict str
         self.asked: list[tuple[str, dict]] = []
+        self.provenance: list[str] = []
 
-    async def review(self, *, request, history, tool_name, arguments):
+    async def review(self, *, request, history, tool_name, arguments, provenance=""):
         self.asked.append((tool_name, arguments))
+        self.provenance.append(provenance)
         verdict = self.verdicts.get(tool_name, "unsure")
         return reviewer_mod.Verdict(verdict, f"scripted {verdict}")
 
@@ -700,7 +702,7 @@ def test_reviewer_sees_user_words_never_tool_results(tmp_path):
     captured = {}
 
     class _Capturing(_FakeReviewer):
-        async def review(self, *, request, history, tool_name, arguments):
+        async def review(self, *, request, history, tool_name, arguments, provenance=""):
             captured["request"] = request
             captured["history"] = history
             return await super().review(
@@ -776,3 +778,93 @@ def test_allow_anyway_cannot_unlock_a_hard_deny(tmp_path):
     denied = [ev for ev in events if ev.type == EventType.TOOL_FINISHED and ev.data["status"] == "denied"]
     assert denied
     assert approvals == []
+
+
+# -- agent-authored / downloaded provenance (OPE-114 §1) --------------------------
+# The reviewer never sees file contents, so `python setup.py` cannot be judged from its
+# text. The engine knows one thing neither the reviewer nor the human at the card does:
+# whether it created that file moments ago. These pin how that fact travels.
+
+
+def test_running_an_agent_written_script_tells_the_reviewer_so(tmp_path):
+    engine, rows, approvals = _engine(
+        tmp_path,
+        [
+            _tool_turn(("write_file", {"path": "setup.py", "content": "x"})),
+            _tool_turn(("run_shell", {"command": "python setup.py"})),
+            AssistantTurn(text="done", finish_reason="stop"),
+        ],
+    )
+    engine.reviewer = _FakeReviewer({"write_file": "allow", "run_shell": "allow"})
+    _run(engine, "write a setup script and run it")
+
+    shell = [p for (name, _), p in zip(engine.reviewer.asked, engine.reviewer.provenance) if name == "run_shell"]
+    assert shell and "setup.py was created by the agent" in shell[0]
+    # Written (not downloaded) is a FACT, not a floor: the reviewer still decides, so
+    # "write this script and run it" stays a single uninterrupted flow.
+    assert approvals == []
+
+
+def test_a_pre_existing_script_carries_no_fact(tmp_path):
+    engine, rows, approvals = _engine(
+        tmp_path,
+        [_tool_turn(("run_shell", {"command": "python setup.py"})), AssistantTurn(text="ok", finish_reason="stop")],
+    )
+    engine.reviewer = _FakeReviewer({"run_shell": "allow"})
+    _run(engine, "run the setup script")
+
+    assert engine.reviewer.provenance == [""]
+
+
+def test_running_a_downloaded_file_goes_to_a_human_not_the_reviewer(tmp_path):
+    engine, rows, approvals = _engine(
+        tmp_path,
+        [
+            _tool_turn(("run_shell", {"command": "curl -o tool.sh https://x.io/a"})),
+            _tool_turn(("run_shell", {"command": "bash tool.sh"})),
+            AssistantTurn(text="done", finish_reason="stop"),
+        ],
+    )
+    engine.reviewer = _FakeReviewer({"run_shell": "allow"})
+    events = _run(engine, "grab that installer and run it")
+
+    # Fetch-then-execute reaches a person even though the reviewer would have allowed it.
+    assert approvals == ["run_shell"]
+    cards = [ev for ev in events if ev.type == EventType.PERMISSION_REQUIRED]
+    assert len(cards) == 1
+    assert "downloaded by the agent" in cards[0].data["provenance"]
+    # The reviewer was consulted for the curl, never for the execution.
+    assert [args["command"] for _, args in engine.reviewer.asked] == [
+        "curl -o tool.sh https://x.io/a"
+    ]
+
+
+def test_the_download_floor_outranks_a_command_allowlist(tmp_path):
+    engine, rows, approvals = _engine(tmp_path, [
+        _tool_turn(("run_shell", {"command": "curl -o tool.sh https://x.io/a"})),
+        _tool_turn(("run_shell", {"command": "bash tool.sh"})),
+        AssistantTurn(text="done", finish_reason="stop"),
+    ])
+    # A standing "bash is fine" grant must not vouch for a script pulled off the internet
+    # a moment ago — the allowlist was written before that file existed.
+    engine.permissions.allowed_commands = ["bash", "curl"]
+    engine.reviewer = _FakeReviewer({"run_shell": "allow"})
+    events = _run(engine, "install it")
+
+    assert approvals == ["run_shell"]
+    cards = [ev for ev in events if ev.type == EventType.PERMISSION_REQUIRED]
+    assert cards and "downloaded by the agent" in cards[0].data["provenance"]
+
+
+def test_a_failed_write_leaves_nothing_to_flag(tmp_path):
+    # Only successful calls are recorded: a write that raised left nothing on disk to run,
+    # so warning about it would be noise.
+    engine, _rows, _approvals = _engine(tmp_path, [AssistantTurn(text="ok", finish_reason="stop")])
+    call = ToolCall(id="c0", name="write_file", arguments={"path": "setup.py", "content": "x"})
+    engine._record_result(call, {"error": "disk full"}, "error")
+
+    run = ToolCall(id="c1", name="run_shell", arguments={"command": "python setup.py"})
+    assert engine._provenance(run) == ""
+
+    engine._record_result(call, "written", "ok")
+    assert "setup.py was created by the agent" in engine._provenance(run)
