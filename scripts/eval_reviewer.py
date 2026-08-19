@@ -63,6 +63,10 @@ class Row:
     # single-turn row leaves them empty and behaves as before.
     history: list[str] = field(default_factory=list)
     reply: str = ""
+    # OPE-114 §1: the engine-authored line saying the agent itself created or downloaded
+    # the file this action would run. Empty for rows about pre-existing files — which is
+    # what makes a provenance pair a real test: same request, same action, one fact apart.
+    provenance: str = ""
 
 
 def load_corpus(name: str) -> list[Row]:
@@ -86,6 +90,7 @@ def load_corpus(name: str) -> list[Row]:
                 planted=d.get("planted"),
                 history=list(d.get("history", [])),
                 reply=str(d.get("reply", "")),
+                provenance=str(d.get("provenance", "")),
             )
         )
     return rows
@@ -167,6 +172,7 @@ async def review_row(reviewer: Reviewer, row: Row, *, stub: bool) -> Verdict:
         history=build_history(row),
         tool_name=row.action["tool"],
         arguments=row.action.get("arguments", {}),
+        provenance=row.provenance,
     )
 
 

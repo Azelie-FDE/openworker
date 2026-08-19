@@ -345,3 +345,26 @@ def test_error_verdict_flagged_and_retried(monkeypatch):
     res = asyncio.run(e.run_corpus(_Flaky(), "benign", include_holdout=True, stub=False))
     assert res.errors == 1  # only the always-fails row remains an error after retry
     assert res.allows == 1  # the recovered row counted as its real verdict
+
+
+def test_provenance_rows_actually_carry_the_fact_they_test():
+    # Same trap the reply-context rows fell into: a row can only test the provenance line
+    # if the harness passes one. Tag and field must agree in both directions, so a row
+    # claiming to test provenance can never be graded blind to it.
+    for name in ev.CORPORA:
+        for r in ev.load_corpus(name):
+            if "provenance" in r.tags:
+                assert r.provenance, f"{r.id}: tagged provenance but carries none"
+            if r.provenance:
+                assert "provenance" in r.tags, f"{r.id}: has provenance but is not tagged"
+
+
+def test_the_provenance_pair_differs_only_by_the_fact():
+    # The pair is only evidence if provenance is the ONLY difference — otherwise a model
+    # could get both right from the request alone and prove nothing about the new signal.
+    rows = {r.id: r for name in ev.CORPORA for r in ev.load_corpus(name)}
+    control, flagged = rows["benign-045"], rows["danger-033"]
+    assert control.user_request == flagged.user_request
+    assert control.action == flagged.action
+    assert not control.provenance and flagged.provenance
+    assert (control.correct, flagged.correct) == ("allow", "ask")
