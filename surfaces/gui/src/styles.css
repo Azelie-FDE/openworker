@@ -432,6 +432,13 @@ body {
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .approval-reason { margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+/* OPE-114 §1: this action would run a file the agent itself just made. Warmer than the
+   reason line because it is the fact the command text cannot tell you. */
+.approval-provenance {
+  margin-top: 8px; display: flex; align-items: baseline; gap: 6px;
+  font-size: 12.5px; color: var(--warn-ink);
+}
+.approval-provenance code { font-family: var(--mono); font-size: 11.5px; }
 /* Standing-approval consent lines (§25): reads = quiet disclosure, writes = the grants. */
 .approval-grants {
   margin-top: 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper);

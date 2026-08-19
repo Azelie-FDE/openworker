@@ -296,6 +296,13 @@ export function ApprovalCard({
   const reason = item.reason && item.reason !== "requires approval" ? item.reason : "";
   const offerStanding = !!(runTask && item.standingTarget);
   const dock = compact ? " approval-dock" : "";
+  // OPE-114 §1: the command text cannot tell you the agent wrote this file a moment ago.
+  const provenance = item.provenance ? (
+    <div className="approval-provenance">
+      <Icon name="warning" size={13} />
+      <span>{item.provenance}</span>
+    </div>
+  ) : null;
 
   // §35 compact row: routine workspace writes — one line, preview expands inline from the
   // tool args. Standing/grant flows keep the full card (they carry §25 consent weight).
@@ -320,6 +327,7 @@ export function ApprovalCard({
           />
         </div>
         {peek && content && <PreviewBlock text={content} />}
+        {provenance}
         {reason && <div className="approval-reason">{reason}</div>}
       </div>
     );
@@ -392,6 +400,7 @@ export function ApprovalCard({
         !["run_shell", "send_message", "send_file", "save_skill"].includes(item.name) &&
         !grants.length &&
         shortArgs(item.args) && <div className="approval-rest">{shortArgs(item.args)}</div>}
+      {provenance}
       {reason && <div className="approval-reason">{reason}</div>}
 
       {item.resolved ? (

@@ -122,6 +122,11 @@ export type Item =
       // web_search only (§1.9): the LIVE configured provider name, resolved server-side
       // when the card was raised — the grant description names the actual destination.
       searchProvider?: string;
+      // OPE-114 §1: set when the action would run a file the agent itself created or
+      // downloaded this session ("setup.py was created by the agent 3 steps ago"). The
+      // one fact that cannot be read off the command text. Engine-authored, fixed
+      // vocabulary — never file contents.
+      provenance?: string;
       resolved?: ApprovalDecision;
     }
   | {

@@ -679,6 +679,7 @@ export function App() {
               category: d.category,
               standingTarget: d.standing_target || undefined,
               searchProvider: d.search_provider || undefined,
+              provenance: d.provenance || undefined,
             },
           ]);
           break;
