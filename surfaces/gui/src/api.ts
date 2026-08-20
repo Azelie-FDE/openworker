@@ -273,6 +273,8 @@ export interface McpServer {
   // "needs_auth" (no tokens yet) | "authorizing" (browser sign-in in flight)
   status: string;
   auth?: "oauth" | null;
+  // http server whose anonymous connect hit a 401/403 — offer OAuth sign-in.
+  auth_hint?: boolean;
   last_error?: string | null;
   tool_count: number | null;
   config: Record<string, any>;

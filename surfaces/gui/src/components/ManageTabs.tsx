@@ -374,6 +374,23 @@ function McpRow({
     await signoutMcp(server.name);
     onRefresh();
   };
+  // Test = the same explicit connect the OAuth Sign-in uses, for every server:
+  // the row flips to "testing…" and the tab's poll lands on connected · N tools
+  // or the error/stderr excerpt. A connected server just reports live state.
+  const runTest = async () => {
+    await connectMcp(server.name);
+    onRefresh();
+    // The connect runs as a background task; if the first refresh outpaced its
+    // start, the row never shows "authorizing" and the tab's poll never arms.
+    window.setTimeout(onRefresh, 600);
+  };
+  // Anonymous connect came back 401/403: the fix is sign-in, so switch the entry
+  // to OAuth (DCR — nothing to register) and start the browser flow right away.
+  const signInWithOauth = async () => {
+    await patchMcpServer(server.name, { auth: "oauth" });
+    await connectMcp(server.name);
+    onRefresh();
+  };
 
   const loadTools = async () => {
     if (tools) {
@@ -395,12 +412,28 @@ function McpRow({
         <div className="flex-1 min-w-0">
           <div className="text-[14px] font-medium">{server.name}</div>
           <div className="text-[11.5px] text-faint">
-            {server.transport} · {authorizing ? "signing in…" : server.status.replace("_", " ")}
+            {server.transport} ·{" "}
+            {authorizing
+              ? isOauth
+                ? "signing in…"
+                : "testing…"
+              : server.auth_hint && !isOauth
+                ? "needs sign-in"
+                : server.status.replace("_", " ")}
             {server.tool_count != null ? ` · ${server.tool_count} tools` : ""}
             {server.requires_approval ? " · asks" : ""}
             {isOauth ? " · oauth" : ""}
           </div>
         </div>
+        {!isOauth && server.auth_hint && !authorizing && (
+          <button
+            className={BTN_ACCENT}
+            onClick={signInWithOauth}
+            data-testid={`mcp-authfix-${server.name}`}
+          >
+            Sign in
+          </button>
+        )}
         {isOauth &&
           (server.status === "needs_auth" ? (
             <button className={BTN_ACCENT} onClick={signIn} data-testid={`mcp-signin-${server.name}`}>
@@ -417,6 +450,18 @@ function McpRow({
               sign out
             </button>
           ) : null)}
+        {server.enabled &&
+          !authorizing &&
+          !server.auth_hint &&
+          !(isOauth && server.status !== "connected") && (
+            <button
+              className="text-[12px] text-muted hover:text-ink shrink-0"
+              onClick={runTest}
+              data-testid={`mcp-test-${server.name}`}
+            >
+              test
+            </button>
+          )}
         <button
           className="text-[12px] text-muted hover:text-ink shrink-0"
           onClick={loadTools}
@@ -450,6 +495,9 @@ function McpRow({
   );
 }
 
+const INPUT =
+  "w-full text-[13px] px-3 py-2 rounded-lg border border-line bg-paper text-ink outline-none focus:border-accent";
+
 function AddForm({
   onCancel,
   onAdded,
@@ -459,9 +507,33 @@ function AddForm({
   onAdded: () => void;
   onError: (e: string | null) => void;
 }) {
+  // Two doors, one flow: Remote URL (name + URL — most hosted servers) and JSON
+  // (the paste box — stdio and advanced configs). Both end in the row's Test.
+  const [tab, setTab] = useState<"url" | "json">("url");
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
   const [text, setText] = useState(EXAMPLE);
 
-  const save = async () => {
+  const saveUrl = async () => {
+    onError(null);
+    const n = name.trim();
+    const u = url.trim();
+    if (!n) {
+      onError("Give the server a name.");
+      return;
+    }
+    if (!/^https?:\/\/\S+$/.test(u)) {
+      onError("Enter the server's full URL (https://…).");
+      return;
+    }
+    await addMcpServer(n, { type: "http", url: u });
+    // Probe anonymously right away — the row shows testing…, then connected · N
+    // tools, an error, or "needs sign-in" (401 → the OAuth switch).
+    await connectMcp(n);
+    onAdded();
+  };
+
+  const saveJson = async () => {
     onError(null);
     let parsed: any;
     try {
@@ -486,19 +558,60 @@ function AddForm({
     onAdded();
   };
 
+  const tabBtn = (active: boolean) =>
+    "text-[12px] px-2.5 py-1 rounded-md border shrink-0 " +
+    (active
+      ? "border-accent text-accent font-medium"
+      : "border-line text-muted hover:text-ink");
+
   return (
     <div className="space-y-2">
-      <div className="text-[12.5px] text-muted">Paste server JSON (name → config):</div>
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        spellCheck={false}
-        rows={9}
-        className="w-full font-mono text-[12px] px-3 py-2.5 rounded-lg border border-line bg-paper text-ink outline-none focus:border-accent resize-y"
-      />
+      <div className="flex items-center gap-1.5">
+        <button className={tabBtn(tab === "url")} onClick={() => setTab("url")} data-testid="mcp-add-tab-url">
+          Remote URL
+        </button>
+        <button className={tabBtn(tab === "json")} onClick={() => setTab("json")} data-testid="mcp-add-tab-json">
+          JSON
+        </button>
+      </div>
+      {tab === "url" ? (
+        <>
+          <div className="text-[12.5px] text-muted">
+            Connect a hosted MCP server. If it needs sign-in, the row will offer it after the
+            first test.
+          </div>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Name (shown in the server list)"
+            spellCheck={false}
+            className={INPUT}
+            data-testid="mcp-add-name"
+          />
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://mcp.example.com/mcp"
+            spellCheck={false}
+            className={INPUT + " font-mono text-[12px]"}
+            data-testid="mcp-add-url"
+          />
+        </>
+      ) : (
+        <>
+          <div className="text-[12.5px] text-muted">Paste server JSON (name → config):</div>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            spellCheck={false}
+            rows={9}
+            className="w-full font-mono text-[12px] px-3 py-2.5 rounded-lg border border-line bg-paper text-ink outline-none focus:border-accent resize-y"
+          />
+        </>
+      )}
       <div className="flex items-center gap-3">
-        <button className={BTN_ACCENT} onClick={save}>
-          Add
+        <button className={BTN_ACCENT} onClick={tab === "url" ? saveUrl : saveJson}>
+          {tab === "url" ? "Add & test" : "Add"}
         </button>
         <button className="text-[12.5px] text-muted hover:text-ink" onClick={onCancel}>
           cancel

@@ -166,6 +166,9 @@ class SessionManager:
         # feeds list_mcp's status so the GUI can show "authorizing…" and failures.
         self._mcp_authorizing: set[str] = set()
         self._mcp_errors: dict[str, str] = {}
+        # http servers whose anonymous connect came back 401/403 — the failure is
+        # "needs sign-in", so the GUI offers the OAuth switch instead of a raw error.
+        self._mcp_auth_hints: set[str] = set()
         # Servers that failed to connect while preparing a session's tools —
         # drained once by the WS handler to append a transcript notice.
         self._mcp_session_failures: dict[str, list[str]] = {}
@@ -1060,6 +1063,7 @@ class SessionManager:
                     "requires_approval": bool(raw.get("requires_approval", True)),
                     "auth": "oauth" if is_oauth else None,
                     "status": status,
+                    "auth_hint": name in self._mcp_auth_hints,
                     "last_error": self._mcp_errors.get(name),
                     "tool_count": (
                         len(self.mcp._conns[name].tools) if connected else None
@@ -1073,6 +1077,8 @@ class SessionManager:
         """Connect one server NOW — for OAuth servers this may open the browser and wait
         for the loopback callback, so callers run it as a background task and watch
         list_mcp for the status flip."""
+        from ..mcp import oauth as mcp_oauth
+
         for server in load_mcp_servers(
             self.default_workspace,
             secrets=self.secrets,
@@ -1082,12 +1088,27 @@ class SessionManager:
                 continue
             self._mcp_authorizing.add(name)
             self._mcp_errors.pop(name, None)
+            self._mcp_auth_hints.discard(name)
             try:
                 # The ONE place a browser sign-in may start: an explicit connect.
                 conn = await self.mcp.ensure(server, interactive=True)
                 return {"ok": True, "tools": len(conn.tools)}
             except Exception as exc:
-                self._mcp_errors[name] = str(exc) or exc.__class__.__name__
+                if (
+                    server.transport == "http"
+                    and server.auth != "oauth"
+                    and mcp_oauth.is_http_auth_error(exc)
+                ):
+                    # Anonymous probe of a guarded server (the add-by-URL flow):
+                    # the answer is sign-in, not a raw 401 dump.
+                    self._mcp_auth_hints.add(name)
+                    msg = "authentication required — sign in to connect"
+                else:
+                    msg = str(exc) or exc.__class__.__name__
+                    tail = self.mcp.last_stderr(name)
+                    if tail:
+                        msg = f"{msg} — {tail}"
+                self._mcp_errors[name] = msg[:500]
                 return {"ok": False, "error": self._mcp_errors[name]}
             finally:
                 self._mcp_authorizing.discard(name)
@@ -1151,6 +1172,10 @@ class SessionManager:
 
     def delete_mcp(self, name: str) -> dict[str, Any]:
         ok = delete_global_server(name)
+        if ok:
+            # A later re-add under the same name starts clean, not pre-failed.
+            self._mcp_errors.pop(name, None)
+            self._mcp_auth_hints.discard(name)
         return {"ok": ok, "name": name}
 
     async def mcp_tools(self, name: str) -> dict[str, Any]:
