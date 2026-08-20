@@ -275,6 +275,8 @@ export interface McpServer {
   auth?: "oauth" | null;
   // http server whose anonymous connect hit a 401/403 — offer OAuth sign-in.
   auth_hint?: boolean;
+  // Epoch seconds of the last successful explicit Test (persisted server-side).
+  last_test_at?: number | null;
   last_error?: string | null;
   tool_count: number | null;
   config: Record<string, any>;

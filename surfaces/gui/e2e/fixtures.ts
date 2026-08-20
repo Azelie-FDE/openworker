@@ -1540,6 +1540,7 @@ export async function mockApi(page: import("@playwright/test").Page) {
           } else {
             s2.status = "connected";
             s2.tool_count = 6;
+            s2.last_test_at = 1700000000; // the successful probe stamps the row
           }
         }
         if (s2.status === "authorizing") s2._flip = true;
@@ -1556,6 +1557,7 @@ export async function mockApi(page: import("@playwright/test").Page) {
         auth: b.config?.auth === "oauth" ? "oauth" : null,
         status: b.config?.auth === "oauth" ? "needs_auth" : "configured",
         auth_hint: false,
+        last_test_at: null,
         last_error: null,
         tool_count: null,
         config: b.config || {},

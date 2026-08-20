@@ -391,6 +391,29 @@ async def test_connect_mcp_http_401_sets_auth_hint(tmp_path, monkeypatch):
         listed = {s["name"]: s for s in manager.list_mcp()}
         assert listed["guarded"]["auth_hint"] is True
         assert listed["guarded"]["status"] == "error"
+        assert listed["guarded"]["last_test_at"] is None  # failed probe stamps nothing
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_last_test_at_persists_and_clears_on_delete(tmp_path, monkeypatch):
+    """The "Ready · tested ⟨when⟩" claim lives in prefs: it survives a manager
+    restart and is dropped with the server (a re-add is not pre-trusted)."""
+    monkeypatch.setenv("COWORKER_STATE_DIR", str(tmp_path / "state"))
+    _write_json(
+        tmp_path / "state" / "mcp.json",
+        {"mcpServers": {"fs": {"command": "echo", "enabled": True}}},
+    )
+    manager = SessionManager(data_dir=tmp_path / "data")
+    manager._prefs.setdefault("mcp_last_test", {})["fs"] = 1_700_000_000
+    manager._save_prefs()
+
+    # A fresh manager (same data dir) still reports the stamp.
+    manager2 = SessionManager(data_dir=tmp_path / "data")
+    listed = {s["name"]: s for s in manager2.list_mcp()}
+    assert listed["fs"]["last_test_at"] == 1_700_000_000
+
+    manager2.delete_mcp("fs")
+    manager3 = SessionManager(data_dir=tmp_path / "data")
+    assert manager3._prefs.get("mcp_last_test", {}).get("fs") is None

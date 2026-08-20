@@ -1,71 +1,82 @@
-// UX-033: the Add MCP server flow (Remote URL + JSON tabs) and the Test button.
-// Remote URL adds an http entry and probes it immediately (testing… → connected);
-// a guarded server (mock: locked-*) lands on "needs sign-in" with the OAuth switch;
-// the JSON paste box remains for stdio/advanced, and every row can be re-tested.
+// UX-033/034: custom MCP servers live on the Connectors page. "Add custom server"
+// (top of page) opens the two-tab modal (Remote URL / JSON); added entries land in
+// the "Custom · MCP" group with honest status chips (Testing… → Live / Error /
+// Needs sign-in / Not tested) and a detail subpage with Test.
 import { expect } from "@playwright/test";
 import { test } from "./fixtures";
 
-async function openMcpTab(page) {
+async function openConnectors(page) {
   await page.goto("/");
   await page.getByTestId("account-row").click();
   await page.getByRole("button", { name: "Connectors", exact: true }).click();
-  await page.getByRole("button", { name: "MCP servers", exact: true }).click();
 }
 
-test("remote URL tab: add & test flips to connected with tool count", async ({ page }) => {
-  await openMcpTab(page);
-  await page.getByRole("button", { name: "Add a server" }).click();
+test("remote URL add: probe flips the row to Live with tool count", async ({ page }) => {
+  await openConnectors(page);
+  await page.getByTestId("add-custom-server").click();
 
   // URL tab is the default door; bad URL is caught before anything is added.
-  await page.getByTestId("mcp-add-name").fill("notes");
-  await page.getByTestId("mcp-add-url").fill("mcp.example.com/mcp");
-  await page.getByRole("button", { name: "Add & test" }).click();
-  await expect(page.getByText("Enter the server's full URL")).toBeVisible();
+  const modal = page.getByTestId("add-mcp-modal");
+  await modal.getByTestId("mcp-add-name").fill("notes");
+  await modal.getByTestId("mcp-add-url").fill("mcp.example.com/mcp");
+  await modal.getByRole("button", { name: "Add & test" }).click();
+  await expect(modal.getByText("Enter the server's full URL")).toBeVisible();
 
-  await page.getByTestId("mcp-add-url").fill("https://mcp.example.com/mcp");
-  await page.getByRole("button", { name: "Add & test" }).click();
+  await modal.getByTestId("mcp-add-url").fill("https://mcp.example.com/mcp");
+  await modal.getByRole("button", { name: "Add & test" }).click();
 
-  const row = page.locator(".space-y-2 > div").filter({ hasText: "notes" }).first();
-  await expect(row).toContainText("testing…");
-  await expect(row).toContainText("connected", { timeout: 10_000 });
+  const row = page.getByTestId("mcp-row-notes");
+  await expect(row).toContainText("Testing…");
+  await expect(row).toContainText("Live", { timeout: 10_000 });
   await expect(row).toContainText("6 tools");
 });
 
-test("guarded server: 401 → needs sign-in → OAuth switch connects", async ({ page }) => {
-  await openMcpTab(page);
-  await page.getByRole("button", { name: "Add a server" }).click();
-  await page.getByTestId("mcp-add-name").fill("locked-crm");
-  await page.getByTestId("mcp-add-url").fill("https://mcp.locked.example/mcp");
-  await page.getByRole("button", { name: "Add & test" }).click();
+test("guarded server: 401 → Needs sign-in chip → OAuth switch on the detail page", async ({
+  page,
+}) => {
+  await openConnectors(page);
+  await page.getByTestId("add-custom-server").click();
+  const modal = page.getByTestId("add-mcp-modal");
+  await modal.getByTestId("mcp-add-name").fill("locked-crm");
+  await modal.getByTestId("mcp-add-url").fill("https://mcp.locked.example/mcp");
+  await modal.getByRole("button", { name: "Add & test" }).click();
 
-  // The anonymous probe 401s: the row says needs sign-in and offers the fix.
-  const row = page.locator(".space-y-2 > div").filter({ hasText: "locked-crm" }).first();
-  await expect(row).toContainText("needs sign-in", { timeout: 10_000 });
-  await expect(row).toContainText("authentication required");
+  // The anonymous probe 401s: the row says needs sign-in; the fix lives one
+  // click deep on the detail page (with the error excerpt).
+  const row = page.getByTestId("mcp-row-locked-crm");
+  await expect(row).toContainText("Needs sign-in", { timeout: 10_000 });
+  await row.click();
 
-  // Sign in switches the entry to oauth and starts the browser flow; the poll
-  // flips it to connected.
-  await row.getByTestId("mcp-authfix-locked-crm").click();
-  await expect(row).toContainText("signing in…");
-  await expect(row).toContainText("connected", { timeout: 10_000 });
-  await expect(row).toContainText("oauth");
+  const detail = page.getByTestId("mcp-detail-locked-crm");
+  await expect(detail).toContainText("authentication required");
+  await detail.getByTestId("mcp-authfix-locked-crm").click();
+  await expect(detail).toContainText("Signing in…");
+  await expect(detail).toContainText("Live", { timeout: 10_000 });
 });
 
-test("JSON tab still adds stdio servers; Test probes an existing row", async ({ page }) => {
-  await openMcpTab(page);
-  await page.getByRole("button", { name: "Add a server" }).click();
-  await page.getByTestId("mcp-add-tab-json").click();
-  await page
+test("JSON tab adds stdio as Not tested; detail Test flips it to Live", async ({ page }) => {
+  await openConnectors(page);
+  await page.getByTestId("add-custom-server").click();
+  const modal = page.getByTestId("add-mcp-modal");
+  await modal.getByTestId("mcp-add-tab-json").click();
+  await modal
     .locator("textarea")
     .fill('{"files": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem"]}}');
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await modal.getByRole("button", { name: "Add", exact: true }).click();
 
-  const row = page.locator(".space-y-2 > div").filter({ hasText: "files" }).first();
-  await expect(row).toContainText("stdio · configured");
+  // A pasted stdio server is configured, not connected — the chip says so.
+  const row = page.getByTestId("mcp-row-files");
+  await expect(row).toContainText("Not tested");
+  await expect(row).toContainText("stdio");
 
-  // Test on the untouched row: testing… then the mock's connected · 6 tools.
-  await row.getByTestId("mcp-test-files").click();
-  await expect(row).toContainText("testing…");
-  await expect(row).toContainText("connected", { timeout: 10_000 });
-  await expect(row).toContainText("6 tools");
+  await row.click();
+  const detail = page.getByTestId("mcp-detail-files");
+  await detail.getByTestId("mcp-test-files").click();
+  await expect(detail).toContainText("Testing…");
+  await expect(detail).toContainText("Live", { timeout: 10_000 });
+  await expect(detail).toContainText("6 tools");
+
+  // Remove from the detail page returns to the list without the row.
+  await detail.getByTestId("mcp-remove-files").click();
+  await expect(page.getByTestId("mcp-row-files")).toHaveCount(0);
 });

@@ -1064,6 +1064,7 @@ class SessionManager:
                     "auth": "oauth" if is_oauth else None,
                     "status": status,
                     "auth_hint": name in self._mcp_auth_hints,
+                    "last_test_at": self._prefs.get("mcp_last_test", {}).get(name),
                     "last_error": self._mcp_errors.get(name),
                     "tool_count": (
                         len(self.mcp._conns[name].tools) if connected else None
@@ -1092,6 +1093,10 @@ class SessionManager:
             try:
                 # The ONE place a browser sign-in may start: an explicit connect.
                 conn = await self.mcp.ensure(server, interactive=True)
+                # The Connectors row says "Ready · tested ⟨when⟩" — the claim must
+                # survive an app restart, so it lives in prefs, not memory.
+                self._prefs.setdefault("mcp_last_test", {})[name] = int(time.time())
+                self._save_prefs()
                 return {"ok": True, "tools": len(conn.tools)}
             except Exception as exc:
                 if (
@@ -1173,9 +1178,12 @@ class SessionManager:
     def delete_mcp(self, name: str) -> dict[str, Any]:
         ok = delete_global_server(name)
         if ok:
-            # A later re-add under the same name starts clean, not pre-failed.
+            # A later re-add under the same name starts clean, not pre-failed —
+            # and not pre-trusted (the old entry's test says nothing about the new).
             self._mcp_errors.pop(name, None)
             self._mcp_auth_hints.discard(name)
+            if self._prefs.get("mcp_last_test", {}).pop(name, None) is not None:
+                self._save_prefs()
         return {"ok": ok, "name": name}
 
     async def mcp_tools(self, name: str) -> dict[str, Any]:
