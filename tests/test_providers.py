@@ -338,6 +338,121 @@ def test_compat_builder_never_leaks_the_openai_key(monkeypatch):
         build_provider_client("kimi", {}, None)
 
 
+ARK_RESPONSES_VENDORS = {
+    "ark": {
+        "base_url": "https://ark.ap-southeast.bytepluses.com/api/v3",
+        "env_key": "ARK_API_KEY",
+        "recommended_model": "dola-seed-evolving-latest-version",
+        "reasoning_summary": False,
+    },
+    "ark-agent-plan-cn": {
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "env_key": "ARK_AGENT_PLAN_CN_API_KEY",
+        "recommended_model": "doubao-seed-evolving",
+        "reasoning_summary": True,
+    },
+}
+
+
+def test_ark_responses_descriptors_are_separate():
+    from coworker.providers.registry import get_descriptor
+
+    for name, expected in ARK_RESPONSES_VENDORS.items():
+        d = get_descriptor(name)
+        assert d is not None and d.needs_key, name
+        assert d.env_key == expected["env_key"]
+        assert d.recommended_model == expected["recommended_model"]
+        assert "Responses API" in d.blurb
+        base = next(f for f in d.fields if f.key == "base_url")
+        assert base.default == expected["base_url"]
+        assert not base.required
+
+
+def test_ark_responses_builder_capabilities_PathsUnchanged(monkeypatch):
+    from coworker.providers.openai_responses import OpenAIResponsesProvider
+    from coworker.providers.registry import build_provider_client
+
+    monkeypatch.setenv("ARK_AGENT_PLAN_CN_API_KEY", "plan-key")
+    bp = build_provider_client("ark", {"api_key": "bp-key"}, None)
+    plan = build_provider_client("ark-agent-plan-cn", {}, None)
+
+    assert isinstance(bp, OpenAIResponsesProvider)
+    assert (bp._api_key, bp._base_url) == (
+        "bp-key",
+        ARK_RESPONSES_VENDORS["ark"]["base_url"],
+    )
+    assert isinstance(plan, OpenAIResponsesProvider)
+    assert (plan._api_key, plan._base_url) == (
+        "plan-key",
+        ARK_RESPONSES_VENDORS["ark-agent-plan-cn"]["base_url"],
+    )
+    assert bp._reasoning_summary is ARK_RESPONSES_VENDORS["ark"]["reasoning_summary"]
+    assert plan._reasoning_summary is ARK_RESPONSES_VENDORS["ark-agent-plan-cn"][
+        "reasoning_summary"
+    ]
+
+
+def test_ark_responses_never_leak_the_openai_key(monkeypatch):
+    import pytest
+
+    from coworker.providers.registry import build_provider_client
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-real")
+    monkeypatch.delenv("ARK_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="BytePlus Ark"):
+        build_provider_client("ark", {}, None)
+
+
+def test_existing_chat_compat_paths_unchanged():
+    """Lockdown: adding Responses vendors must not migrate existing compat providers."""
+    from coworker.providers.registry import build_provider_client
+
+    provider = build_provider_client("deepseek", {"api_key": "ds-key"}, None)
+    assert isinstance(provider, OpenAIProvider)
+    assert provider._base_url == COMPAT_VENDORS["deepseek"]
+
+
+def test_ark_curated_models_are_strict_allowlists():
+    from coworker.providers.matrix import models_for_provider
+
+    assert models_for_provider("ark") == [
+        "dola-seed-evolving-latest-version",
+        "dola-seed-2-1-turbo-260628",
+    ]
+    assert models_for_provider("ark-agent-plan-cn") == [
+        "doubao-seed-evolving",
+        "doubao-seed-2.1-turbo",
+    ]
+
+
+def test_ark_models_route_and_get_verified_agent_capabilities():
+    from coworker.providers.router import ProviderRouter
+
+    models = (
+        "ark:dola-seed-evolving-latest-version",
+        "ark:dola-seed-2-1-turbo-260628",
+        "ark-agent-plan-cn:doubao-seed-evolving",
+        "ark-agent-plan-cn:doubao-seed-2.1-turbo",
+    )
+    router = ProviderRouter.__new__(ProviderRouter)
+    for model in models:
+        prefix, bare = model.split(":", 1)
+        assert router._provider_name(model) == prefix
+        assert ProviderRouter._bare(model) == bare
+        caps = capabilities_for(model)
+        assert caps.tools and caps.parallel_tool_calls and caps.streaming
+        assert not caps.vision
+
+
+def test_ark_recommended_models_are_curated():
+    from coworker.providers.matrix import models_for_provider
+    from coworker.providers.registry import get_descriptor
+
+    for name in ARK_RESPONSES_VENDORS:
+        d = get_descriptor(name)
+        assert d.recommended_model in models_for_provider(name)
+
+
 def test_compat_models_route_and_get_tool_capabilities():
     from coworker.providers.router import ProviderRouter
 
