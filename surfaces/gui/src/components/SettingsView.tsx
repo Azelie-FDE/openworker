@@ -52,7 +52,7 @@ import { showPersonas } from "../flags";
 // Models + Personas host the existing tab components inside the page shell (field re-skin to follow).
 // "appearance" is the General tab's stable key — callers deep-link with it, so the
 // rename (UX-021) changed only the label. "files" folded into General as a card.
-type SetTab = "appearance" | "models" | "skills" | "voice" | "memory" | "personas";
+type SetTab = "appearance" | "models" | "context" | "skills" | "voice" | "memory" | "personas";
 
 const CARD = "rounded-xl2 border border-line bg-panel";
 const FIELD_LABEL = "text-[12.5px] font-medium text-ink";
@@ -66,10 +66,11 @@ const BTN_BORDERED =
 const SET_TABS: {
   key: SetTab;
   label: string;
-  icon: "sliders" | "code" | "mic" | "archive" | "sparkle" | "book";
+  icon: "sliders" | "code" | "mic" | "archive" | "sparkle" | "book" | "refresh";
 }[] = [
   { key: "appearance", label: "General", icon: "sliders" },
   { key: "models", label: "Models", icon: "code" },
+  { key: "context", label: "Context optimization", icon: "refresh" },
   { key: "skills", label: "Skills", icon: "book" },
   { key: "voice", label: "Voice input", icon: "mic" },
   { key: "memory", label: "Memory", icon: "archive" },
@@ -129,12 +130,15 @@ export function SettingsView({
                 sub="Providers and the models offered in the composer's picker. Keys are stored only on this computer."
               />
               <ModelsTab />
-              {/* Token savings is model-spend behavior, so it lives here (UX-021),
-                  not under General. */}
-              <div className="mt-6">
-                <TokenSavingsCard />
-                <CompactionCard />
-              </div>
+            </section>
+          ) : tab === "context" ? (
+            <section>
+              <PanelHead
+                title="Context optimization"
+                sub="How sessions spend tokens — attachment handling and long-history compaction."
+              />
+              <TokenSavingsCard />
+              <CompactionCard />
             </section>
           ) : tab === "skills" ? (
             <SkillsTab onCreateSkill={onCreateSkill} />
@@ -379,7 +383,7 @@ function PersonasSection({ onOpenPersona }: { onOpenPersona?: (id: string) => vo
     <section>
       <PanelHead
         title="Coworkers"
-        sub="Which coworkers are enabled and shown in the picker, plus installing new coworker bundles."
+        sub="Which coworkers are enabled and shown in the picker — the starred one is the default for new sessions."
       />
       <PersonasTab key={galleryBump} onOpenPersona={onOpenPersona} />
       <button

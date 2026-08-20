@@ -136,11 +136,8 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
 
   return (
     <div>
-      <p className="text-[12.5px] text-muted mb-3 leading-relaxed">
-        Enable a coworker, then choose whether it appears in the coworker picker. The starred coworker
-        is the default for new sessions.
-      </p>
-
+      {/* No intro line here — the PanelHead above already explains the page
+          (the two stacked one-liners read as duplicates, owner 2026-08-21). */}
       <div className={CARD + " divide-y divide-line mb-6"}>
         {personas.map((p) => (
           <div key={p.id} className="px-4 py-3">

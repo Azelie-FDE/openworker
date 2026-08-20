@@ -1152,11 +1152,12 @@ export function Sidebar(props: Props) {
                 role="menu"
               >
                 {cloud?.signed_in ? (
+                  /* Just the email — being signed in to OpenWorker Cloud is implicit. */
                   <div
                     className="px-3 py-1.5 mb-1 text-[11px] text-faint truncate border-b border-line"
-                    title={`${accountEmail} · OpenWorker Cloud`}
+                    title={accountEmail}
                   >
-                    {accountEmail} · OpenWorker Cloud
+                    {accountEmail}
                   </div>
                 ) : (
                   <>
@@ -1200,7 +1201,7 @@ export function Sidebar(props: Props) {
                   false,
                   <span className="text-[11px] text-faint">⌘ ,</span>,
                 )}
-                {appMenuItem("clock", "Automations", props.onOpenScheduled, props.scheduledActive)}
+                {/* No Automations here — the sidebar's top nav already carries it. */}
                 {appMenuItem("audit", "Activity", props.onOpenAudit, props.auditActive)}
                 {cloud?.signed_in && (
                   <>
