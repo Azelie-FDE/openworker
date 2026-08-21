@@ -216,8 +216,12 @@ export function AccessSection({
       : names.length <= 2
         ? names.join(", ")
         : `${names.slice(0, 2).join(", ")} +${names.length - 2}`;
+  // A temporary dir's raw name (the session id) never shows — say "Temporary folder"; a
+  // draft with no folder picked yet shows none at all (UX-029).
   const folderPart = projectScoped
-    ? baseName(workspace || roots.find((r) => r.primary)?.path || "") || null
+    ? scratchPrimary
+      ? "Temporary folder"
+      : baseName(workspace || "") || null
     : roots.length > 0
       ? `${roots.length} folder${roots.length === 1 ? "" : "s"}`
       : null;

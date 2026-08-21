@@ -69,7 +69,9 @@ export function mcpStatusLine(s: McpServer): string {
       /* leave the host off a malformed url */
     }
   }
-  if (s.status !== "connected" && s.last_test_at) {
+  // Live servers show it too — the visible receipt that clicking Test did
+  // something (it re-round-trips the connection and refreshes the tool count).
+  if (s.last_test_at) {
     const rel = relTime(s.last_test_at);
     if (rel) bits.push(`tested ${rel}`);
   }

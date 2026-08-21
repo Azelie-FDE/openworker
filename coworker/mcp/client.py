@@ -85,6 +85,29 @@ class MCPManager:
     async def tools(self, server: MCPServerDef) -> list[Any]:
         return (await self.ensure(server)).tools
 
+    async def verify(self, server: MCPServerDef, *, interactive: bool = False) -> _Conn:
+        """A REAL health check for explicit Test actions. `ensure` returns a cached
+        connection untouched, which made Test-on-Live a silent no-op that could not
+        detect a dead server (owner-hit 2026-08-21). Here a cached connection is
+        round-tripped (tools/list, refreshing the tool set); a dead one is torn
+        down and reconnected fresh."""
+        conn = self._conns.get(server.name)
+        if conn is not None:
+            try:
+                listed = await asyncio.wait_for(conn.session.list_tools(), timeout=20)
+                conn.tools = list(listed.tools)
+                return conn
+            except Exception:
+                conn.shutdown.set()
+                task = self._tasks.pop(server.name, None)
+                if task is not None:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(task), timeout=5)
+                    except Exception:
+                        task.cancel()
+                self._conns.pop(server.name, None)  # _serve pops too; belt and braces
+        return await self.ensure(server, interactive=interactive)
+
     def last_stderr(self, name: str) -> Optional[str]:
         """Stderr tail from the most recent failed startup of `name`, if any."""
         return self._stderr_tails.get(name)
