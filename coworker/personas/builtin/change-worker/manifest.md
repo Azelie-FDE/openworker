@@ -1,4 +1,5 @@
 ---
+ships: false
 id: change-worker
 name: Change Worker
 icon: code

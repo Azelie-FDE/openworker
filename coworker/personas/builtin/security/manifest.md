@@ -1,4 +1,5 @@
 ---
+group: security
 id: security
 name: Security Coworker
 icon: shield

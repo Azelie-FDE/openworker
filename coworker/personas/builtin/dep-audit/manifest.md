@@ -1,4 +1,5 @@
 ---
+group: security
 id: dep-audit
 name: Dependency Audit Coworker
 icon: audit

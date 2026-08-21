@@ -1,4 +1,5 @@
 ---
+ships: false
 id: infra-worker
 name: Infra Worker
 icon: sliders

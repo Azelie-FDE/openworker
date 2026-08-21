@@ -1,4 +1,5 @@
 ---
+ships: false
 id: test-worker
 name: Test Worker
 icon: check

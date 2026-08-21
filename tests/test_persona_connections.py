@@ -127,6 +127,7 @@ def test_persona_set_default_connection(tmp_path, monkeypatch):
 
 
 def test_persona_enable_toggle(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENWORKER_UNSHIPPED", "1")  # ops is ships:false now
     mgr = _mgr(tmp_path, monkeypatch)
     client = TestClient(create_app(mgr))
 

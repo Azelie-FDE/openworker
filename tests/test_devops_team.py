@@ -25,7 +25,8 @@ def test_bundle_registers_with_team_traits(tmp_path):
         assert reg.get(pid).manifest.team == "worker"
 
 
-def test_lead_surfaces_workers_do_not(tmp_path):
+def test_lead_surfaces_workers_do_not(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENWORKER_UNSHIPPED", "1")  # teams are ships:false — internal builds
     reg = _reg(tmp_path)
     ids = [e["name"] for e in reg.sidebar()]
     assert "devops-lead" in ids

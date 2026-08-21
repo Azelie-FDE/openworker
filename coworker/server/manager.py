@@ -784,13 +784,28 @@ class SessionManager:
             }
             for rec in (manifest.recommends if manifest else [])
         ]
+        media_dir = self.personas.media_dir(persona_id)
+        media = (
+            sorted(
+                f.name
+                for f in media_dir.iterdir()
+                if f.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+            )
+            if media_dir
+            else []
+        )
         return {
             "id": entry.id,
             "name": entry.name,
             "icon": entry.icon,
             "tagline": entry.tagline,
             "description": manifest.description if manifest else "",
+            "media": media,
+            "builtin": entry.builtin,
+            "group": entry.group,
             "enabled": self.personas.is_enabled(entry.id),
+            "surfaced": self.personas.is_surfaced(entry.id),
+            "default": entry.id == self.personas.default_id(),
             "tools": list(entry.tools),
             "recommended_models": list(manifest.recommended_models) if manifest else [],
             "default_permission_mode": (
@@ -1719,8 +1734,11 @@ class SessionManager:
             propose_team). Only team-capable workers are listed — solo coworkers
             cannot join a team."""
             out = []
-            for row in manager.personas.list_all():
-                pid = row.get("id", "")
+            # Registry entries directly — NOT list_all(), which applies the
+            # ships:false visibility filter: a lead that is running (internal
+            # build or user-enabled) must be able to staff its workers even
+            # when those workers are hidden from the settings page.
+            for pid in manager.personas.ids():
                 entry = manager.personas.get(pid)
                 m = getattr(entry, "manifest", None)
                 if m is None or m.team != "worker":

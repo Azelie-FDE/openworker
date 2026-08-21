@@ -38,7 +38,8 @@ def test_lead_carries_no_execution_tools(tmp_path):
         assert {"shell", "git"} <= set(reg.get(pid).tools)
 
 
-def test_workers_never_surface_lead_does(tmp_path):
+def test_workers_never_surface_lead_does(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENWORKER_UNSHIPPED", "1")  # teams are ships:false — internal builds
     reg = _reg(tmp_path)
     ids = [e["name"] for e in reg.sidebar()]
     assert "devsecops-lead" in ids

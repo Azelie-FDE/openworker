@@ -1,4 +1,5 @@
 ---
+ships: false
 id: logs-worker
 name: Logs Worker
 icon: search

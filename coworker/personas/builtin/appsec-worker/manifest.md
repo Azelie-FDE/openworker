@@ -1,4 +1,5 @@
 ---
+ships: false
 id: appsec-worker
 name: AppSec Worker
 icon: code

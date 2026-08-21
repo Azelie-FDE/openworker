@@ -1,4 +1,5 @@
 ---
+ships: false
 id: posture-worker
 name: Posture Worker
 icon: sliders

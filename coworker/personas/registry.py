@@ -1,7 +1,7 @@
 """Persona registry — the installed personas + their lifecycle state.
 
-Unifies two sources behind one `id → Agent` resolver: the core surfaces (Code / Chat /
-Cowork) wrap their existing agent builders (exact prompts preserved), and markdown manifests
+Unifies two sources behind one `id → Agent` resolver: the core surfaces (Cowork / Code)
+wrap their existing agent builders (exact prompts preserved), and markdown manifests
 (Ops today; third-party dirs in Phase 2) load through ``PersonaManifest``. Lifecycle —
 installed → enabled → surfaced, plus a default — is persisted to a small JSON file.
 
@@ -13,18 +13,28 @@ working. Disable/surface only affect what the *new-session* picker offers.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
 from ..agents.base import Agent
-from ..agents.chat import chat_agent
 from ..agents.code import CODE_CAPABILITIES, code_agent
 from ..agents.cowork import COWORK_CAPABILITIES, cowork_agent
 from .manifest import PersonaManifest, load_manifest_file
 
 DEFAULT_PERSONA_ID = "cowork"
+
+
+def include_unshipped() -> bool:
+    """Internal builds opt ships:false coworkers in (owner, 2026-08-21). A release
+    build never sets this, so unshipped personas simply do not exist there."""
+    return os.environ.get("OPENWORKER_UNSHIPPED", "").strip().lower() not in (
+        "",
+        "0",
+        "false",
+    )
 
 
 @dataclass
@@ -51,9 +61,13 @@ class PersonaEntry:
         True  # whether it shows in the picker before any user choice
     )
     # Whether it ships enabled before any user choice. Builtins default on (UX-029: the
-    # composer picker is their front door) — except retired ones (Chat: Coworker covers
-    # quick Q&A). Installed third-party personas always start disabled pending consent.
+    # composer picker is their front door) — except Code (owner call 2026-08-21: ships
+    # disabled). Installed third-party personas always start disabled pending consent.
     default_enabled: bool = True
+    # Distribution flag (owner, 2026-08-21): ships:false = absent from release builds.
+    ships: bool = True
+    # Settings-page grouping ("general" | "security") — cosmetic only.
+    group: str = "general"
     _builder: Optional[Callable[[], Agent]] = None
     manifest: Optional[PersonaManifest] = None
 
@@ -109,6 +123,7 @@ class PersonaRegistry:
         workspace="deliverable",
         default_surfaced=True,
         default_enabled=True,
+        group="general",
     ) -> None:
         self._entries[id] = PersonaEntry(
             id=id,
@@ -122,13 +137,17 @@ class PersonaRegistry:
             tools=list(tools),
             default_surfaced=default_surfaced,
             default_enabled=default_enabled,
+            group=group,
             _builder=builder,
         )
 
     def _load_builtin(self, builtin_dir: Optional[str | Path]) -> None:
-        # Core surfaces keep their exact prompts via the existing builders. Cowork (the default)
-        # leads; Chat is RETIRED (owner call 2026-08-11: Coworker covers quick Q&A) — it ships
-        # disabled and unsurfaced, recoverable from Settings ▸ Coworkers.
+        # Core surfaces keep their exact prompts via the existing builders. Cowork (the
+        # default) leads. Chat is GONE (owner call 2026-08-21; retired-but-listed since
+        # 2026-08-11) — stray `persona=chat` session ids resolve to the default via
+        # agent()'s unknown-id fallback. Code ships disabled + unsurfaced (same owner
+        # call): OpenWorker is the launch generalist, but Code stays one checkbox away
+        # as the only plain work-in-my-repo persona.
         self._register_builder(
             "cowork",
             "OpenWorker",
@@ -150,17 +169,6 @@ class PersonaRegistry:
             "code",
             CODE_CAPABILITIES,
             workspace="git",
-        )
-        self._register_builder(
-            "chat",
-            "Chat",
-            "chat",
-            "Quick questions — no workspace",
-            chat_agent,
-            False,
-            "knowledge",
-            [],
-            workspace="none",
             default_surfaced=False,
             default_enabled=False,
         )
@@ -197,6 +205,8 @@ class PersonaRegistry:
             family=m.family,
             workspace=m.workspace,
             tools=list(m.tools),
+            ships=m.ships,
+            group=m.group,
             manifest=m,
             # Team workers never surface in the picker: they are purpose-built to be
             # STAFFED by a lead, not started solo (their prompts talk to a lead, not
@@ -237,18 +247,32 @@ class PersonaRegistry:
         )
 
     # -- queries ----------------------------------------------------------------
+    def _visible(self, e: PersonaEntry) -> bool:
+        # Unshipped personas surface only on internal builds — except one a user
+        # already enabled (an internal-build choice must not vanish under them).
+        return e.ships or include_unshipped() or self._enabled.get(e.id) is True
+
     def ids(self) -> list[str]:
         return list(self._entries)
 
     def get(self, persona_id: str) -> Optional[PersonaEntry]:
         return self._entries.get(persona_id)
 
+    def media_dir(self, persona_id: str) -> Optional[Path]:
+        """The persona bundle's media/ folder (screenshots for the detail page), if any.
+        Only manifest-backed personas have one — it sits beside their manifest.md."""
+        entry = self._entries.get(persona_id)
+        if entry is None or entry.manifest is None or not entry.manifest.source:
+            return None
+        d = Path(entry.manifest.source).parent / "media"
+        return d if d.is_dir() else None
+
     def is_enabled(self, persona_id: str) -> bool:
         # Explicit state (either way) always wins. Absent a user choice, the entry's
         # default applies: builtins ship enabled — the composer picker is their front door
         # (UX-029, supersedes the 2026-07-09 Coworker-only default that fit the old hidden
-        # ▾ menu) — except retired ones (Chat). Installed third-party personas stay
-        # disabled until the user consents from the risk screen.
+        # ▾ menu) — except ones registered default-off (Code). Installed third-party
+        # personas stay disabled until the user consents from the risk screen.
         if persona_id in self._enabled:
             return bool(self._enabled[persona_id])
         entry = self._entries.get(persona_id)
@@ -288,7 +312,7 @@ class PersonaRegistry:
         """Session surfaces for the new-session picker: enabled AND surfaced, in order."""
         out = []
         for e in self._entries.values():
-            if self.is_enabled(e.id) and self.is_surfaced(e.id):
+            if self._visible(e) and self.is_enabled(e.id) and self.is_surfaced(e.id):
                 out.append(
                     {
                         "name": e.id,
@@ -317,10 +341,13 @@ class PersonaRegistry:
                 "enabled": self.is_enabled(e.id),
                 "surfaced": self.is_surfaced(e.id),
                 "default": e.id == self.default_id(),
+                "ships": e.ships,
+                "group": e.group,
                 "version": e.manifest.version if e.manifest else "",
                 "installed_at": self._installed_meta.get(e.id, {}).get("installed_at", ""),
             }
             for e in self._entries.values()
+            if self._visible(e)
         ]
 
     # -- mutations --------------------------------------------------------------

@@ -26,6 +26,7 @@ VALID_WORKSPACES = {"git", "project", "deliverable", "none"}
 VALID_MODES = {"discuss", "plan", "interactive", "custom", "auto"}
 VALID_REC_KINDS = {"connector", "mcp"}
 VALID_REC_TIERS = {"core", "optional"}
+VALID_GROUPS = {"general", "security"}
 
 
 class ManifestError(ValueError):
@@ -80,6 +81,13 @@ class PersonaManifest:
     # update channel, so this drives the "replaces vN" note on re-install, nothing more.
     version: str = ""
     recommends: list[Recommendation] = field(default_factory=list)
+    # Distribution decision, not a maturity claim (owner, 2026-08-21): ships:false
+    # coworkers exist in the codebase but are absent from release builds — internal
+    # builds opt them in via OPENWORKER_UNSHIPPED=1.
+    ships: bool = True
+    # Settings-page grouping ("general" | "security"). Cosmetic — grouping never
+    # gates behavior, so a third-party persona claiming "security" is harmless.
+    group: str = "general"
     builtin: bool = False
     source: Optional[str] = (
         None  # where it was loaded from (path / url), for provenance
@@ -288,6 +296,12 @@ def parse_manifest(
             f"persona {persona_id!r}: default_permission_mode must be one of {sorted(VALID_MODES)}"
         )
 
+    group = str(meta.get("group", "general") or "general").strip().lower()
+    if group not in VALID_GROUPS:
+        raise ManifestError(
+            f"persona {persona_id!r}: group must be one of {sorted(VALID_GROUPS)}"
+        )
+
     team_raw = str(meta.get("team", "") or "").strip().lower()
     if team_raw and team_raw not in VALID_TEAM:
         raise ManifestError(
@@ -319,6 +333,8 @@ def parse_manifest(
         mcp=_strlist(meta, "mcp"),
         version=str(meta.get("version", "") or "").strip(),
         recommends=recommends,
+        ships=bool(meta.get("ships", True)),
+        group=group,
         builtin=builtin,
         source=source,
     )

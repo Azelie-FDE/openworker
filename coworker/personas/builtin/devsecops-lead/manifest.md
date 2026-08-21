@@ -1,4 +1,5 @@
 ---
+ships: false
 id: devsecops-lead
 name: DevSecOps Lead
 icon: shield

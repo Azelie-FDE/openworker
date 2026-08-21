@@ -1,4 +1,5 @@
 ---
+ships: false
 id: swe-lead
 name: SWE Lead
 icon: users

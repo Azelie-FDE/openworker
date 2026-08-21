@@ -256,7 +256,11 @@ def create_app(manager: SessionManager) -> FastAPI:
 
     @app.get("/v1/personas")
     def personas() -> dict[str, Any]:
-        return {"personas": manager.personas.list_all()}
+        from ..personas.registry import include_unshipped
+
+        # `internal` tells the GUI it may show internal-build affordances (the
+        # "Not in this release" group, the Gallery entry point).
+        return {"personas": manager.personas.list_all(), "internal": include_unshipped()}
 
     @app.get("/v1/inbox")
     def inbox(session_id: str = "", state: str = "") -> dict[str, Any]:
@@ -580,6 +584,24 @@ def create_app(manager: SessionManager) -> FastAPI:
         if detail is None:
             return {"ok": False, "error": f"unknown persona: {persona_id}"}
         return detail
+
+    @app.get("/v1/personas/{persona_id}/media/{name}")
+    def persona_media(persona_id: str, name: str) -> Any:
+        # Screenshots from the persona bundle's media/ folder. The name is confined
+        # to that folder: no separators, resolved path must stay inside it.
+        from fastapi.responses import FileResponse, Response
+
+        media_dir = manager.personas.media_dir(persona_id)
+        if media_dir is None or "/" in name or "\\" in name or name.startswith("."):
+            return Response(status_code=404)
+        f = (media_dir / name).resolve()
+        try:
+            inside = f.is_relative_to(media_dir.resolve())
+        except AttributeError:  # pragma: no cover — py<3.9 has no is_relative_to
+            inside = str(f).startswith(str(media_dir.resolve()))
+        if not inside or not f.is_file():
+            return Response(status_code=404)
+        return FileResponse(f)
 
     @app.post("/v1/personas/{persona_id}/enable")
     def persona_enable(persona_id: str, body: dict) -> dict[str, Any]:

@@ -1,4 +1,5 @@
 ---
+ships: false
 id: secrets-worker
 name: Secrets Worker
 icon: search

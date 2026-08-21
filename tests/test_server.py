@@ -60,17 +60,12 @@ def test_chat_completions_openai_shape(tmp_path):
 def test_agents_and_memory_rest(tmp_path):
     client = _client(tmp_path, [])
     agents = client.get("/v1/agents").json()["agents"]
-    # The picker lists enabled+surfaced personas — builtins ship enabled (UX-029);
-    # Chat stays default-hidden via the surfaced axis. The security bundles (Phase C)
-    # ship in the picker out of the box.
+    # The picker lists enabled+surfaced personas. Release lineup (owner 2026-08-21):
+    # OpenWorker + the security bundles; Code ships disabled, Chat is gone, and
+    # ships:false personas (teams, ops, design) need OPENWORKER_UNSHIPPED=1.
     names = [a["name"] for a in agents]
     assert names[0] == "cowork"
-    # Leads surface (they're how a user starts a team); team WORKERS never do —
-    # they're staffed by a lead, not started solo.
-    assert set(names) == {
-        "cowork", "code", "ops", "security", "cloud-posture", "dep-audit",
-        "swe-lead", "devsecops-lead", "devops-lead",
-    }
+    assert set(names) == {"cowork", "security", "cloud-posture", "dep-audit"}
     assert "skills" in client.get("/v1/skills").json()  # catalog (may be empty)
 
     added = client.post("/v1/memory", json={"content": "prefer pathlib"}).json()
@@ -99,17 +94,17 @@ def test_disable_persona_archives_its_sessions(tmp_path):
             )
         )
 
-    mk("chat-a", "chat")
-    mk("chat-b", "chat")
-    mk("chat-old", "chat")
+    mk("chat-a", "code")
+    mk("chat-b", "code")
+    mk("chat-old", "code")
     store.set_flags(
         "chat-old", archived=True
     )  # already archived — must not be re-counted
     mk("cowork-a", "cowork")
-    mk("__run__r1", "chat")  # internal automation thread — never touched
+    mk("__run__r1", "code")  # internal automation thread — never touched
 
     client = TestClient(create_app(manager))
-    body = client.post("/v1/personas/chat", json={"enabled": False}).json()
+    body = client.post("/v1/personas/code", json={"enabled": False}).json()
     assert body["ok"] is True
     assert body["archived_sessions"] == 2
     assert store.load("chat-a").archived and store.load("chat-b").archived
@@ -121,8 +116,8 @@ def test_disable_persona_archives_its_sessions(tmp_path):
     assert store.load("chat-a").archived
 
     # The dedicated §5/§8 enable route shares the same semantic.
-    mk("chat-c", "chat")
-    client.post("/v1/personas/chat/enable", json={"enabled": False})
+    mk("chat-c", "code")
+    client.post("/v1/personas/code/enable", json={"enabled": False})
     assert store.load("chat-c").archived
 
 
@@ -869,18 +864,19 @@ def test_ws_with_workspace_query(tmp_path):
         assert "turn_end" in _drain(ws)
 
 
-def test_ws_chat_agent_needs_no_workspace(tmp_path):
+def test_ws_removed_agent_id_falls_back_to_default(tmp_path):
+    # Chat is removed (owner 2026-08-21): a stored session or deep link carrying
+    # agent=chat resolves to the default persona instead of erroring.
     manager = SessionManager(
         workspace=None,
         data_dir=tmp_path,
-        provider=ScriptedProvider([_text("hi from chat")]),
+        provider=ScriptedProvider([_text("hi")]),
     )
     client = TestClient(create_app(manager))
     with client.websocket_connect("/ws/session/chat1?agent=chat") as ws:
         ready = ws.receive_json()
         assert ready["type"] == "ready"
-        assert ready["data"]["agent"] == "chat"
-        assert ready["data"]["workspace"] is None
+        assert ready["data"]["agent"] == "cowork"
         ws.send_json({"type": "user_message", "text": "hello"})
         assert "turn_end" in _drain(ws)
 

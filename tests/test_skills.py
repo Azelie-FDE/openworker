@@ -45,8 +45,9 @@ def test_chat_agent_has_no_workspace_tools():
 
 
 def test_get_agent_fallback():
-    assert get_agent("chat").name == "chat"
-    # Unknown ids fall back to the default persona (Cowork), per the persona registry.
+    # Chat is removed (owner 2026-08-21): its id, like any unknown id, falls back to
+    # the default persona per the registry.
+    assert get_agent("chat").name == "cowork"
     assert get_agent("nope").name == "cowork"
 
 

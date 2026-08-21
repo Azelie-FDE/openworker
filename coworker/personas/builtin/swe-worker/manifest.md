@@ -1,4 +1,5 @@
 ---
+ships: false
 id: swe-worker
 name: SWE Worker
 icon: code

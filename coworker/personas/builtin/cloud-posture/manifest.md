@@ -1,4 +1,5 @@
 ---
+group: security
 id: cloud-posture
 name: Cloud Posture Coworker
 icon: sliders

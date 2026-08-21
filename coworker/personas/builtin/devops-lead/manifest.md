@@ -1,4 +1,5 @@
 ---
+ships: false
 id: devops-lead
 name: DevOps Lead
 icon: audit

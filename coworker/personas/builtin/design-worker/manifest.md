@@ -1,4 +1,5 @@
 ---
+ships: false
 id: design-worker
 name: Design Worker
 icon: layout
