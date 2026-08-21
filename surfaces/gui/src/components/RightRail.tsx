@@ -52,9 +52,8 @@ interface Props {
   // Fires when a full artifact preview opens/closes, so the app can auto-collapse the left nav
   // to give the preview (PDF/webpage/sheet) more room (#3).
   onPreviewChange?: (open: boolean) => void;
-  // §32: the rail is the ONE session panel for every non-chat persona. Artifacts stays
-  // cowork-only (deliverables; code-family gets "Files" later — slot reserved); the Access
-  // section (the former Session-settings drawer) renders for all.
+  // §32: the rail is the ONE session panel for every persona. Artifacts (scratch-side
+  // deliverables), Files (all roots), and Access all render for every session (UX-036/037).
   showArtifacts?: boolean;
   personaId?: string;
   projectScoped?: boolean;
@@ -119,8 +118,6 @@ export function RightRail({
     team: false,
     files: false,
   });
-  // Journal + Access sit behind a quiet "More" row (three primary sections max).
-  const [moreOpen, setMoreOpen] = useState(false);
   const autoOpenedProgress = useRef(false);
   useEffect(() => {
     if (!isLead && running && todo.length > 0 && !autoOpenedProgress.current) {
@@ -135,16 +132,9 @@ export function RightRail({
     seenBoardKey.current = openBoardKey;
     setOpen((prev) => ({ ...prev, board: true }));
   }, [openBoardKey]);
-  // Access deep links (intro "Configure ›" etc.) must survive the More fold.
-  const seenAccessKey = useRef(openAccessKey);
-  useEffect(() => {
-    if (openAccessKey === seenAccessKey.current) return;
-    seenAccessKey.current = openAccessKey;
-    setMoreOpen(true);
-  }, [openAccessKey]);
   const [artifacts, setArtifacts] = useState<ArtifactInfo[]>([]);
   // UX-037 Files: the session's roots (workspace/scratch/grants) — the entry points of
-  // the file explorer. Fetched lazily when the More fold opens.
+  // the file explorer.
   const [rootDirs, setRootDirs] = useState<RootInfo[]>([]);
   const [journal, setJournal] = useState<JournalCase[]>([]);
   const [selected, setSelected] = useState<ArtifactInfo | null>(null);
@@ -158,9 +148,9 @@ export function RightRail({
   }, [active, sessionId, refreshKey, showArtifacts]);
 
   useEffect(() => {
-    if (!active || !moreOpen) return;
+    if (!active) return;
     getRoots(sessionId).then(setRootDirs).catch(() => setRootDirs([]));
-  }, [active, moreOpen, sessionId, refreshKey]);
+  }, [active, sessionId, refreshKey]);
 
   // Journal cases surface only when a board exists — same visibility rule as the
   // Board section, so plain sessions carry zero team chrome.
@@ -372,17 +362,10 @@ export function RightRail({
           </RailSection>
           )}
 
-          {/* Seventeenth pass: three primary sections max — Journal and Access fold
-              behind a quiet "More" row. Deep links (Access openKey) unfold it. */}
-          <button
-            className="rail-more-row"
-            data-testid="rail-more-toggle"
-            onClick={() => setMoreOpen((v) => !v)}
-          >
-            <Icon name={moreOpen ? "chevronDown" : "chevronRight"} size={13} className="rail-chev" />
-            <span>More</span>
-          </button>
-          {moreOpen && board?.space && journal.length > 0 && (
+          {/* The More fold is gone (owner call 2026-08-20): every section lists flat,
+              collapsed by default — with Files added, one extra click hid half the
+              drawer for no gain. */}
+          {board?.space && journal.length > 0 && (
             <RailSection
               title="Journal"
               count={String(journal.length)}
@@ -403,7 +386,7 @@ export function RightRail({
           {/* UX-037: Files — an explorer over the session's roots. Each root opens in
               the artifact viewer, whose folder listings already click through; the
               Artifacts section stays the curated scratch-only surface. */}
-          {moreOpen && rootDirs.length > 0 && (
+          {rootDirs.length > 0 && (
             <RailSection
               title="Files"
               count={String(rootDirs.length)}
@@ -447,10 +430,8 @@ export function RightRail({
           )}
 
           {/* §32: Access — the former Session-settings drawer, one section among peers.
-              key: its data ownership resets with the conversation, like the old row did.
-              Stays MOUNTED behind the More fold (hidden, not unmounted) so its openKey
-              deep links (intro "Configure ›", onboarding "Start working") keep firing. */}
-          <div style={moreOpen ? undefined : { display: "none" }}>
+              key: its data ownership resets with the conversation, like the old row did. */}
+          <div>
             <AccessSection
               key={sessionId}
               sessionId={sessionId}

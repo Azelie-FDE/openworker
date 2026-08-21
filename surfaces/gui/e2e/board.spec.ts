@@ -147,11 +147,10 @@ test("Add a note is a pure append — it lands in the timeline, state untouched"
   await expect(detail.getByRole("button", { name: "Mark done" })).toBeVisible();
 });
 
-test("journal folds behind More; expanding lists cases once a board exists", async ({ page }) => {
+test("journal section lists cases once a board exists", async ({ page }) => {
   await planTheWork(page);
   // Journal is not a primary section — it sits behind the quiet More row.
   await expect(page.getByTestId("rail-toggle-journal")).toHaveCount(0);
-  await page.getByTestId("rail-more-toggle").click();
   await page.getByTestId("rail-toggle-journal").click();
   const journal = page.getByTestId("journal-list");
   await expect(journal).toBeVisible();

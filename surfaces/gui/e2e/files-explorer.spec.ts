@@ -1,6 +1,6 @@
-// UX-037: Files — an explorer over the session's roots behind the More fold. Each root
-// opens in the artifact viewer (breadcrumb "Files"), whose folder listings click through
-// to subfolders and files. Artifacts stays the curated scratch-only surface beside it.
+// UX-037: Files — an explorer over the session's roots. Each root opens in the artifact
+// viewer (breadcrumb "Files"), whose folder listings click through to subfolders and
+// files. Artifacts stays the curated scratch-only surface beside it.
 import { expect } from "@playwright/test";
 import { test } from "./fixtures";
 
@@ -10,8 +10,7 @@ test("Files lists the session roots and browses into a file", async ({ page }) =
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText(/Echo: hello/)).toBeVisible();
 
-  // Behind More, collapsed by default like every section.
-  await page.getByTestId("rail-more-toggle").click();
+  // Collapsed by default like every section (the More fold is gone — owner 2026-08-20).
   await page.getByTestId("rail-toggle-files").click();
   const row = page.getByTestId("files-root-row").first();
   await expect(row).toContainText("scratch");

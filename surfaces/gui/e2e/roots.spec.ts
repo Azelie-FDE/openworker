@@ -10,7 +10,6 @@ test("working directories: add folders with the read-only / read-write gate", as
   await page.getByText("Draft the launch note").first().click();
 
   // Expand the rail's Access section.
-  await page.getByTestId("rail-more-toggle").click(); // Access folds behind More (17th pass)
   await page.getByTestId("access-toggle").click();
   const dirs = page.getByTestId("drawer-directories");
   await expect(dirs.getByText("Folders")).toBeVisible();
