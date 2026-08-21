@@ -186,6 +186,12 @@ class SessionManager:
         # feeds list_mcp's status so the GUI can show "authorizing…" and failures.
         self._mcp_authorizing: set[str] = set()
         self._mcp_errors: dict[str, str] = {}
+        # http servers whose anonymous connect came back 401/403 — the failure is
+        # "needs sign-in", so the GUI offers the OAuth switch instead of a raw error.
+        self._mcp_auth_hints: set[str] = set()
+        # Servers that failed to connect while preparing a session's tools —
+        # drained once by the WS handler to append a transcript notice.
+        self._mcp_session_failures: dict[str, list[str]] = {}
         self.gateway: Optional[Gateway] = None
         self._data_base = base
         # Desktop/UI prefs (default model, onboarding state) — not secrets; a plain JSON file.
@@ -1186,6 +1192,7 @@ class SessionManager:
                 continue
             try:
                 conn = await self.mcp.ensure(server)
+                self._mcp_errors.pop(server.name, None)
             except Exception as exc:
                 if mcp_oauth.is_auth_required(exc):
                     # Stored tokens no longer refresh (vendor rotated/expired
@@ -1198,7 +1205,22 @@ class SessionManager:
                     logger.info(
                         "mcp %s needs re-auth; skipped for this session", server.name
                     )
-                # else: bad command / unreachable url — skip, don't break the session
+                else:
+                    # Bad command / crashed child / unreachable url — the session
+                    # still runs without the tools, but the failure must not be
+                    # silent (three-for-three silent failures in the 2026-08-20
+                    # drill): record it for the MCP page and the session notice.
+                    msg = str(exc) or exc.__class__.__name__
+                    tail = self.mcp.last_stderr(server.name)
+                    if tail:
+                        msg = f"{msg} — {tail}"
+                    self._mcp_errors[server.name] = msg[:500]
+                    logger.warning(
+                        "mcp %s failed to connect: %s", server.name, msg[:500]
+                    )
+                self._mcp_session_failures.setdefault(session_id, []).append(
+                    server.name
+                )
                 continue
             callables = build_callables(
                 server,
@@ -1216,6 +1238,12 @@ class SessionManager:
                     )
             out.extend(callables)
         return out
+
+    def pop_mcp_failures(self, session_id: str) -> list[tuple[str, Optional[str]]]:
+        """Drain (name, error) for servers that failed while preparing this session's
+        tools — consumed once by the WS handler to append a transcript notice."""
+        names = self._mcp_session_failures.pop(session_id, [])
+        return [(n, self._mcp_errors.get(n)) for n in names]
 
     def list_mcp(self) -> list[dict[str, Any]]:
         """Servers from the global config + connection status (does not connect)."""
@@ -1240,6 +1268,12 @@ class SessionManager:
                 status = "authorizing"
             elif is_oauth and not mcp_oauth.has_tokens(name, self.secrets):
                 status = "needs_auth"
+            elif name in self._mcp_errors and not is_oauth:
+                # Startup/connection failure (stdio crash, unreachable url) — the
+                # drill class. OAuth servers keep their softer statuses: acquiring
+                # tokens supersedes a stale sign-in error (the GUI still prints
+                # last_error under the row either way).
+                status = "error"
             else:
                 status = "configured"
             out.append(
@@ -1258,6 +1292,8 @@ class SessionManager:
                     "requires_approval": bool(raw.get("requires_approval", True)),
                     "auth": "oauth" if is_oauth else None,
                     "status": status,
+                    "auth_hint": name in self._mcp_auth_hints,
+                    "last_test_at": self._prefs.get("mcp_last_test", {}).get(name),
                     "last_error": self._mcp_errors.get(name),
                     "tool_count": (
                         len(self.mcp._conns[name].tools) if connected else None
@@ -1271,6 +1307,8 @@ class SessionManager:
         """Connect one server NOW — for OAuth servers this may open the browser and wait
         for the loopback callback, so callers run it as a background task and watch
         list_mcp for the status flip."""
+        from ..mcp import oauth as mcp_oauth
+
         for server in load_mcp_servers(
             self.default_workspace,
             secrets=self.secrets,
@@ -1280,12 +1318,31 @@ class SessionManager:
                 continue
             self._mcp_authorizing.add(name)
             self._mcp_errors.pop(name, None)
+            self._mcp_auth_hints.discard(name)
             try:
                 # The ONE place a browser sign-in may start: an explicit connect.
                 conn = await self.mcp.ensure(server, interactive=True)
+                # The Connectors row says "Ready · tested ⟨when⟩" — the claim must
+                # survive an app restart, so it lives in prefs, not memory.
+                self._prefs.setdefault("mcp_last_test", {})[name] = int(time.time())
+                self._save_prefs()
                 return {"ok": True, "tools": len(conn.tools)}
             except Exception as exc:
-                self._mcp_errors[name] = str(exc) or exc.__class__.__name__
+                if (
+                    server.transport == "http"
+                    and server.auth != "oauth"
+                    and mcp_oauth.is_http_auth_error(exc)
+                ):
+                    # Anonymous probe of a guarded server (the add-by-URL flow):
+                    # the answer is sign-in, not a raw 401 dump.
+                    self._mcp_auth_hints.add(name)
+                    msg = "authentication required — sign in to connect"
+                else:
+                    msg = str(exc) or exc.__class__.__name__
+                    tail = self.mcp.last_stderr(name)
+                    if tail:
+                        msg = f"{msg} — {tail}"
+                self._mcp_errors[name] = msg[:500]
                 return {"ok": False, "error": self._mcp_errors[name]}
             finally:
                 self._mcp_authorizing.discard(name)
@@ -1349,6 +1406,13 @@ class SessionManager:
 
     def delete_mcp(self, name: str) -> dict[str, Any]:
         ok = delete_global_server(name)
+        if ok:
+            # A later re-add under the same name starts clean, not pre-failed —
+            # and not pre-trusted (the old entry's test says nothing about the new).
+            self._mcp_errors.pop(name, None)
+            self._mcp_auth_hints.discard(name)
+            if self._prefs.get("mcp_last_test", {}).pop(name, None) is not None:
+                self._save_prefs()
         return {"ok": ok, "name": name}
 
     async def mcp_tools(self, name: str) -> dict[str, Any]:

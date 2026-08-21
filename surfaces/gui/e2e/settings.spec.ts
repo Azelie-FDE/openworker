@@ -79,6 +79,44 @@ test("Models: provider gallery states; vendor form previews models", async ({ pa
   await expect(page.getByTestId("set-provider-openai")).toBeVisible();
 });
 
+test("Models: BytePlus and Volcengine Ark stay visually and operationally separate", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTestId("account-row").click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Models", exact: true }).click();
+
+  const byteplusCard = page.getByTestId("set-provider-ark");
+  const volcengineCard = page.getByTestId("set-provider-ark-agent-plan-cn");
+  await expect(byteplusCard).toContainText("BytePlus Ark");
+  await expect(volcengineCard).toContainText("Volcengine Ark Agent Plan");
+  const byteplusLogo = await byteplusCard.locator("img").getAttribute("src");
+  const volcengineLogo = await volcengineCard.locator("img").getAttribute("src");
+  expect(byteplusLogo).toBeTruthy();
+  expect(volcengineLogo).toBeTruthy();
+  expect(byteplusLogo).not.toBe(volcengineLogo);
+
+  await byteplusCard.click();
+  await page.getByTestId("set-endpoint-link").click();
+  await expect(page.getByTestId("set-field-base_url")).toHaveValue(
+    "https://ark.ap-southeast.bytepluses.com/api/v3",
+  );
+  let preview = page.getByTestId("model-preview");
+  await expect(preview).toContainText("Dola Seed Evolving · BytePlus Ark");
+  await expect(preview).toContainText("Dola Seed 2.1 Turbo · BytePlus Ark");
+  await expect(preview).not.toContainText("Doubao Seed");
+
+  await page.getByTestId("set-back").click();
+  await volcengineCard.click();
+  await page.getByTestId("set-endpoint-link").click();
+  await expect(page.getByTestId("set-field-base_url")).toHaveValue(
+    "https://ark.cn-beijing.volces.com/api/plan/v3",
+  );
+  preview = page.getByTestId("model-preview");
+  await expect(preview).toContainText("Doubao Seed Evolving · Volcengine Agent Plan");
+  await expect(preview).toContainText("Doubao Seed 2.1 Turbo · Volcengine Agent Plan");
+  await expect(preview).not.toContainText("Dola Seed");
+});
+
 // UX-021: a configured provider's form shows the in-field saved state and the Remove key…
 // affordance; removing reverts the card to "Not set up".
 test("Models: Remove key reverts a configured provider", async ({ page }) => {

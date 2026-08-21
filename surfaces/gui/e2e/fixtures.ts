@@ -45,6 +45,10 @@ const SETTINGS = {
   model_labels: {
     "anthropic:claude-opus-4-8": "Claude Opus 4.8 · Anthropic",
     "zai:glm-5.2": "GLM-5.2 · Z AI",
+    "ark:dola-seed-evolving-latest-version": "Dola Seed Evolving · BytePlus Ark",
+    "ark:dola-seed-2-1-turbo-260628": "Dola Seed 2.1 Turbo · BytePlus Ark",
+    "ark-agent-plan-cn:doubao-seed-evolving": "Doubao Seed Evolving · Volcengine Agent Plan",
+    "ark-agent-plan-cn:doubao-seed-2.1-turbo": "Doubao Seed 2.1 Turbo · Volcengine Agent Plan",
   },
   // Context windows (subset — mirrors /v1/settings.model_context_windows); drives the
   // composer usage chip's context-fill meter.
@@ -339,6 +343,10 @@ const PROVIDERS = [
   { name: "anthropic", title: "Claude (Anthropic)", needs_key: true, fields: [{ key: "api_key", label: "API key", secret: true, required: true, help: "", placeholder: "sk-…" }], configured: true, values: {}, suggested_models: ["claude-opus-4-8"], key_set_at: null, last_used_at: null },
   // zai: an OpenAI-compatible vendor — unconfigured, with a prefilled editable endpoint + blurb.
   { name: "zai", title: "Z AI (GLM)", needs_key: true, blurb: "Uses Z AI's OpenAI-compatible API — the endpoint is prefilled, just add your key.", fields: [{ key: "api_key", label: "Z AI API key", secret: true, required: true, help: "", placeholder: "" }, { key: "base_url", label: "Endpoint", secret: false, required: false, help: "Prefilled with Z AI's international endpoint.", placeholder: "https://api.z.ai/api/paas/v4", default: "https://api.z.ai/api/paas/v4" }], configured: false, values: {}, suggested_models: ["glm-5.2"], key_set_at: null, last_used_at: null },
+  // Ark uses two provider identities: BytePlus pay-as-you-go and Volcengine Agent Plan CN
+  // have independent credentials, endpoints, and strict curated model lists.
+  { name: "ark", title: "BytePlus Ark", needs_key: true, blurb: "Uses BytePlus Ark's OpenAI-compatible Responses API — the endpoint is prefilled, just add your key.", fields: [{ key: "api_key", label: "BytePlus Ark API key", secret: true, required: true, help: "", placeholder: "" }, { key: "base_url", label: "Endpoint", secret: false, required: false, help: "BytePlus Ark's Asia Pacific endpoint.", placeholder: "https://ark.ap-southeast.bytepluses.com/api/v3", default: "https://ark.ap-southeast.bytepluses.com/api/v3" }], configured: false, values: {}, suggested_models: ["dola-seed-evolving-latest-version", "dola-seed-2-1-turbo-260628"], key_set_at: null, last_used_at: null },
+  { name: "ark-agent-plan-cn", title: "Volcengine Ark Agent Plan", needs_key: true, blurb: "Uses Volcengine Ark Agent Plan's OpenAI-compatible Responses API — the endpoint is prefilled, just add your key.", fields: [{ key: "api_key", label: "Volcengine Ark Agent Plan API key", secret: true, required: true, help: "", placeholder: "" }, { key: "base_url", label: "Endpoint", secret: false, required: false, help: "Volcengine Ark Agent Plan's China (Beijing) endpoint.", placeholder: "https://ark.cn-beijing.volces.com/api/plan/v3", default: "https://ark.cn-beijing.volces.com/api/plan/v3" }], configured: false, values: {}, suggested_models: ["doubao-seed-evolving", "doubao-seed-2.1-turbo"], key_set_at: null, last_used_at: null },
   // ollama: keyless local provider — "configured" without proving anything runs; the
   // onboarding gallery shows "No key needed" and its form is endpoint + Detect (§39).
   { name: "ollama", title: "Ollama (local models)", needs_key: false, fields: [{ key: "base_url", label: "Endpoint", secret: false, required: false, help: "", placeholder: "http://127.0.0.1:11434", default: "http://127.0.0.1:11434" }], configured: true, values: {}, suggested_models: ["qwen3-coder:30b"], key_set_at: null, last_used_at: null },
@@ -1970,8 +1978,17 @@ export async function mockApi(page: import("@playwright/test").Page) {
     if (p.endsWith("/v1/mcp") && m === "GET") {
       for (const s2 of mcpServers) {
         if (s2.status === "authorizing" && s2._flip) {
-          s2.status = "connected";
-          s2.tool_count = 6;
+          // Servers named locked-* simulate a guarded remote: the anonymous
+          // probe 401s (→ needs sign-in) until the entry is switched to oauth.
+          if (s2.name.startsWith("locked") && s2.auth !== "oauth") {
+            s2.status = "error";
+            s2.auth_hint = true;
+            s2.last_error = "authentication required — sign in to connect";
+          } else {
+            s2.status = "connected";
+            s2.tool_count = 6;
+            s2.last_test_at = 1700000000; // the successful probe stamps the row
+          }
         }
         if (s2.status === "authorizing") s2._flip = true;
       }
@@ -1986,6 +2003,8 @@ export async function mockApi(page: import("@playwright/test").Page) {
         requires_approval: true,
         auth: b.config?.auth === "oauth" ? "oauth" : null,
         status: b.config?.auth === "oauth" ? "needs_auth" : "configured",
+        auth_hint: false,
+        last_test_at: null,
         last_error: null,
         tool_count: null,
         config: b.config || {},
@@ -1996,7 +2015,12 @@ export async function mockApi(page: import("@playwright/test").Page) {
       const mc = p.match(/\/v1\/mcp\/([^/]+)\/connect$/);
       if (mc && m === "POST") {
         const s2 = mcpServers.find((x) => x.name === decodeURIComponent(mc[1]));
-        if (s2) s2.status = "authorizing";
+        if (s2) {
+          s2.status = "authorizing";
+          s2.auth_hint = false;
+          s2.last_error = null;
+          s2._flip = false;
+        }
         return json({ ok: true, started: true });
       }
       const ms = p.match(/\/v1\/mcp\/([^/]+)\/signout$/);
@@ -2008,6 +2032,29 @@ export async function mockApi(page: import("@playwright/test").Page) {
           s2._flip = false;
         }
         return json({ ok: true });
+      }
+      const mp = p.match(/\/v1\/mcp\/([^/]+)$/);
+      if (mp && m === "PATCH") {
+        const s2 = mcpServers.find((x) => x.name === decodeURIComponent(mp[1]));
+        const b = req.postDataJSON() || {};
+        if (s2) {
+          if (b.enabled !== undefined) s2.enabled = b.enabled;
+          if (b.auth === "oauth") {
+            // The needs-sign-in fix: entry switches to oauth; the follow-up
+            // connect runs the browser flow.
+            s2.auth = "oauth";
+            s2.auth_hint = false;
+            s2.status = "needs_auth";
+          }
+          s2.config = { ...s2.config, ...b };
+        }
+        return json({ ok: !!s2, name: mp[1] });
+      }
+      const md = p.match(/\/v1\/mcp\/([^/]+)$/);
+      if (md && m === "DELETE") {
+        const i = mcpServers.findIndex((x) => x.name === decodeURIComponent(md[1]));
+        if (i >= 0) mcpServers.splice(i, 1);
+        return json({ ok: i >= 0 });
       }
     }
     if (p.endsWith("/v1/unrouted")) return json([]);
