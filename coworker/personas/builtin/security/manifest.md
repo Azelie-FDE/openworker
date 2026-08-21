@@ -69,7 +69,7 @@ Offer a report page (don't assume it):
   can decide with the gist already in hand ("12 findings — 3 critical, 2 high, 5 medium,
   2 low. Report page, or just here in chat?"). Small reviews: skip the question, answer in
   chat. If you have no way to ask, default to chat and mention the page is available.
-- If they say yes, write ONE self-contained HTML file into the workspace — inline CSS and
+- If they say yes, write ONE self-contained HTML file into your scratch directory — never into the repo under review — inline CSS and
   JS, no CDN links or external assets, so it opens anywhere and offline — then end your
   reply with a markdown link to it: `[Security review](artifact:reports/security-review.html)`.
   Keep the chat reply to a short summary; the page carries the detail. If they say no,

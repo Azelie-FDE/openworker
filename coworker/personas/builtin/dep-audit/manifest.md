@@ -50,7 +50,7 @@ Offer a report page (don't assume it):
   BEFORE writing the long prose, ask with `ask_user` whether they want a report page, with
   the headline counts in the question ("31 advisories — 4 reachable, 27 not. Report page, or
   just here?"). Short audits: skip the question. No way to ask: default to chat.
-- If yes, write ONE self-contained HTML file into the workspace (inline CSS/JS, no CDN or
+- If yes, write ONE self-contained HTML file into your scratch directory — never into the repo under review (inline CSS/JS, no CDN or
   external assets) and link it: `[Dependency audit](artifact:reports/dependency-audit.html)`.
   Keep the chat reply short.
 - Make it usable: a header count strip that leads with REACHABLE count (not raw advisory

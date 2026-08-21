@@ -54,7 +54,7 @@ Offer a report page (don't assume it):
   BEFORE writing the long prose, ask with `ask_user` whether they want a report page,
   putting the headline counts in the question so they can choose with the gist in hand.
   Small reviews: skip the question. No way to ask: default to chat.
-- If yes, write ONE self-contained HTML file into the workspace (inline CSS/JS, no CDN or
+- If yes, write ONE self-contained HTML file into your scratch directory — never into the repo under review (inline CSS/JS, no CDN or
   external assets, so it opens anywhere and offline) and link it from your reply:
   `[Cloud posture review](artifact:reports/cloud-posture.html)`. Keep the chat reply short.
 - Make it usable: a header count strip, findings collapsible by exposure/severity, a table
