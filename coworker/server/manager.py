@@ -1425,6 +1425,19 @@ class SessionManager:
             self._mcp_auth_hints.discard(name)
             if self._prefs.get("mcp_last_test", {}).pop(name, None) is not None:
                 self._save_prefs()
+            # Removing a server must not leave its connection running until the next
+            # restart, nor its OAuth tokens + DCR registration in the secret store —
+            # "Remove" is the user saying this server is GONE (owner review 2026-08-21).
+            # The route runs in a threadpool; the shutdown event belongs to the loop.
+            conn = self.mcp._conns.get(name)
+            if conn is not None:
+                if self._loop is not None:
+                    self._loop.call_soon_threadsafe(conn.shutdown.set)
+                else:
+                    conn.shutdown.set()
+            from ..mcp import oauth as mcp_oauth
+
+            mcp_oauth.sign_out(name, self.secrets)
         return {"ok": ok, "name": name}
 
     async def mcp_tools(self, name: str) -> dict[str, Any]:

@@ -472,3 +472,27 @@ async def test_verify_tears_down_a_dead_connection_and_reconnects():
     assert out is fresh
     assert dead.shutdown.is_set()
     assert "srv" not in mgr._conns
+
+
+def test_delete_mcp_shuts_down_connection_and_forgets_tokens(tmp_path):
+    """Remove server = the server is GONE: live connection told to shut down and
+    the OAuth token/DCR profile purged, not just the config entry deleted."""
+    from types import SimpleNamespace
+
+    from coworker.mcp import oauth as mcp_oauth
+    from coworker.mcp.client import _Conn
+    from coworker.mcp.config import put_global_server
+    from coworker.server import SessionManager
+
+    mgr = SessionManager(data_dir=tmp_path / "data")
+    put_global_server("gone-srv", {"url": "https://x.example/mcp", "auth": "oauth"})
+    mgr.secrets.put(
+        mcp_oauth.PROFILE_PREFIX + "gone-srv", {"tokens": {"access_token": "A"}}
+    )
+    conn = _Conn(SimpleNamespace(), tools=[])
+    mgr.mcp._conns["gone-srv"] = conn
+
+    res = mgr.delete_mcp("gone-srv")
+    assert res["ok"]
+    assert conn.shutdown.is_set()
+    assert mgr.secrets.get(mcp_oauth.PROFILE_PREFIX + "gone-srv") is None
