@@ -2099,6 +2099,27 @@ export async function mockApi(page: import("@playwright/test").Page) {
   });
 }
 
+/** Seed a replayed transcript for one session. The shared mock answers every
+ * GET /v1/sessions/{id}/messages with `[]`, so reopening a session always starts blank;
+ * this registers a LATER route (later routes win) that stages rich history for that one
+ * session — replayed tool calls with results, connector-sourced messages, notices,
+ * reasoning — so specs can assert the reopen path (itemsFromMessages) directly instead
+ * of driving every turn live through the fake agent. Call after the page has the mock
+ * (any time before the session is opened). */
+export async function seedSessionMessages(
+  page: Page,
+  sessionId: string,
+  messages: Record<string, unknown>[],
+): Promise<void> {
+  await page.route(new RegExp(`/v1/sessions/${sessionId}/messages$`), (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ messages }),
+    }),
+  );
+}
+
 // A `test` whose page has the API mocked before navigation.
 export const test = base.extend({
   page: async ({ page }, use) => {
