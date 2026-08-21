@@ -320,3 +320,90 @@ def test_request_directory_without_requester_is_safe_noop():
         next(e for e in events if e.type == EventType.TOOL_FINISHED).data["status"]
         == "denied"
     )
+
+
+# -- Universal scratch (workspace-scratch-design.md §4) -------------------------
+
+
+def _repo(tmp_path, name="repo"):
+    d = tmp_path / name
+    d.mkdir()
+    (d / "README.md").write_text("hello", encoding="utf-8")
+    return d
+
+
+def test_gated_session_gets_workspace_plus_scratch_roots(tmp_path):
+    mgr = _cowork_manager(tmp_path)
+    repo = _repo(tmp_path)
+    sid = "sessGated1"
+    engine = mgr.get_engine(sid, agent="code", workspace=str(repo))
+    assert engine is not None
+
+    roots = mgr.get_roots(sid)
+    assert len(roots) == 2
+    assert roots[0]["primary"] and Path(roots[0]["path"]) == repo.resolve()
+    scratch = mgr.scratch_base() / sid
+    assert Path(roots[1]["path"]) == scratch.resolve()
+    assert roots[1]["writable"] is True
+    assert scratch.is_dir()  # provisioned at engine build
+
+    # Both roots are writable to the permission engine; elsewhere is not.
+    perms = engine.permissions
+    assert perms._under_writable_root(str(repo / "x.txt"))
+    assert perms._under_writable_root(str(scratch / "x.txt"))
+    assert not perms._under_writable_root(str(tmp_path / "elsewhere.txt"))
+
+
+def test_orphan_session_keeps_scratch_primary_single_scratch_root(tmp_path):
+    mgr = _cowork_manager(tmp_path)
+    sid = "sessOrphan1"
+    engine = mgr.get_engine(sid, agent="cowork")
+    assert engine is not None
+    roots = mgr.get_roots(sid)
+    # ws == scratch: exactly one scratch root, never doubled.
+    assert len(roots) == 1 and roots[0]["primary"] and roots[0]["writable"]
+    assert Path(roots[0]["path"]) == (mgr.scratch_base() / sid).resolve()
+
+
+def test_gated_session_artifacts_list_scratch_not_repo(tmp_path):
+    mgr = _cowork_manager(tmp_path)
+    repo = _repo(tmp_path)
+    sid = "sessGated2"
+    assert mgr.get_engine(sid, agent="code", workspace=str(repo)) is not None
+    scratch = mgr.scratch_base() / sid
+    (scratch / "report.html").write_text("<h1>posture</h1>", encoding="utf-8")
+
+    arts = mgr.list_artifacts(sid)
+    names = {a["name"] for a in arts}
+    # The repo's files are NOT artifacts; the scratch report is.
+    assert "report.html" in names and "README.md" not in names
+
+
+def test_artifact_chips_resolve_in_workspace_and_scratch(tmp_path):
+    mgr = _cowork_manager(tmp_path)
+    repo = _repo(tmp_path)
+    sid = "sessGated3"
+    engine = mgr.get_engine(sid, agent="code", workspace=str(repo))
+    assert engine is not None
+    mgr.save(sid, engine)  # chips resolve against the persisted record, as after a turn
+    scratch = mgr.scratch_base() / sid
+    (scratch / "report.html").write_text("<h1>ok</h1>", encoding="utf-8")
+
+    # Relative chip → workspace file (as before).
+    assert mgr.read_artifact(sid, "README.md")["ok"] is True
+    # Relative chip that only exists in scratch → resolves there.
+    assert mgr.read_artifact(sid, "report.html")["ok"] is True
+    # Absolute scratch path (what the roots context advertises) → resolves.
+    assert mgr.read_artifact(sid, str(scratch / "report.html"))["ok"] is True
+    # Escapes every root → refused.
+    outside = tmp_path / "outside.txt"
+    outside.write_text("x", encoding="utf-8")
+    assert mgr.read_artifact(sid, str(outside))["ok"] is False
+
+
+def test_gated_session_registers_request_directory(tmp_path):
+    mgr = _cowork_manager(tmp_path)
+    repo = _repo(tmp_path)
+    engine = mgr.get_engine("sessGated4", agent="code", workspace=str(repo))
+    assert engine is not None
+    assert "request_directory" in engine.registry.names()

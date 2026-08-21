@@ -386,8 +386,14 @@ class SessionManager:
     DEFAULT_SCRATCH_BASE = "~/OpenWorker"
 
     def scratch_base(self) -> Path:
-        """Common area for per-conversation scratch directories. Configurable via prefs."""
-        base = self._prefs.get("scratch_base") or self.DEFAULT_SCRATCH_BASE
+        """Common area for per-conversation scratch directories. Configurable via prefs;
+        the env override keeps tests (and any sandboxed run) out of the real home dir —
+        universal scratch means every session provisions here, not just orphan ones."""
+        base = (
+            self._prefs.get("scratch_base")
+            or os.environ.get("COWORKER_SCRATCH_BASE")
+            or self.DEFAULT_SCRATCH_BASE
+        )
         return Path(base).expanduser()
 
     def _provision_scratch(self, session_id: str) -> str:
@@ -539,17 +545,35 @@ class SessionManager:
 
         if ws:
             self.session_store.touch_workspace(ws)
-        # Orphan surfaces are multi-root: the scratch (ws) is the primary writable root, plus any
-        # folders the user added (persisted per session). Folder-gated personas stay single-root
-        # (roots=None) until universal scratch lands (workspace-scratch-design.md phase B).
+        # Universal scratch (workspace-scratch-design.md §4): EVERY session is multi-root
+        # with a per-conversation scratch dir. Orphan sessions run ON their scratch
+        # (ws == scratch, primary). Sessions on a real folder — gated personas, or a
+        # temp-workspace pick that later became a project — keep that folder primary and
+        # gain scratch as a second writable root, so deliverables/temp files have a home
+        # that never dirties the user's repo. request_directory rides on roots, so it now
+        # registers everywhere.
         roots = None
-        if not ag.requires_folder and ws:
+        if ws:
             extra = [
                 r
                 for r in ((record.extra_roots if record else []) or [])
                 if Path(str(r.get("path", ""))).is_dir()
             ]
-            roots = [{"path": ws, "writable": True, "label": "scratch"}, *extra]
+            if self.is_temp_workspace(ws):
+                roots = [{"path": ws, "writable": True, "label": "scratch"}, *extra]
+            elif self._SESSION_ID_RE.match(session_id or "") and session_id not in {".", ".."}:
+                roots = [
+                    {"path": ws, "writable": True, "label": "workspace"},
+                    {
+                        "path": self._provision_scratch(session_id),
+                        "writable": True,
+                        "label": "scratch",
+                    },
+                    *extra,
+                ]
+            else:
+                # A session id we won't put in a filesystem path: primary root only.
+                roots = [{"path": ws, "writable": True, "label": "workspace"}, *extra]
         engine = build_engine(
             agent=ag,
             workspace=ws,
@@ -2305,13 +2329,28 @@ class SessionManager:
             )
         return "\n".join(lines)
 
-    def list_artifacts(self, session_id: str) -> list[dict[str, Any]]:
+    def _artifact_scan_root(self, session_id: str) -> Optional[Path]:
+        """The dir the Artifacts panel lists: the session's SCRATCH surface only
+        (workspace-scratch-design.md §2.5). For orphan sessions that's the workspace
+        itself; for folder-gated sessions it's the side scratch root — never the user's
+        repo, which would list the whole codebase as 'artifacts'."""
         record = self.session_store.load(session_id)
         workspace = record.workspace if record else self.default_workspace
-        if not workspace:
-            return []
-        root = Path(workspace).expanduser().resolve()
-        if not root.is_dir():
+        if workspace and self.is_temp_workspace(workspace):
+            return Path(workspace).expanduser().resolve()
+        if self._SESSION_ID_RE.match(session_id or "") and session_id not in {".", ".."}:
+            d = (self.scratch_base() / session_id).resolve()
+            if d.is_dir():
+                return d
+        # Legacy fallback (pre-universal-scratch sessions on a custom scratch base):
+        # a workspace that is itself disposable still scans.
+        if workspace and not record:
+            return Path(workspace).expanduser().resolve()
+        return None
+
+    def list_artifacts(self, session_id: str) -> list[dict[str, Any]]:
+        root = self._artifact_scan_root(session_id)
+        if root is None or not root.is_dir():
             return []
         out: list[dict[str, Any]] = []
         suffixes = {
@@ -2385,25 +2424,45 @@ class SessionManager:
     def _artifact_target(
         self, session_id: str, path: str, *, allow_dir: bool = False
     ) -> tuple[Optional[Path], Optional[str]]:
-        """Resolve an artifact path under the session's workspace, or (None, error)."""
+        """Resolve an artifact path under one of the session's roots — workspace first,
+        then the scratch dir, then user-granted extra roots. Universal scratch means a
+        gated session's artifacts live BESIDE its workspace, so single-root resolution
+        would orphan every transcript chip pointing at scratch."""
         record = self.session_store.load(session_id)
         workspace = record.workspace if record else self.default_workspace
-        if not workspace:
+        candidates: list[Path] = []
+        if workspace:
+            candidates.append(Path(workspace).expanduser().resolve())
+        if self._SESSION_ID_RE.match(session_id or "") and session_id not in {".", ".."}:
+            scratch = (self.scratch_base() / session_id).resolve()
+            if scratch.is_dir() and scratch not in candidates:
+                candidates.append(scratch)
+        for r in (record.extra_roots if record else []) or []:
+            p = Path(str(r.get("path", ""))).expanduser()
+            if p.is_dir():
+                rp = p.resolve()
+                if rp not in candidates:
+                    candidates.append(rp)
+        if not candidates:
             return None, "no workspace"
-        root = Path(workspace).expanduser().resolve()
-        target = (root / path).expanduser().resolve()
-        try:
-            target.relative_to(root)
-        except ValueError:
-            return None, "path escapes workspace"
-        if allow_dir and target.is_dir():
-            return target, None
-        if not target.is_file():
+        found_missing = False
+        for root in candidates:
+            target = (root / path).expanduser().resolve()
+            try:
+                target.relative_to(root)
+            except ValueError:
+                continue
+            if allow_dir and target.is_dir():
+                return target, None
+            if target.is_file():
+                return target, None
+            found_missing = True
+        if found_missing:
             return None, (
                 "This isn't in the conversation's folder anymore — it may have been "
                 "moved or deleted."
             )
-        return target, None
+        return None, "path escapes workspace"
 
     def read_artifact(self, session_id: str, path: str) -> dict[str, Any]:
         # Folders are readable too (a model sometimes links a whole package, e.g. a skill

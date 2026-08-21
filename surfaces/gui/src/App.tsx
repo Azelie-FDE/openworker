@@ -2065,12 +2065,14 @@ export function App() {
             todo={todo}
             running={running}
             onPreviewChange={onArtifactPreview}
-            showArtifacts={agent === "cowork"}
+            // Universal scratch (UX-036): every session has a scratch surface, so the
+            // Artifacts section always shows — the server lists the scratch root only.
+            showArtifacts
             personaId={agent}
             projectScoped={isProjectScoped(personaOf(agent))}
             workspace={workspace || undefined}
             branch={branch}
-            scratchPrimary={agent === "cowork" || tempWorkspace}
+            scratchPrimary={tempWorkspace || !isProjectScoped(personaOf(agent))}
             openAccessKey={accessKey}
             onOpenIntegrations={() => setSurface("integrations")}
             board={board}

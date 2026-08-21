@@ -53,17 +53,22 @@ class Capability:
 
 
 def _code_files(context: AgentContext) -> list:
-    """Repo-oriented files: single-root, line-numbered/windowed `read_file`. Our `grep` and
-    windowed `read_file` replace aisuite's slower `search_files` / `read_file`/`read_file_lines`.
+    """Repo-oriented files: line-numbered/windowed `read_file`. Our `grep` and windowed
+    `read_file` replace aisuite's slower `search_files` / `read_file`/`read_file_lines`.
+    Multi-root aware (universal scratch): with session roots, writes/reads reach the
+    scratch and granted dirs too; the workspace stays the relative-path anchor.
     """
     ws = str(context.workspace)
     replaced = {"search_files", "read_file", "read_file_lines"}
+    file_kwargs = (
+        {"roots": context.roots} if context.roots else {"root": ws, "allow_write": True}
+    )
     files = [
         t
-        for t in ai.toolkits.files(root=ws, allow_write=True)
+        for t in ai.toolkits.files(**file_kwargs)
         if getattr(t, "__name__", "") not in replaced
     ]
-    return [*files, *file_tools(ws)]
+    return [*files, *file_tools(ws, roots=context.roots)]
 
 
 def _files(context: AgentContext) -> list:

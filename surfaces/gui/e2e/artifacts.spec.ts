@@ -53,3 +53,21 @@ test("a transcript chip opens the viewer on the FIRST click even with the rail h
   await page.getByTestId("artifact-chip").click();
   await expect(page.getByTestId("artifact-frame")).toBeVisible();
 });
+
+test("Artifacts section renders for a folder-gated coworker too (universal scratch)", async ({
+  page,
+}) => {
+  // UX-036: every session has a scratch surface, so the drawer's Artifacts section is no
+  // longer cowork-only — a security session lists its scratch-side reports the same way.
+  await page.goto("/");
+  await page.getByTestId("coworker-chip").click();
+  await page.locator(".setup-menu").getByRole("button", { name: /Security Coworker/ }).click();
+  await page.getByPlaceholder(/Ask the coworker/).fill("audit this repo");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByTestId("send-folder-dialog").getByRole("button", { name: "Choose a folder…" }).click();
+  await expect(page.getByText(/Echo: audit this repo/)).toBeVisible();
+
+  await expect(page.getByTestId("rail-toggle-artifacts")).toBeVisible();
+  await page.getByTestId("rail-toggle-artifacts").click();
+  await expect(page.locator(".artifact-row", { hasText: "security-review.html" })).toBeVisible();
+});
