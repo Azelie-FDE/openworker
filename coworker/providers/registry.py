@@ -86,6 +86,10 @@ class ProviderDescriptor:
     )
     # One-line note under the provider title (e.g. "Connects through X's OpenAI-compatible API").
     blurb: str = ""
+    # "oauth" → no key form at all: the provider is configured by a browser sign-in
+    # (tokens in its `provider:<name>` profile) and the GUI renders connect/sign-out
+    # instead of fields. None → the usual key/field form.
+    auth: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +99,7 @@ class ProviderDescriptor:
             "fields": [f.to_dict() for f in self.fields],
             "recommended_model": self.recommended_model,
             "blurb": self.blurb,
+            "auth": self.auth,
         }
 
 
@@ -122,6 +127,14 @@ def _build_openai(profile: dict[str, Any], secrets: Any) -> ProviderClient:
     if base_url:
         return OpenAIProvider(secrets=secrets, base_url=base_url)
     return OpenAIResponsesProvider(secrets=secrets)
+
+
+def _build_codex(profile: dict[str, Any], secrets: Any) -> ProviderClient:
+    # Credentials come from the OAuth token set in the provider's own profile,
+    # resolved (and refreshed) at call time by the token store — never a key.
+    from .codex_provider import CodexProvider
+
+    return CodexProvider(secrets=secrets)
 
 
 def _build_anthropic(profile: dict[str, Any], secrets: Any) -> ProviderClient:
@@ -346,6 +359,17 @@ DESCRIPTORS: list[ProviderDescriptor] = [
         build=_build_openai,
         recommended_model="gpt-5.6-sol",
         env_key="OPENAI_API_KEY",
+    ),
+    ProviderDescriptor(
+        name="openai-codex",
+        title="ChatGPT (OpenAI subscription)",
+        needs_key=False,
+        fields=[],
+        build=_build_codex,
+        recommended_model="gpt-5.2-codex",
+        blurb="Sign in with your ChatGPT plan and run OpenAI models through your "
+        "subscription — no API key. Tokens stay on this machine.",
+        auth="oauth",
     ),
     ProviderDescriptor(
         name="anthropic",
@@ -693,6 +717,9 @@ def descriptor_configured(d: ProviderDescriptor, profile: dict[str, Any]) -> boo
     a stored or env key. Multi-field cloud providers (no `api_key` field, e.g. Bedrock):
     every required field present — their actual credentials may be ambient (~/.aws, ADC).
     """
+    if d.auth == "oauth":
+        # A stored token set = signed in (the tokens live in the same profile).
+        return bool((profile or {}).get("tokens"))
     if not d.needs_key:
         return True  # keyless (Ollama) — usable out of the box
     profile = profile or {}
@@ -908,6 +935,10 @@ def verify_provider_key(
 
     d = _BY_NAME.get(name) or _BY_NAME["openai"]
     key = (api_key or "").strip()
+    if d.auth == "oauth":
+        # OAuth providers verify from their stored tokens (needs the SecretStore),
+        # which only the manager holds — see SessionManager.verify_provider.
+        return {"ok": False, "error": f"{d.title} verifies via its sign-in, not a key."}
     if name == "bedrock":
         return _verify_bedrock(fields or {}, timeout)
     if name == "vertex":
