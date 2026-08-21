@@ -2121,6 +2121,7 @@ def create_app(manager: SessionManager) -> FastAPI:
                 data={
                     "path": str(args.get("path", "")),
                     "writable": bool(args.get("writable", False)),
+                    "primary": bool(args.get("primary", False)),
                 },
                 tool_call_id=tool_call_id,
             )
@@ -2137,6 +2138,39 @@ def create_app(manager: SessionManager) -> FastAPI:
             if not path:
                 return {"granted": False, "error": "no directory was provided"}
             writable = bool(resp.get("writable", args.get("writable", False)))
+            if bool(args.get("primary", False)):
+                # Root promotion (workspace-scratch-design.md §5) — the shell cd inside
+                # is blocking, keep it off the event loop.
+                promo = await asyncio.to_thread(
+                    manager.promote_workspace, session_id, path
+                )
+                if promo.get("ok"):
+                    return {
+                        "granted": True,
+                        "path": promo["path"],
+                        "writable": True,
+                        "primary": True,
+                        "note": (
+                            "This folder is now the session's workspace. For the rest "
+                            "of this turn, address it by absolute path."
+                        ),
+                    }
+                # Promotion refused (e.g. the session already has a workspace): still
+                # honor the grant as a plain additional folder.
+                res = manager.add_root(session_id, path, writable)
+                if not res.get("ok"):
+                    return {
+                        "granted": False,
+                        "error": promo.get("error", "could not promote"),
+                    }
+                return {
+                    "granted": True,
+                    "path": path,
+                    "writable": writable,
+                    "primary": False,
+                    "note": promo.get("error", "")
+                    + " — granted as an additional folder instead",
+                }
             res = manager.add_root(session_id, path, writable)
             if not res.get("ok"):
                 return {

@@ -751,7 +751,7 @@ export function App() {
           if (unattendedRef.current) break;
           setItems((p) => [
             ...p,
-            { kind: "dirreq", reason: d.reason || "", path: d.path || "", writable: !!d.writable },
+            { kind: "dirreq", reason: d.reason || "", path: d.path || "", writable: !!d.writable, primary: !!d.primary },
           ]);
           break;
         case "tool_requested":

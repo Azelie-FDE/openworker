@@ -407,3 +407,73 @@ def test_gated_session_registers_request_directory(tmp_path):
     engine = mgr.get_engine("sessGated4", agent="code", workspace=str(repo))
     assert engine is not None
     assert "request_directory" in engine.registry.names()
+
+
+def test_gated_session_save_and_rebuild_keeps_roots_stable(tmp_path):
+    """The scratch root must never persist as an 'extra' — a save/rebuild cycle used to
+    re-add it as a plain folder each time (dup roots forever)."""
+    mgr = _cowork_manager(tmp_path)
+    repo = _repo(tmp_path)
+    sid = "sessGated5"
+    engine = mgr.get_engine(sid, agent="code", workspace=str(repo))
+    mgr.save(sid, engine)
+
+    mgr2 = _cowork_manager(tmp_path)
+    engine2 = mgr2.get_engine(sid)
+    assert engine2 is not None
+    mgr2.save(sid, engine2)
+    mgr3 = _cowork_manager(tmp_path)
+    roots = mgr3.get_roots(sid)
+    assert [Path(r["path"]) for r in roots] == [
+        repo.resolve(),
+        (mgr3.scratch_base() / sid).resolve(),
+    ]
+
+
+# -- Root promotion (workspace-scratch-design.md §5) ----------------------------
+
+
+def test_promote_workspace_repoints_orphan_session(tmp_path):
+    mgr = _cowork_manager(tmp_path)
+    repo = _repo(tmp_path, "project")
+    sid = "sessPromo1"
+    engine = mgr.get_engine(sid, agent="cowork")
+    scratch = (mgr.scratch_base() / sid).resolve()
+
+    res = mgr.promote_workspace(sid, str(repo))
+    assert res["ok"], res
+    # Live roots re-anchored: workspace first, scratch kept.
+    assert [r.path for r in engine.roots][:2] == [repo.resolve(), scratch]
+    assert engine.roots[0].writable and engine.roots[0].label == "workspace"
+    # Persisted: the record's workspace is the promoted folder.
+    rec = mgr.session_store.load(sid)
+    assert Path(rec.workspace).resolve() == repo.resolve()
+
+    # Post-turn rebuild (mark_idle evicts) → fully anchored dual-root session.
+    mgr.mark_idle(sid)
+    engine2 = mgr.get_engine(sid)
+    assert engine2 is not engine
+    roots = mgr.get_roots(sid)
+    assert [Path(r["path"]) for r in roots] == [repo.resolve(), scratch]
+    assert roots[0]["primary"] and roots[0]["label"] == "workspace"
+
+
+def test_promote_workspace_refused_when_session_has_one(tmp_path):
+    mgr = _cowork_manager(tmp_path)
+    repo = _repo(tmp_path, "projectA")
+    other = _repo(tmp_path, "projectB")
+    sid = "sessPromo2"
+    assert mgr.get_engine(sid, agent="code", workspace=str(repo)) is not None
+    res = mgr.promote_workspace(sid, str(other))
+    assert not res["ok"] and "already has a workspace" in res["error"]
+
+
+def test_promote_workspace_is_one_way_once(tmp_path):
+    mgr = _cowork_manager(tmp_path)
+    a = _repo(tmp_path, "first")
+    b = _repo(tmp_path, "second")
+    sid = "sessPromo3"
+    assert mgr.get_engine(sid, agent="cowork") is not None
+    assert mgr.promote_workspace(sid, str(a))["ok"]
+    res = mgr.promote_workspace(sid, str(b))
+    assert not res["ok"] and "already has a workspace" in res["error"]

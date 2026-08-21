@@ -144,6 +144,7 @@ export type Item =
       reason: string;
       path?: string;
       writable?: boolean;
+      primary?: boolean; // root promotion: the folder becomes the session's workspace
       resolved?: "granted" | "denied";
     }
   | {

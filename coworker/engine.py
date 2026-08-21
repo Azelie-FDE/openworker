@@ -1210,6 +1210,10 @@ class TurnEngine:
                     "reason": str(args.get("reason", "")),
                     "path": str(args.get("path", "")),
                     "writable": bool(args.get("writable", False)),
+                    # Root promotion (workspace-scratch-design.md §5): the agent asks for
+                    # the folder to become the session's primary workspace — the consent
+                    # card must say so, it's a different grant than a plain extra root.
+                    "primary": bool(args.get("primary", False)),
                 },
             )
             self._audit(

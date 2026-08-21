@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import time
@@ -160,6 +161,10 @@ class SessionManager:
         if self.default_workspace:
             self.session_store.touch_workspace(self.default_workspace)
         self._engines: dict[str, TurnEngine] = {}
+        # Sessions whose workspace was promoted mid-turn (workspace-scratch-design.md §5):
+        # evicted from the engine cache at the next mark_idle so the following turn
+        # rebuilds fully anchored on the new workspace.
+        self._promotion_rebuild: set[str] = set()
         self._running_sessions: set[str] = (
             set()
         )  # sessions with an in-flight turn (busy)
@@ -1006,6 +1011,7 @@ class SessionManager:
                 data={
                     "path": str(args.get("path", "")),
                     "writable": bool(args.get("writable", False)),
+                    "primary": bool(args.get("primary", False)),
                 },
                 tool_call_id=tool_call_id,
             )
@@ -1019,6 +1025,33 @@ class SessionManager:
             if not path:
                 return {"granted": False, "error": "no directory was provided"}
             writable = bool(resp.get("writable", args.get("writable", False)))
+            if bool(args.get("primary", False)):
+                promo = await asyncio.to_thread(self.promote_workspace, session_id, path)
+                if promo.get("ok"):
+                    return {
+                        "granted": True,
+                        "path": promo["path"],
+                        "writable": True,
+                        "primary": True,
+                        "note": (
+                            "This folder is now the session's workspace. For the rest "
+                            "of this turn, address it by absolute path."
+                        ),
+                    }
+                res = self.add_root(session_id, path, writable)
+                if not res.get("ok"):
+                    return {
+                        "granted": False,
+                        "error": promo.get("error", "could not promote"),
+                    }
+                return {
+                    "granted": True,
+                    "path": path,
+                    "writable": writable,
+                    "primary": False,
+                    "note": promo.get("error", "")
+                    + " — granted as an additional folder instead",
+                }
             res = self.add_root(session_id, path, writable)
             if not res.get("ok"):
                 return {
@@ -4054,6 +4087,11 @@ class SessionManager:
             or self.teams.for_worker_session(session_id)
         ):
             asyncio.run_coroutine_threadsafe(self.team_tick(), self._loop)
+        if session_id in self._promotion_rebuild:
+            # Promotion happened this turn: drop the cached engine so the next turn
+            # rebuilds with the new primary (relative anchoring, env snapshot, git).
+            self._promotion_rebuild.discard(session_id)
+            self._engines.pop(session_id, None)
 
     def is_running(self, session_id: str) -> bool:
         return session_id in self._running_sessions
@@ -4569,7 +4607,7 @@ class SessionManager:
                 messages=engine.messages,
                 title=title_from(engine.messages),
                 agent=getattr(engine, "agent_name", "code"),
-                extra_roots=self._extra_roots_of(engine),
+                extra_roots=self._extra_roots_of(engine, session_id),
                 grants=_grants_of(engine),
                 compaction=(
                     engine.compaction_state.as_dict()
@@ -4590,13 +4628,23 @@ class SessionManager:
         if grants.get("readonly"):
             engine.permissions.allow_readonly_for_session()
 
-    @staticmethod
-    def _extra_roots_of(engine: TurnEngine) -> list[dict[str, Any]]:
-        """Added folders = the engine's roots minus the primary scratch (index 0)."""
+    def _extra_roots_of(
+        self, engine: TurnEngine, session_id: str
+    ) -> list[dict[str, Any]]:
+        """User/agent-added folders = the engine's roots minus the primary (index 0) AND
+        the session's provisioned scratch root. Persisting the scratch as an "extra"
+        would re-add it as a plain folder on every rebuild (universal scratch made
+        index-0-only slicing wrong for dual-root sessions)."""
         roots = getattr(engine, "roots", None) or []
+        scratch = (self.scratch_base() / session_id).expanduser()
+        try:
+            scratch = scratch.resolve()
+        except OSError:
+            pass
         return [
             {"path": str(r.path), "writable": bool(r.writable), "label": r.label}
             for r in roots[1:]
+            if r.path != scratch
         ]
 
     # -- LLM auto-titles (FB-010) -------------------------------------------------
@@ -4730,15 +4778,29 @@ class SessionManager:
             else self._provision_scratch(session_id)
         )
         extra = (record.extra_roots if record else []) or []
+        primary_is_scratch = self.is_temp_workspace(primary)
         out = [
             {
                 "path": primary,
                 "writable": True,
-                "label": "scratch",
+                "label": "scratch" if primary_is_scratch else "workspace",
                 "primary": True,
                 "exists": Path(primary).is_dir(),
             }
         ]
+        # Universal scratch: a real-folder session also carries its provisioned scratch
+        # root (mirrors the engine-side shape so a cold read matches a live one).
+        if not primary_is_scratch and self._SESSION_ID_RE.match(session_id or ""):
+            scratch = self.scratch_base() / session_id
+            out.append(
+                {
+                    "path": str(scratch.expanduser().resolve()),
+                    "writable": True,
+                    "label": "scratch",
+                    "primary": False,
+                    "exists": scratch.is_dir(),
+                }
+            )
         for r in extra:
             p = str(r.get("path", ""))
             out.append(
@@ -4751,6 +4813,45 @@ class SessionManager:
                 }
             )
         return out
+
+    def promote_workspace(self, session_id: str, path: str) -> dict[str, Any]:
+        """Root promotion (workspace-scratch-design.md §5): adopt `path` as the session's
+        primary workspace. One-way and once — only while the primary is still the
+        provisioned scratch; a session that already has a real workspace is never
+        re-pointed. Mutates the live session (roots + shell cwd), persists, and marks
+        the engine for a post-turn rebuild."""
+        p = Path(path).expanduser()
+        if not p.is_dir():
+            return {"ok": False, "error": f"not a directory: {path}"}
+        resolved = p.resolve()
+        engine = self._engines.get(session_id)
+        if engine is None:
+            return {"ok": False, "error": "no live session to promote"}
+        executor = getattr(engine, "executor", None)
+        current = str(executor.cwd) if executor is not None else None
+        if not current or not self.is_temp_workspace(current):
+            return {"ok": False, "error": "this session already has a workspace"}
+        roots = getattr(engine, "roots", None)
+        if roots is None:
+            return {"ok": False, "error": "this session has no directory list"}
+        # Shared list: permissions, file tools, and the context injector see the new
+        # primary immediately. The old scratch primary stays as the scratch root.
+        roots[:] = [
+            RootDir(path=resolved, writable=True, label="workspace"),
+            *[r for r in roots if r.path != resolved],
+        ]
+        try:
+            # Move the live shell too — save() derives the persisted workspace from the
+            # executor's cwd, so this is also what makes the promotion durable.
+            res = executor.run(f"cd {shlex.quote(str(resolved))}", timeout=15)
+            if res.get("exit_code") != 0:
+                executor.cwd = str(resolved)
+        except Exception:
+            executor.cwd = str(resolved)  # a respawned shell starts there
+        self.save(session_id, engine)
+        self.session_store.touch_workspace(str(resolved))
+        self._promotion_rebuild.add(session_id)
+        return {"ok": True, "path": str(resolved), "roots": self.get_roots(session_id)}
 
     def add_root(
         self, session_id: str, path: str, writable: bool = False
@@ -4771,7 +4872,9 @@ class SessionManager:
                         r.writable = bool(writable)
             else:
                 engine.roots.append(RootDir(path=resolved, writable=bool(writable)))
-            self.session_store.set_extra_roots(session_id, self._extra_roots_of(engine))
+            self.session_store.set_extra_roots(
+                session_id, self._extra_roots_of(engine, session_id)
+            )
         else:
             # A brand-new conversation has no record yet (it's only saved after the first turn) —
             # create one now so set_extra_roots has a row to update and the folder survives.
@@ -4786,7 +4889,12 @@ class SessionManager:
                         agent="cowork",  # folder access is a Cowork affordance
                     )
                 )
-            extra = [r for r in self.get_roots(session_id) if not r["primary"]]
+            session_scratch = str((self.scratch_base() / session_id).expanduser().resolve())
+            extra = [
+                r
+                for r in self.get_roots(session_id)
+                if not r["primary"] and r["path"] != session_scratch
+            ]
             extra = [r for r in extra if Path(r["path"]).resolve() != resolved]
             extra.append(
                 {
@@ -4820,7 +4928,9 @@ class SessionManager:
                     "error": "cannot remove the primary scratch directory",
                 }
             engine.roots[:] = [r for r in engine.roots if r.path != resolved]
-            self.session_store.set_extra_roots(session_id, self._extra_roots_of(engine))
+            self.session_store.set_extra_roots(
+                session_id, self._extra_roots_of(engine, session_id)
+            )
         else:
             current = self.get_roots(session_id)
             if (
@@ -4832,10 +4942,12 @@ class SessionManager:
                     "ok": False,
                     "error": "cannot remove the primary scratch directory",
                 }
+            session_scratch = (self.scratch_base() / session_id).expanduser().resolve()
             extra = [
                 r
                 for r in current
-                if not r["primary"] and Path(r["path"]).resolve() != resolved
+                if not r["primary"]
+                and Path(r["path"]).resolve() not in (resolved, session_scratch)
             ]
             self.session_store.set_extra_roots(
                 session_id,
