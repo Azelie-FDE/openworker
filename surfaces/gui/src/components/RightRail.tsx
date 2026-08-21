@@ -4,12 +4,14 @@ import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
   getArtifacts,
   getJournalCases,
+  getRoots,
   readArtifact,
   revealArtifact,
   type ArtifactContent,
   type ArtifactInfo,
   type Board,
   type JournalCase,
+  type RootInfo,
 } from "../api";
 import type { SessionInfo, TodoItem } from "../types";
 import { AccessSection } from "./AccessSection";
@@ -17,7 +19,7 @@ import { BoardSection } from "./BoardPanel";
 import { Icon } from "./Icon";
 import { Markdown, OPEN_ARTIFACT_EVENT } from "./Markdown";
 
-type Panel = "progress" | "artifacts" | "board" | "journal" | "team";
+type Panel = "progress" | "artifacts" | "board" | "journal" | "team" | "files";
 
 // Quiet file-type icons for the artifact list (the colored kind pills read as noisy).
 function kindIcon(kind: string): "file" | "fileCode" | "image" | "table" {
@@ -115,6 +117,7 @@ export function RightRail({
     board: false,
     journal: false,
     team: false,
+    files: false,
   });
   // Journal + Access sit behind a quiet "More" row (three primary sections max).
   const [moreOpen, setMoreOpen] = useState(false);
@@ -140,6 +143,9 @@ export function RightRail({
     setMoreOpen(true);
   }, [openAccessKey]);
   const [artifacts, setArtifacts] = useState<ArtifactInfo[]>([]);
+  // UX-037 Files: the session's roots (workspace/scratch/grants) — the entry points of
+  // the file explorer. Fetched lazily when the More fold opens.
+  const [rootDirs, setRootDirs] = useState<RootInfo[]>([]);
   const [journal, setJournal] = useState<JournalCase[]>([]);
   const [selected, setSelected] = useState<ArtifactInfo | null>(null);
   const [content, setContent] = useState<ArtifactContent | null>(null);
@@ -150,6 +156,11 @@ export function RightRail({
     if (!active) return;
     if (showArtifacts) refreshArtifacts();
   }, [active, sessionId, refreshKey, showArtifacts]);
+
+  useEffect(() => {
+    if (!active || !moreOpen) return;
+    getRoots(sessionId).then(setRootDirs).catch(() => setRootDirs([]));
+  }, [active, moreOpen, sessionId, refreshKey]);
 
   // Journal cases surface only when a board exists — same visibility rule as the
   // Board section, so plain sessions carry zero team chrome.
@@ -239,6 +250,7 @@ export function RightRail({
               kind: kindFromPath(path),
               size: 0,
               modified_at: 0,
+              origin: selected?.origin,
             })
           }
         />
@@ -388,6 +400,52 @@ export function RightRail({
               </div>
             </RailSection>
           )}
+          {/* UX-037: Files — an explorer over the session's roots. Each root opens in
+              the artifact viewer, whose folder listings already click through; the
+              Artifacts section stays the curated scratch-only surface. */}
+          {moreOpen && rootDirs.length > 0 && (
+            <RailSection
+              title="Files"
+              count={String(rootDirs.length)}
+              open={open.files}
+              onToggle={() => setOpen({ ...open, files: !open.files })}
+            >
+              <div className="artifact-list" data-testid="files-roots">
+                {rootDirs.map((r) => (
+                  <button
+                    className="artifact-row"
+                    key={r.path}
+                    data-testid="files-root-row"
+                    onClick={() =>
+                      setSelected({
+                        path: r.path,
+                        abs_path: r.path,
+                        name: r.label || r.path.split("/").pop() || r.path,
+                        kind: "folder",
+                        size: 0,
+                        modified_at: 0,
+                        origin: "files",
+                      })
+                    }
+                    title={r.path}
+                  >
+                    <span className="artifact-ico">
+                      <Icon name="folder" size={17} />
+                    </span>
+                    <span className="artifact-name">
+                      {r.label || r.path.split("/").pop() || r.path}
+                      <span className="artifact-row-meta">
+                        {r.writable ? "read-write" : "read-only"}
+                        {!r.exists ? " · missing" : ""}
+                      </span>
+                    </span>
+                    <span className="artifact-open">Browse</span>
+                  </button>
+                ))}
+              </div>
+            </RailSection>
+          )}
+
           {/* §32: Access — the former Session-settings drawer, one section among peers.
               key: its data ownership resets with the conversation, like the old row did.
               Stays MOUNTED behind the More fold (hidden, not unmounted) so its openKey
@@ -540,7 +598,7 @@ function ArtifactViewer({
           <Icon name="arrowLeft" size={16} />
         </button>
         <div className="artifact-heading">
-          <div className="artifact-title"><span>Artifacts</span><span className="artifact-sep">/</span><span>{artifact.name}</span></div>
+          <div className="artifact-title"><span>{artifact.origin === "files" ? "Files" : "Artifacts"}</span><span className="artifact-sep">/</span><span>{artifact.name}</span></div>
           <div className="artifact-path">{artifact.path}</div>
         </div>
         <div className="rail-actions">

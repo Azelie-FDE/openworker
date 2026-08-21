@@ -1054,6 +1054,31 @@ export async function mockApi(page: import("@playwright/test").Page) {
     // an inline script that renders proof-of-execution, a parent-window escape attempt,
     // and an external subresource that must be CSP-blocked.
     if (/\/v1\/sessions\/[^/]+\/artifacts\/read$/.test(p)) {
+      const reqPath = new URL(req.url()).searchParams.get("path") || "";
+      // UX-037 Files: a session root (or subfolder) reads as a folder listing.
+      const rootHit = roots.find((r) => reqPath === r.path);
+      if (rootHit) {
+        return json({
+          ok: true,
+          path: reqPath,
+          kind: "folder",
+          entries: [
+            { name: "reports", dir: true, size: 0 },
+            { name: "notes.md", dir: false, size: 128 },
+          ],
+        });
+      }
+      if (reqPath.endsWith("/reports")) {
+        return json({
+          ok: true,
+          path: reqPath,
+          kind: "folder",
+          entries: [{ name: "security-review.html", dir: false, size: 2048 }],
+        });
+      }
+      if (reqPath.endsWith("notes.md")) {
+        return json({ ok: true, path: reqPath, kind: "markdown", content: "# Notes\n\nhello from the explorer" });
+      }
       return json({
         ok: true,
         path: "reports/security-review.html",

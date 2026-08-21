@@ -366,6 +366,9 @@ export interface ArtifactInfo {
   kind: "markdown" | "html" | "image" | "code" | "text" | string;
   size: number;
   modified_at: number;
+  // Which rail surface opened it — drives the viewer's breadcrumb ("Artifacts" vs
+  // "Files"). Absent = artifacts (UX-037).
+  origin?: "artifacts" | "files";
 }
 
 export interface ArtifactContent {
