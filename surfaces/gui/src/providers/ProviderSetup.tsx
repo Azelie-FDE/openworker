@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  codexAuthStatus,
+  codexSignin,
+  codexSignout,
   getProviders,
   removeProvider,
   setProvider,
@@ -217,6 +220,15 @@ export function useProviderSetup(opts?: { onSaved?: () => void }): ProviderSetup
   };
 
   const statusFor = (p: ProviderInfo, o?: { lastUsed?: boolean }) => {
+    if (p.auth === "oauth") {
+      if (p.signed_in)
+        return (
+          <span className="block text-[12px] text-ok font-medium truncate">
+            ✓ Signed in{p.account ? <span className="text-muted font-normal"> · {p.account}</span> : ""}
+          </span>
+        );
+      return <span className="block text-[12px] text-faint truncate">Sign in with your plan</span>;
+    }
     if (p.configured && p.needs_key) {
       const used = o?.lastUsed ? relTime(p.last_used_at) : null;
       return (
@@ -274,6 +286,101 @@ export function useProviderSetup(opts?: { onSaved?: () => void }): ProviderSetup
 }
 
 /** The gallery: one card per provider, each wearing its own state. */
+/** OAuth provider pane (auth === "oauth"): browser sign-in instead of a key form.
+ * Signin runs server-side in the background; this polls the status route until the
+ * flow flips to signed-in or reports an error. Tokens never reach the GUI. */
+function OAuthSignIn({ info, tp, onChanged }: { info: ProviderInfo; tp: string; onChanged: () => Promise<void> }) {
+  const [busy, setBusy] = useState(!!info.authorizing);
+  const [error, setError] = useState<string | null>(info.last_error || null);
+  const [reopenUrl, setReopenUrl] = useState<string | null>(null);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true; // StrictMode double-mount: the cleanup below must not stick
+    return () => { alive.current = false; };
+  }, []);
+
+  const poll = async () => {
+    for (let i = 0; i < 150 && alive.current; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const s = await codexAuthStatus().catch(() => null);
+      if (!s) continue;
+      if (s.authorize_url) setReopenUrl(s.authorize_url);
+      if (s.signed_in || (!s.authorizing && s.last_error)) {
+        if (alive.current) {
+          setBusy(false);
+          setError(s.last_error || null);
+        }
+        await onChanged();
+        return;
+      }
+    }
+    if (alive.current) setBusy(false);
+  };
+
+  const start = async () => {
+    setBusy(true);
+    setError(null);
+    await codexSignin().catch(() => setError("Couldn't start the sign-in."));
+    void poll();
+  };
+
+  if (info.signed_in)
+    return (
+      <div className="mt-4">
+        <div className="flex items-center gap-2.5 rounded-xl border border-okLine bg-okSoft px-3 py-2.5">
+          <span className="text-[13px] text-ink min-w-0 flex-1 truncate" data-testid={`${tp}-oauth-account`}>
+            ✓ Signed in{info.account ? ` as ${info.account}` : ""}
+          </span>
+          <button
+            className="shrink-0 rounded-lg border border-line bg-panel px-3 py-1.5 text-[13px] text-ink hover:border-lineStrong"
+            data-testid={`${tp}-oauth-signout`}
+            onClick={async () => {
+              await codexSignout().catch(() => {});
+              await onChanged();
+            }}
+          >
+            Sign out
+          </button>
+        </div>
+        <p className="text-[12px] text-faint mt-2">
+          Usage draws on the plan's rolling window, not per-token billing. Sign-in stays on this computer.
+        </p>
+      </div>
+    );
+
+  return (
+    <div className="mt-4">
+      <button
+        className="rounded-lg border border-accent bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-105 disabled:opacity-40"
+        onClick={() => void start()}
+        disabled={busy}
+        data-testid={`${tp}-oauth-signin`}
+      >
+        {busy ? "Waiting for the browser…" : "Sign in with ChatGPT"}
+      </button>
+      {busy && (
+        <p className="text-[12px] text-faint mt-2">
+          Finish signing in in the browser window.
+          {reopenUrl && (
+            <>
+              {" "}
+              <button
+                className="text-muted underline decoration-line underline-offset-2 hover:text-ink"
+                onClick={() => openExternal(reopenUrl)}
+              >
+                Reopen the sign-in page
+              </button>
+            </>
+          )}
+        </p>
+      )}
+      <div className="mt-2 min-h-[19px] text-[13px]">
+        {error && <span className="text-warnInk">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
 export function ProviderCards({
   ps,
   tp,
@@ -405,6 +512,8 @@ export function ProviderForm({
       </div>
       {info?.blurb && <p className="text-[12px] text-faint mt-1">{info.blurb}</p>}
 
+      {info?.auth === "oauth" && <OAuthSignIn info={info} tp={tp} onChanged={ps.refreshProviders} />}
+
       {fieldsAll
         .filter(
           (f) =>
@@ -499,7 +608,7 @@ export function ProviderForm({
           — takes about a minute.
         </p>
       )}
-      {info && !info.needs_key && (
+      {info && !info.needs_key && info.auth !== "oauth" && (
         <p className="text-[12px] text-faint mt-2">
           No API key needed — Ollama runs models on this computer.{" "}
           <button
@@ -559,7 +668,7 @@ export function ProviderForm({
       <div className="mt-3 min-h-[19px] text-[13px]">
         {ps.verify.state === "error" && <span className="text-warnInk">{ps.verify.msg}</span>}
       </div>
-      {footer}
+      {info?.auth === "oauth" ? null : footer}
     </div>
   );
 }
