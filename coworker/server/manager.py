@@ -1303,6 +1303,15 @@ class SessionManager:
             )
         return out
 
+    def begin_mcp_connect(self, name: str) -> None:
+        """Flag `authorizing` BEFORE the background connect task starts. The GUI's
+        fast poll keys off this status; the first refresh used to outpace the task,
+        so a failing Test showed nothing until the lazy 5s tick (owner-hit
+        2026-08-21 — the button looked dead). Known names only, so an unknown
+        server can't wedge the flag (connect_mcp only clears it on a match)."""
+        if name in read_global():
+            self._mcp_authorizing.add(name)
+
     async def connect_mcp(self, name: str) -> dict[str, Any]:
         """Connect one server NOW — for OAuth servers this may open the browser and wait
         for the loopback callback, so callers run it as a background task and watch
@@ -1346,6 +1355,7 @@ class SessionManager:
                 return {"ok": False, "error": self._mcp_errors[name]}
             finally:
                 self._mcp_authorizing.discard(name)
+        self._mcp_authorizing.discard(name)  # begin_mcp_connect flagged a name we never matched
         return {"ok": False, "error": f"unknown MCP server: {name}"}
 
     async def mcp_connect_connector(self, name: str) -> dict[str, Any]:

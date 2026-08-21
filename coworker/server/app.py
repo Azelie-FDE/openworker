@@ -1177,6 +1177,7 @@ def create_app(manager: SessionManager) -> FastAPI:
         # browser and waits on the loopback callback — that can take minutes, so it
         # runs as a background task; the GUI polls /v1/mcp for the status flip
         # (authorizing → connected | needs_auth + last_error).
+        manager.begin_mcp_connect(name)  # authorizing shows on the very next poll
         asyncio.create_task(manager.connect_mcp(name))
         return {"ok": True, "started": True}
 
@@ -2367,7 +2368,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             engine._append_notice(
                 "mcp_error",
                 f"MCP server “{name}” failed to start{detail}"[:300]
-                + " — see Settings ▸ MCP",
+                + " — see Settings ▸ Connectors",
             )
         # Auto-compaction failure prompt (OPE-27): only an ATTENDED session may be asked
         # Retry/Trim — unattended runs auto-trim (the policy in engine._compact_now).

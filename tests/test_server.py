@@ -1080,3 +1080,26 @@ def test_set_provider_persists_extra_fields(tmp_path):
     manager.set_provider("ollama", {"base_url": ""})
     providers = {p["name"]: p for p in manager.get_providers()}
     assert "base_url" not in providers["ollama"]["values"]
+
+
+def test_mcp_connect_route_flags_authorizing_immediately(tmp_path, monkeypatch):
+    """Owner-hit 2026-08-21: the Test button looked dead — the connect ran as a
+    background task, and the GUI's first refresh landed before the task set
+    `authorizing`, so the fast poll never armed. The route must flag it
+    synchronously (and only for known servers, so nothing wedges)."""
+    import asyncio
+
+    from coworker.server import SessionManager
+
+    mgr = SessionManager(data_dir=tmp_path / "data")
+    monkeypatch.setattr(
+        "coworker.server.manager.read_global", lambda: {"sales-db": {"command": "x"}}
+    )
+    mgr.begin_mcp_connect("sales-db")
+    assert "sales-db" in mgr._mcp_authorizing
+    mgr.begin_mcp_connect("nope")
+    assert "nope" not in mgr._mcp_authorizing
+    # An unmatched name clears the flag instead of wedging "Testing…" forever.
+    monkeypatch.setattr("coworker.server.manager.load_mcp_servers", lambda *a, **k: [])
+    res = asyncio.run(mgr.connect_mcp("sales-db"))
+    assert not res["ok"] and "sales-db" not in mgr._mcp_authorizing
