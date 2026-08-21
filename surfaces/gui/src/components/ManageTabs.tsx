@@ -39,8 +39,8 @@ const relTime = (epoch?: number | null): string | null => {
 // Integrations ▸ Connectors (the MCP tab retired into the Connectors page, UX-034).
 const SEC_H = "text-[11px] uppercase tracking-[0.05em] text-faint font-semibold";
 const BTN_BORDERED =
-  "text-[12.5px] px-3 py-1.5 rounded-lg border border-line bg-paper hover:border-lineStrong shrink-0";
-const BTN_ACCENT = "text-[12.5px] px-3 py-1.5 rounded-lg bg-accent text-white shrink-0 disabled:opacity-50";
+  "text-[13px] px-3 py-1.5 rounded-lg border border-line bg-paper hover:border-lineStrong shrink-0";
+const BTN_ACCENT = "text-[13px] px-3 py-1.5 rounded-lg bg-accent text-white shrink-0 disabled:opacity-50";
 
 /** Two-letter initials for a chip/avatar (first+last word, else first two chars). */
 function initials(name: string): string {
@@ -85,7 +85,7 @@ export function ModelsTab() {
         footer={
           ps.credentialed ? (
             <button
-              className="text-[12.5px] text-danger/80 hover:text-danger hover:underline underline-offset-2"
+              className="text-[13px] text-danger/80 hover:text-danger hover:underline underline-offset-2"
               data-testid="set-remove-key"
               onClick={() => {
                 if (window.confirm(`Remove the ${info?.title} key from this computer?`)) ps.removeKey();
@@ -256,10 +256,10 @@ export function UnauthorizedBlock({
               <span>in {m.chat_name || m.chat_id}</span>
               <span className="ml-auto shrink-0">{relTime(m.ts) || ""}</span>
             </div>
-            <div className="text-[12.5px] mt-1 break-words">{m.text}</div>
+            <div className="text-[13px] mt-1 break-words">{m.text}</div>
             <div className="flex items-center gap-1.5 mt-2">
               <button
-                className="text-[11.5px] px-2 py-1 rounded-md bg-accent text-white"
+                className="text-[12px] px-2 py-1 rounded-md bg-accent text-white"
                 data-testid={`parked-allow-deliver-${m.id}`}
                 title="Add the sender to the allow-list and deliver this message now"
                 onClick={() => act(m.id, "allow_deliver")}
@@ -275,7 +275,7 @@ export function UnauthorizedBlock({
                 Allow only
               </button>
               <button
-                className="text-[11.5px] px-2 py-1 rounded-md text-faint hover:text-danger"
+                className="text-[12px] px-2 py-1 rounded-md text-faint hover:text-danger"
                 data-testid={`parked-dismiss-${m.id}`}
                 title="Throw this message away"
                 onClick={() => act(m.id, "dismiss")}
@@ -312,7 +312,7 @@ export function ListeningSessionsBlock({ c }: { c: Connector }) {
       ) : (
         <div className="space-y-1.5">
           {mine.map((s) => (
-            <div className="flex items-center gap-2 text-[12.5px]" key={s.session_id + s.channel}>
+            <div className="flex items-center gap-2 text-[13px]" key={s.session_id + s.channel}>
               <span className="min-w-0 truncate" title={s.session_id}>
                 {s.session_title || s.session_id}
                 {s.agent ? <span className="text-faint"> · {s.agent}</span> : null}
@@ -401,7 +401,7 @@ export function AllowlistBlock({
         ) : (
           <div className="space-y-1.5">
             {unknownRecent.map((r) => (
-              <div className="flex items-center gap-2 text-[12.5px]" key={r.user_id}>
+              <div className="flex items-center gap-2 text-[13px]" key={r.user_id}>
                 <span className="w-5 h-5 rounded-full bg-paper border border-line grid place-items-center text-[9px] font-bold text-muted shrink-0">
                   {initials(r.user_name || "?")}
                 </span>
@@ -409,7 +409,7 @@ export function AllowlistBlock({
                   {r.user_name || "unknown"} <span className="text-faint">· {r.chat_type}</span>
                 </span>
                 <button
-                  className="ml-auto text-[11.5px] px-2 py-0.5 rounded-md bg-accent text-white shrink-0"
+                  className="ml-auto text-[12px] px-2 py-0.5 rounded-md bg-accent text-white shrink-0"
                   onClick={async () => {
                     await allowUser(c.name, r.user_id, teamId);
                     onChanged();
@@ -433,7 +433,7 @@ export function ConnectorTools({ c, onChanged }: { c: Connector; onChanged: () =
   };
   if (!c.tools?.length)
     return (
-      <div className="border-t border-line px-3.5 py-3 text-[12.5px] text-muted">
+      <div className="border-t border-line px-3.5 py-3 text-[13px] text-muted">
         No tools for this connector yet.
       </div>
     );
@@ -454,10 +454,10 @@ export function ConnectorTools({ c, onChanged }: { c: Connector; onChanged: () =
             />
             <span className="min-w-0">
               <span className="block text-[13px]">{tool.label}</span>
-              <span className="block text-[11.5px] text-faint">
+              <span className="block text-[12px] text-faint">
                 {tool.name} · {tool.kind} · asks approval
               </span>
-              <span className="block text-[11.5px] text-faint">{tool.description}</span>
+              <span className="block text-[12px] text-faint">{tool.description}</span>
             </span>
           </label>
         ))}
@@ -522,7 +522,7 @@ export function ConnectSetup({
             {waiting ? "Check your browser…" : `Connect ${c.title} with one click`}
           </button>
           {c.fields.length > 0 && (
-            <div className="text-[11.5px] text-faint">or connect manually:</div>
+            <div className="text-[12px] text-faint">or connect manually:</div>
           )}
         </div>
       )}
@@ -538,7 +538,7 @@ export function ConnectSetup({
                   Coming soon
                 </span>
               </button>
-              <div className="text-[11.5px] text-faint">
+              <div className="text-[12px] text-faint">
                 One-click sign-in is coming soon — connect manually below for now:
               </div>
             </>
@@ -556,12 +556,12 @@ export function ConnectSetup({
             <CloudStatusPending />
           )}
           {!c.managed_paused && cloud?.signed_in && (
-            <div className="text-[11.5px] text-faint">or connect manually:</div>
+            <div className="text-[12px] text-faint">or connect manually:</div>
           )}
         </div>
       )}
       {c.instructions.length > 0 && (
-        <ol className="list-decimal pl-4 text-[12.5px] text-muted leading-relaxed space-y-1">
+        <ol className="list-decimal pl-4 text-[13px] text-muted leading-relaxed space-y-1">
           {c.instructions.map((step, i) => (
             <li key={i}>{step}</li>
           ))}
@@ -588,7 +588,7 @@ export function ConnectSetup({
           {busy ? "Validating…" : "Connect"}
         </button>
       </div>
-      {error && <div className="text-[12.5px] text-danger">{error}</div>}
+      {error && <div className="text-[13px] text-danger">{error}</div>}
     </div>
   );
 }

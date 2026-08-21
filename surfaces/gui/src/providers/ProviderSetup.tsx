@@ -220,18 +220,18 @@ export function useProviderSetup(opts?: { onSaved?: () => void }): ProviderSetup
     if (p.configured && p.needs_key) {
       const used = o?.lastUsed ? relTime(p.last_used_at) : null;
       return (
-        <span className="block text-[11.5px] text-ok font-medium truncate">
+        <span className="block text-[12px] text-ok font-medium truncate">
           ✓ Connected{used ? <span className="text-muted font-normal"> · used {used}</span> : ""}
         </span>
       );
     }
     if (!p.needs_key)
       return (
-        <span className="block text-[11.5px] text-faint truncate">
+        <span className="block text-[12px] text-faint truncate">
           {keylessOk.has(p.name) ? <span className="text-ok font-medium">✓ Running</span> : "No key needed"}
         </span>
       );
-    return <span className="block text-[11.5px] text-faint truncate">Not set up</span>;
+    return <span className="block text-[12px] text-faint truncate">Not set up</span>;
   };
 
   return {
@@ -323,7 +323,7 @@ export function ProviderForm({
   const { info, sel } = ps;
   const label = "block text-[12px] text-muted mt-3 mb-1";
   const input =
-    "w-full px-3 py-2 rounded-lg border bg-panel text-[13.5px] outline-none focus:border-accent";
+    "w-full px-3 py-2 rounded-lg border bg-panel text-[13px] outline-none focus:border-accent";
   const fieldsAll = info?.fields || [];
   const keyed = fieldsAll.some((x) => x.secret);
   // Cloud providers declare a segmented auth-method choice; the selected method's
@@ -387,23 +387,23 @@ export function ProviderForm({
           </button>
         )}
       </div>
-      {f.help && <p className="text-[11.5px] text-faint mt-1">{f.help}</p>}
+      {f.help && <p className="text-[12px] text-faint mt-1">{f.help}</p>}
     </div>
   );
 
   return (
     <div>
-      <button className="text-[12.5px] text-muted hover:text-ink" onClick={ps.backToGallery} data-testid={`${tp}-back`}>
+      <button className="text-[13px] text-muted hover:text-ink" onClick={ps.backToGallery} data-testid={`${tp}-back`}>
         ‹ All providers
       </button>
       <div className="flex items-center gap-3 mt-3 mb-1">
         <ProviderMark name={info?.name || ""} title={info?.title || ""} size={36} />
         <span className="min-w-0">
-          <span className="block text-[15px] font-semibold leading-tight">{info?.title}</span>
+          <span className="block text-[14px] font-semibold leading-tight">{info?.title}</span>
           {info ? ps.statusFor(info) : null}
         </span>
       </div>
-      {info?.blurb && <p className="text-[11.5px] text-faint mt-1">{info.blurb}</p>}
+      {info?.blurb && <p className="text-[12px] text-faint mt-1">{info.blurb}</p>}
 
       {fieldsAll
         .filter(
@@ -433,7 +433,7 @@ export function ProviderForm({
                   role="radio"
                   aria-checked={active}
                   className={
-                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12.5px] whitespace-nowrap transition-colors " +
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] whitespace-nowrap transition-colors " +
                     (active
                       ? "bg-panel text-ink font-medium shadow-sm ring-1 ring-line"
                       : "text-muted hover:text-ink")
@@ -468,11 +468,11 @@ export function ProviderForm({
             {methodFields.map((f) => fieldRow(f, false))}
             <div className="mt-3.5 flex items-center justify-between gap-3 border-t border-line pt-3">
               {ps.savedState ? (
-                <span className="text-[11.5px] font-medium text-ok" data-testid={`${tp}-saved-pill`}>
+                <span className="text-[12px] font-medium text-ok" data-testid={`${tp}-saved-pill`}>
                   ✓ Tested &amp; saved
                 </span>
               ) : (
-                <span className="text-[11.5px] text-faint">Runs one read-only check, then saves.</span>
+                <span className="text-[12px] text-faint">Runs one read-only check, then saves.</span>
               )}
               <button
                 className="shrink-0 rounded-lg border border-accent bg-accent px-4 py-1.5 text-[13px] font-medium text-white hover:brightness-105 disabled:opacity-40"
@@ -488,7 +488,7 @@ export function ProviderForm({
       )}
 
       {info?.needs_key && KEY_HELP[sel] && (
-        <p className="text-[11.5px] text-faint mt-2">
+        <p className="text-[12px] text-faint mt-2">
           No key yet?{" "}
           <button
             className="text-muted underline decoration-line underline-offset-2 hover:text-ink"
@@ -500,7 +500,7 @@ export function ProviderForm({
         </p>
       )}
       {info && !info.needs_key && (
-        <p className="text-[11.5px] text-faint mt-2">
+        <p className="text-[12px] text-faint mt-2">
           No API key needed — Ollama runs models on this computer.{" "}
           <button
             className="text-muted underline decoration-line underline-offset-2 hover:text-ink"
@@ -521,7 +521,7 @@ export function ProviderForm({
         if (!ps.showEndpoint)
           return (
             <button
-              className="block self-start text-[12.5px] text-muted hover:text-ink mt-4"
+              className="block self-start text-[13px] text-muted hover:text-ink mt-4"
               onClick={() => ps.setShowEndpoint(true)}
               data-testid={`${tp}-endpoint-link`}
             >
@@ -550,13 +550,13 @@ export function ProviderForm({
                 </span>
               )}
             </div>
-            {ep.help && <p className="text-[11.5px] text-faint mt-1">{ep.help}</p>}
+            {ep.help && <p className="text-[12px] text-faint mt-1">{ep.help}</p>}
           </div>
         );
       })()}
 
       {/* Error line: fixed height so failures never reflow the form. */}
-      <div className="mt-3 min-h-[19px] text-[12.5px]">
+      <div className="mt-3 min-h-[19px] text-[13px]">
         {ps.verify.state === "error" && <span className="text-warnInk">{ps.verify.msg}</span>}
       </div>
       {footer}

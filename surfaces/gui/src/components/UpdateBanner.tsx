@@ -93,13 +93,13 @@ export function UpdateBanner() {
         OpenWorker v{update.version} is ready to install.
       </div>
       {phase === "error" && (
-        <div className="text-[11.5px] text-warnInk mt-1.5">
+        <div className="text-[12px] text-warnInk mt-1.5">
           The update couldn't be installed — it will be offered again next launch.
         </div>
       )}
       <div className="flex items-center gap-2 mt-2.5">
         <button
-          className="px-3 py-1.5 rounded-full bg-accent text-white text-[12.5px] disabled:opacity-50"
+          className="px-3 py-1.5 rounded-full bg-accent text-white text-[13px] disabled:opacity-50"
           onClick={install}
           disabled={busy}
           data-testid="update-install"
@@ -107,7 +107,7 @@ export function UpdateBanner() {
           {busy ? "Downloading…" : "Restart to update"}
         </button>
         <button
-          className="px-2 py-1.5 text-[12.5px] text-faint hover:text-muted"
+          className="px-2 py-1.5 text-[13px] text-faint hover:text-muted"
           onClick={() => {
             dismissed.current = update.version;
             setUpdate(null);
