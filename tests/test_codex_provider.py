@@ -410,12 +410,15 @@ def test_matrix_curates_subscription_models():
     from coworker.providers.matrix import models_for_provider
 
     assert models_for_provider("openai-codex") == [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
         "gpt-5.2-codex",
         "gpt-5.2",
         "gpt-5.1-codex",
         "gpt-5.1-codex-mini",
     ]
-    caps = capabilities_for("openai-codex:gpt-5.2-codex")
+    caps = capabilities_for("openai-codex:gpt-5.6-sol")
     assert caps.tools and caps.vision and caps.streaming
 
 
@@ -470,7 +473,7 @@ def test_providers_list_shows_oauth_state(tmp_path):
     row = rows["openai-codex"]
     assert row["auth"] == "oauth"
     assert row["signed_in"] is False and row["configured"] is False
-    assert "gpt-5.2-codex" in row["suggested_models"]
+    assert "gpt-5.6-sol" in row["suggested_models"]
 
     manager.secrets.put(
         "provider:openai-codex",
@@ -545,7 +548,7 @@ async def test_manager_signin_stores_and_promotes_model(tmp_path, monkeypatch):
     assert result["ok"] is True
     assert manager._codex_authorizing is False
     settings = manager.get_settings()
-    assert "openai-codex:gpt-5.2-codex" in settings["models"]
+    assert "openai-codex:gpt-5.6-sol" in settings["models"]
 
 
 async def test_manager_signin_failure_lands_in_status(tmp_path, monkeypatch):

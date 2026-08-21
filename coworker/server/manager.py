@@ -2958,7 +2958,7 @@ class SessionManager:
         self._refresh_provider("openai-codex")
         # Same convenience as set_provider: surface the recommended model right away,
         # and win the default when the current default's provider isn't usable.
-        added = "openai-codex:gpt-5.2-codex"
+        added = "openai-codex:gpt-5.6-sol"
         self.add_model(added)
         if not self._provider_configured(self._model_provider(self.model)):
             self.set_default_model(added)

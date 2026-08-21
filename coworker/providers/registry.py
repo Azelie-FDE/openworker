@@ -366,7 +366,7 @@ DESCRIPTORS: list[ProviderDescriptor] = [
         needs_key=False,
         fields=[],
         build=_build_codex,
-        recommended_model="gpt-5.2-codex",
+        recommended_model="gpt-5.6-sol",
         blurb="Sign in with your ChatGPT plan and run OpenAI models through your "
         "subscription — no API key. Tokens stay on this machine.",
         auth="oauth",
