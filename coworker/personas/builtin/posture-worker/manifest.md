@@ -4,7 +4,8 @@ id: posture-worker
 name: Posture Worker
 icon: sliders
 tagline: IaC & cloud posture under a team lead — read-only, evidence first
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 team: worker
 tools: [code_files, git, search, shell, todo]

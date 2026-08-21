@@ -481,8 +481,7 @@ class SessionManager:
         record = self.session_store.load(session_id)
         if record:
             return record.workspace or None
-        ag = get_agent(agent or "code")
-        return self.resolve_workspace(workspace) if ag.needs_workspace else None
+        return self.resolve_workspace(workspace)
 
     def get_engine(
         self,
@@ -526,14 +525,14 @@ class SessionManager:
             ws = record.workspace or None
             model, mode, messages = record.model, Mode(record.mode), record.messages
         else:
-            ws = self.resolve_workspace(workspace) if ag.needs_workspace else None
+            ws = self.resolve_workspace(workspace)
             model, mode, messages = self.model, self.mode, None
 
-        if ag.needs_workspace and (not ws or not Path(ws).is_dir()):
-            # Knowledge surfaces (Cowork, Ops, …) start "orphan": no folder picked →
-            # auto-provision a per-conversation scratch directory (generalizes MyHelper's
-            # auto-workspace). Code-family surfaces still require a real repo; Chat needs none.
-            if ag.family == "knowledge":
+        if not ws or not Path(ws).is_dir():
+            # Sessions without a folder start "orphan": auto-provision a per-conversation
+            # scratch directory (generalizes MyHelper's auto-workspace). Folder-gated
+            # personas (requires_folder) still demand a real directory picked by the user.
+            if not ag.requires_folder:
                 ws = self._provision_scratch(session_id)
             else:
                 return None
@@ -541,9 +540,10 @@ class SessionManager:
         if ws:
             self.session_store.touch_workspace(ws)
         # Orphan surfaces are multi-root: the scratch (ws) is the primary writable root, plus any
-        # folders the user added (persisted per session). Code/Chat stay single-root (roots=None).
+        # folders the user added (persisted per session). Folder-gated personas stay single-root
+        # (roots=None) until universal scratch lands (workspace-scratch-design.md phase B).
         roots = None
-        if ag.family == "knowledge" and ws:
+        if not ag.requires_folder and ws:
             extra = [
                 r
                 for r in ((record.extra_roots if record else []) or [])
@@ -644,8 +644,11 @@ class SessionManager:
         from ..config import load_config
 
         entry = self.personas.get(persona_id)
-        family = entry.family if entry else ""
-        workspace_kind = entry.workspace if entry else ""
+        # Wire fields kept stable; both now carry the workspace shape ("folder" = gated
+        # primary folder, "scratch" = starts on the per-session scratch dir).
+        kind = ("folder" if entry.requires_folder else "scratch") if entry else ""
+        family = kind
+        workspace_kind = kind
 
         def _send() -> None:
             try:
@@ -734,19 +737,6 @@ class SessionManager:
         return connector in self.effective_connectors(session_id)
 
     # -- persona + session connection surfaces (UI-REFRESH §5/§6) ----------------
-    @staticmethod
-    def _workspace_kind(entry) -> str:
-        """The persona's workspace requirement as a stable string for the GUI. Manifest-backed
-        personas carry it verbatim (git|deliverable|none); builtins (which have no manifest) map
-        family/needs_workspace into the SAME vocabulary so the frontend reads one enum:
-        code-family → git, knowledge-family with a workspace → deliverable, none → none.
-        """
-        if entry.manifest is not None:
-            return entry.manifest.workspace
-        if not entry.needs_workspace:
-            return "none"
-        return "git" if entry.family == "code" else "deliverable"
-
     def _connected_connectors(self) -> set[str]:
         """The account-connected connector names (the first layer of the §4 hierarchy)."""
         return {c["name"] for c in connector_list(self.secrets) if c["connected"]}
@@ -811,7 +801,7 @@ class SessionManager:
             "default_permission_mode": (
                 manifest.default_permission_mode if manifest else "interactive"
             ),
-            "workspace": self._workspace_kind(entry),
+            "requires_folder": entry.requires_folder,
             "recommends": recommends,
             "default_connections": self._persona_default_connections(
                 persona_id, manifest, connected

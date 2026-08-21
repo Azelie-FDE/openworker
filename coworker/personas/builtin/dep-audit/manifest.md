@@ -4,7 +4,8 @@ id: dep-audit
 name: Dependency Audit Coworker
 icon: audit
 tagline: Vulnerable dependencies — audit, minimal upgrades, PRs
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 tools: [code_files, git, search, shell, todo]
 connectors: [github]

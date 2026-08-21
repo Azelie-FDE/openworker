@@ -38,7 +38,7 @@ const SURFACES: { key: string; label: string; icon: IconName; cls: string }[] = 
 const surfaceFromPersona = (p: Persona) => ({
   key: p.id,
   label: shortPersonaName(p.name, p.id),
-  icon: personaGlyph(p.icon, p.family),
+  icon: personaGlyph(p.icon, p.requires_folder),
   cls: `ico-${p.icon || "cowork"}`,
 });
 

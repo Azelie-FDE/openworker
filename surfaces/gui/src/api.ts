@@ -1030,10 +1030,8 @@ export interface Persona {
   name: string;
   icon: string;
   tagline: string;
-  needs_workspace: boolean;
+  requires_folder: boolean; // folder gate — drives project-scoping
   builtin: boolean;
-  family: string;
-  workspace: string; // "git" | "project" | "deliverable" | "none" — drives project-scoping
   tools: string[];
   enabled: boolean;
   surfaced: boolean;
@@ -1213,7 +1211,7 @@ export interface PersonaDetail {
   tools: string[];
   recommended_models: string[];
   default_permission_mode: string;
-  workspace: string;
+  requires_folder: boolean; // folder gate (workspace-scratch-design.md)
   recommends: PersonaRecommendation[];
   default_connections: PersonaDefaultConnection[];
 }

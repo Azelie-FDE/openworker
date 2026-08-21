@@ -4,7 +4,8 @@ id: devops-lead
 name: DevOps Lead
 icon: audit
 tagline: Stands watch over production — correlates what broke with what shipped, staffs an incident team only when it matters
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 team: lead
 tools: [shell, code_files, search, todo]

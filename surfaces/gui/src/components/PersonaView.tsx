@@ -357,11 +357,10 @@ export function PersonaView({
                 <span className="text-faint">Default mode</span> · {detail.default_permission_mode}
               </div>
             )}
-            {detail.workspace && (
-              <div>
-                <span className="text-faint">Workspace</span> · {detail.workspace}
-              </div>
-            )}
+            <div>
+              <span className="text-faint">Workspace</span> ·{" "}
+              {detail.requires_folder ? "picked folder" : "scratch"}
+            </div>
           </section>
 
           {/* management — the controls that left the list page (UX-035) */}

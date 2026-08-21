@@ -4,7 +4,8 @@ id: appsec-worker
 name: AppSec Worker
 icon: code
 tagline: Code security review under a team lead — scan, triage, fix
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 team: worker
 tools: [code_files, git, search, shell, todo]

@@ -54,7 +54,7 @@ def test_install_from_dir_lands_disabled_pending_consent(tmp_path):
     reg.set_enabled("acme-ops", True)
     reg.set_surfaced("acme-ops", True)
     assert "acme-ops" in [e["name"] for e in reg.sidebar()]
-    assert reg.agent("acme-ops").family == "knowledge"
+    assert reg.agent("acme-ops").requires_folder is False
 
 
 def test_installed_persona_persists_across_restart(tmp_path):
@@ -131,7 +131,7 @@ def test_install_snapshots_independently_of_source(tmp_path):
     shutil.rmtree(src)  # source gone
     reg2 = PersonaRegistry(state_path=tmp_path / "personas.json")
     assert "acme-ops" in reg2.ids() and reg2.is_enabled("acme-ops")
-    assert reg2.agent("acme-ops").family == "knowledge"
+    assert reg2.agent("acme-ops").requires_folder is False
 
 
 def test_adding_a_connector_grows_capabilities_and_forces_reconsent(tmp_path):

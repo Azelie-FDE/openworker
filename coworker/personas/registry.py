@@ -49,13 +49,13 @@ class PersonaEntry:
     name: str
     icon: str = ""
     tagline: str = ""
-    needs_workspace: bool = True
     builtin: bool = True
-    family: str = "knowledge"
-    # The persona's workspace requirement (git|project|deliverable|none) — surfaced to the GUI so it
-    # can detect project-scoped personas (git/project) uniformly. Manifest-backed personas carry it
-    # verbatim; builtins set it at registration to match their family/needs_workspace.
-    workspace: str = "deliverable"
+    # Workspace/toolset traits (workspace-scratch-design.md): requires_folder is the
+    # composer/engine gate on a user-picked primary folder — surfaced to the GUI, which
+    # groups gated sessions by project. subagents/scheduling gate the matching toolsets.
+    requires_folder: bool = False
+    subagents: bool = False
+    scheduling: bool = True
     tools: list[str] = field(default_factory=list)
     default_surfaced: bool = (
         True  # whether it shows in the picker before any user choice
@@ -117,10 +117,10 @@ class PersonaRegistry:
         icon,
         tagline,
         builder,
-        needs_workspace,
-        family,
         tools,
-        workspace="deliverable",
+        requires_folder=False,
+        subagents=False,
+        scheduling=True,
         default_surfaced=True,
         default_enabled=True,
         group="general",
@@ -130,10 +130,10 @@ class PersonaRegistry:
             name=name,
             icon=icon,
             tagline=tagline,
-            needs_workspace=needs_workspace,
             builtin=True,
-            family=family,
-            workspace=workspace,
+            requires_folder=requires_folder,
+            subagents=subagents,
+            scheduling=scheduling,
             tools=list(tools),
             default_surfaced=default_surfaced,
             default_enabled=default_enabled,
@@ -154,10 +154,7 @@ class PersonaRegistry:
             "cowork",
             "Produce a deliverable — research, analysis, scripts",
             cowork_agent,
-            True,
-            "knowledge",
             COWORK_CAPABILITIES,
-            workspace="deliverable",
         )
         self._register_builder(
             "code",
@@ -165,10 +162,10 @@ class PersonaRegistry:
             "code",
             "Work in a codebase — files, git, shell",
             code_agent,
-            True,
-            "code",
             CODE_CAPABILITIES,
-            workspace="git",
+            requires_folder=True,
+            subagents=True,
+            scheduling=False,
             default_surfaced=False,
             default_enabled=False,
         )
@@ -200,10 +197,10 @@ class PersonaRegistry:
             name=m.name,
             icon=m.icon,
             tagline=m.tagline,
-            needs_workspace=m.needs_workspace,
             builtin=builtin,
-            family=m.family,
-            workspace=m.workspace,
+            requires_folder=m.requires_folder,
+            subagents=m.subagents,
+            scheduling=m.scheduling,
             tools=list(m.tools),
             ships=m.ships,
             group=m.group,
@@ -317,7 +314,7 @@ class PersonaRegistry:
                     {
                         "name": e.id,
                         "title": e.name,
-                        "needs_workspace": e.needs_workspace,
+                        "requires_folder": e.requires_folder,
                         "icon": e.icon,
                         "tagline": e.tagline,
                         "default": e.id == self.default_id(),
@@ -333,10 +330,8 @@ class PersonaRegistry:
                 "name": e.name,
                 "icon": e.icon,
                 "tagline": e.tagline,
-                "needs_workspace": e.needs_workspace,
+                "requires_folder": e.requires_folder,
                 "builtin": e.builtin,
-                "family": e.family,
-                "workspace": e.workspace,
                 "tools": e.tools,
                 "enabled": self.is_enabled(e.id),
                 "surfaced": self.is_surfaced(e.id),

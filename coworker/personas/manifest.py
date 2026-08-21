@@ -20,9 +20,8 @@ import yaml
 # (traversal), no `:*?"<>|` (invalid on Windows), bounded length.
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
-VALID_FAMILIES = {"code", "knowledge"}
+VALID_FAMILIES = {"code", "knowledge"}  # legacy key, shimmed in parse()
 VALID_TEAM = {"lead", "worker"}
-VALID_WORKSPACES = {"git", "project", "deliverable", "none"}
 VALID_MODES = {"discuss", "plan", "interactive", "custom", "auto"}
 VALID_REC_KINDS = {"connector", "mcp"}
 VALID_REC_TIERS = {"core", "optional"}
@@ -55,10 +54,14 @@ class PersonaManifest:
     tagline: str = ""
     description: str = ""
     tools: list[str] = field(default_factory=list)
-    family: str = "knowledge"  # "code" | "knowledge"
-    # Derived from family since the enum collapse (§16): code → "git", knowledge →
-    # "deliverable". Builtins registered via builders may still carry "none" (Chat).
-    workspace: str = "deliverable"
+    # Workspace/toolset traits (workspace-scratch-design.md — replaces the old
+    # family/workspace pair). requires_folder: the composer/engine gate on a
+    # user-picked primary folder. subagents: explorer fan-out. scheduling:
+    # scheduled tasks + self-wake (defaults to the opposite of requires_folder
+    # when the manifest is silent — folder personas fan out instead).
+    requires_folder: bool = False
+    subagents: bool = False
+    scheduling: bool = True
     messaging: bool = False
     # Connector grant (OPE-93): False = none, a tuple = allowlist of connector ids
     # (session exposes declared ∩ connected), True = every connected connector — the
@@ -93,10 +96,6 @@ class PersonaManifest:
         None  # where it was loaded from (path / url), for provenance
     )
 
-    @property
-    def needs_workspace(self) -> bool:
-        return self.workspace != "none"
-
     def to_agent(self):
         """Materialize the runtime Agent (prompt + catalog-expanded tools + traits)."""
         from ..agents.base import Agent
@@ -108,9 +107,10 @@ class PersonaManifest:
             name=self.id,
             title=self.name,
             system_prompt=self.system_prompt,
-            needs_workspace=self.needs_workspace,
             tool_factory=factory,
-            family=self.family,
+            requires_folder=self.requires_folder,
+            subagents=self.subagents,
+            scheduling=self.scheduling,
             messaging=self.messaging,
             connectors=self.connectors,
             team=self.team,
@@ -273,22 +273,21 @@ def parse_manifest(
     if not body.strip():
         raise ManifestError(f"persona {persona_id!r} has no body (the system prompt)")
 
-    family = str(meta.get("family", "knowledge")).strip().lower()
-    if family not in VALID_FAMILIES:
+    # Workspace/toolset traits (workspace-scratch-design.md). Legacy shim: pre-trait
+    # bundles declared `family: code|knowledge` (and a dead `workspace:` enum, ignored
+    # here) — when the new keys are absent, `family: code` maps to the folder-gated
+    # profile so an old bundle keeps its gate. New keys always win.
+    legacy_family = str(meta.get("family", "")).strip().lower()
+    if legacy_family and legacy_family not in VALID_FAMILIES:
         raise ManifestError(
-            f"persona {persona_id!r}: family must be one of {sorted(VALID_FAMILIES)}"
+            f"persona {persona_id!r}: family (legacy) must be one of {sorted(VALID_FAMILIES)}"
         )
-
-    # The workspace enum collapsed into family (owner decision 2026-07-03, UX-DECISIONS §16):
-    # knowledge → transparent scratch + user-added roots (no folder gate, ever); code → an
-    # explicit directory picked by the user. The manifest key is still accepted — and
-    # typo-checked — so older manifests parse, but it no longer drives behavior.
-    declared = str(meta.get("workspace", "")).strip().lower()
-    if declared and declared not in VALID_WORKSPACES:
-        raise ManifestError(
-            f"persona {persona_id!r}: workspace must be one of {sorted(VALID_WORKSPACES)}"
-        )
-    workspace = "git" if family == "code" else "deliverable"
+    legacy_code = legacy_family == "code"
+    requires_folder = bool(meta.get("requires_folder", legacy_code))
+    subagents = bool(meta.get("subagents", legacy_code))
+    # Folder personas fan out to explorers instead of scheduling — the silent default
+    # mirrors that split; either can be declared explicitly.
+    scheduling = bool(meta.get("scheduling", not requires_folder))
 
     mode = str(meta.get("default_permission_mode", "interactive")).strip().lower()
     if mode not in VALID_MODES:
@@ -322,8 +321,9 @@ def parse_manifest(
         tagline=str(meta.get("tagline", "")).strip(),
         description=str(meta.get("description", "")).strip(),
         tools=tools,
-        family=family,
-        workspace=workspace,
+        requires_folder=requires_folder,
+        subagents=subagents,
+        scheduling=scheduling,
         messaging=bool(meta.get("messaging", False)),
         connectors=connectors,
         team=team_raw or None,

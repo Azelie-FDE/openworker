@@ -4,7 +4,8 @@ id: infra-worker
 name: Infra Worker
 icon: sliders
 tagline: Incident diagnosis from the platform side — resources, cloud state, IaC
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 team: worker
 tools: [shell, code_files, git, search, todo]

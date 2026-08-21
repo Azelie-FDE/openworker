@@ -24,10 +24,10 @@ function stubFetch(routes: { match: string; method?: string; json: any }[]) {
 
 const PERSONAS = {
   personas: [
-    { id: "cowork", name: "OpenWorker", icon: "cowork", tagline: "general assistant", family: "knowledge", enabled: true, surfaced: true, default: true },
-    { id: "ops", name: "Ops", icon: "ops", tagline: "incidents, runbooks", family: "code", enabled: true, surfaced: true, default: false },
-    { id: "code", name: "Code", icon: "code", tagline: "repository work", family: "code", enabled: true, surfaced: true, default: false },
-    { id: "secret", name: "Disabled One", icon: "cowork", tagline: "off", family: "knowledge", enabled: false, surfaced: false, default: false },
+    { id: "cowork", name: "OpenWorker", icon: "cowork", tagline: "general assistant", requires_folder: false, enabled: true, surfaced: true, default: true },
+    { id: "ops", name: "Ops", icon: "ops", tagline: "incidents, runbooks", requires_folder: true, enabled: true, surfaced: true, default: false },
+    { id: "code", name: "Code", icon: "code", tagline: "repository work", requires_folder: true, enabled: true, surfaced: true, default: false },
+    { id: "secret", name: "Disabled One", icon: "cowork", tagline: "off", requires_folder: false, enabled: false, surfaced: false, default: false },
   ],
 };
 

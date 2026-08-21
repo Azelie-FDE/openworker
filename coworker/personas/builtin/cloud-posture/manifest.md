@@ -4,7 +4,8 @@ id: cloud-posture
 name: Cloud Posture Coworker
 icon: sliders
 tagline: Review Terraform & cloud config — read-only, evidence first
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 tools: [code_files, git, search, shell, todo]
 connectors: [github]

@@ -113,9 +113,8 @@ function normalizeTodos(raw: unknown): TodoItem[] {
   });
 }
 
-// Fallbacks used only before the persona list loads (the in-component, family-aware
-// needsWorkspace/gatesWorkspace consult the real persona once available).
-const needsWorkspaceFallback = (a: string) => a === "code" || a === "cowork";
+// Fallback used only before the persona list loads (the in-component gatesWorkspace
+// consults the real persona's requires_folder once available).
 const gatesWorkspaceFallback = (a: string) => a === "code";
 const LAST_SESSION_KEY = "coworker:last-session-by-agent:v1";
 const NAV_COLLAPSED_KEY = "coworker:nav-collapsed:v1";
@@ -404,11 +403,9 @@ export function App() {
     getInbox(sessionId, "pending").then(setSessionInbox).catch(() => setSessionInbox([]));
     refreshSessions(); // attention badge should drop right away
   };
-  // Shows a working-area chip / project grouping. Persona's needs_workspace; fallback before load.
-  const needsWorkspace = (a: string) => personaOf(a)?.needs_workspace ?? needsWorkspaceFallback(a);
-  // MUST pick a folder before starting — project-scoped personas (git-bound Code, project-bound
-  // Ops). Scratch/deliverable personas start orphan: the server auto-provisions a per-conversation
-  // scratch dir and reports it in the `ready` event.
+  // MUST pick a folder before starting — requires_folder personas (git-bound Code, the
+  // security coworkers). Everything else starts orphan: the server auto-provisions a
+  // per-conversation scratch dir and reports it in the `ready` event.
   const gatesWorkspace = (a: string) => {
     const p = personaOf(a);
     return p ? isProjectScoped(p) : gatesWorkspaceFallback(a);
@@ -1343,9 +1340,7 @@ export function App() {
       // starts orphan ("" → server provisions). Chat has no workspace.
       const targetWorkspace = gatesWorkspace(name)
         ? target.workspace || fallbackWorkspace(inheritable, knownProjects)
-        : needsWorkspace(name)
-          ? target.workspace || ""
-          : "";
+        : target.workspace || "";
       if (targetWorkspace && targetWorkspace !== workspace) {
         setWorkspace(targetWorkspace);
         setBranch(null);
@@ -1372,7 +1367,7 @@ export function App() {
     if (fallback && fallback !== workspace) {
       setWorkspace(fallback);
       setBranch(null);
-    } else if (!fallback && needsWorkspace(name)) {
+    } else if (!fallback) {
       setWorkspace(null); // orphan cowork: server provisions a fresh scratch on connect
     }
     setSessionId(id);
@@ -1864,7 +1859,7 @@ export function App() {
                       <span className="mark">✦</span>
                       {agent === "chat" ? "How can I help?" : "Let's build something."}
                     </h1>
-                    {needsWorkspace(agent) && (
+                    {(
                       <div className="suggestions">
                         <div className="suggest-head">Try a task</div>
                         {SUGGESTIONS.map((s, i) => (
@@ -1943,7 +1938,7 @@ export function App() {
               <SessionSetupRow
                 personas={personas}
                 agent={agent}
-                showFolder={needsWorkspace(agent)}
+                showFolder
                 folderName={workspace && !tempWorkspace ? baseName(workspace) : null}
                 onPickCoworker={pickCoworker}
                 onPickFolder={pickDraftFolder}
@@ -2002,7 +1997,7 @@ export function App() {
               onModeChange={changeMode}
               onModelChange={changeModel}
               sessionId={sessionId}
-              workspace={needsWorkspace(agent) ? workspace || "" : undefined}
+              workspace={workspace || ""}
               unattended={unattended}
               onUnattendedChange={agent !== "chat" ? toggleUnattended : undefined}
               prefill={composerPrefill}

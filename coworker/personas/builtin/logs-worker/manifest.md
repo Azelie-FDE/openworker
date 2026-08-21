@@ -4,7 +4,8 @@ id: logs-worker
 name: Logs Worker
 icon: search
 tagline: Incident diagnosis from the symptom side — errors, traces, reproduction
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 team: worker
 tools: [shell, code_files, git, search, todo]

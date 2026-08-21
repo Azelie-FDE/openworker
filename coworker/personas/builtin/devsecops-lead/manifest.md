@@ -4,7 +4,8 @@ id: devsecops-lead
 name: DevSecOps Lead
 icon: shield
 tagline: Leads a security review team — scopes, staffs, assigns, verifies evidence
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 team: lead
 tools: [code_files, search, todo]

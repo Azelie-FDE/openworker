@@ -4,7 +4,8 @@ id: test-worker
 name: Test Worker
 icon: check
 tagline: Verifies teammates' work against acceptance criteria
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 team: worker
 tools: [code_files, git, search, shell, todo]

@@ -4,7 +4,8 @@ id: secrets-worker
 name: Secrets Worker
 icon: search
 tagline: Secret hunting under a team lead — working tree and full git history
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 team: worker
 tools: [code_files, git, search, shell, todo]

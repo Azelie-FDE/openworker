@@ -38,10 +38,10 @@ def test_bundles_register_as_enabled_code_builtins(tmp_path):
     for pid in BUNDLES:
         entry = reg.get(pid)
         assert entry is not None and entry.builtin
-        assert entry.family == "code"  # folder pick at send, like Code
+        assert entry.requires_folder  # folder pick at send, like Code
         assert reg.is_enabled(pid) is True  # in the picker out of the box
         agent = reg.agent(pid)  # catalog-expanded tools materialize
-        assert agent.family == "code" and agent.needs_workspace
+        assert agent.requires_folder and agent.subagents
 
 
 def test_bundle_skill_folders_match_their_manifests(tmp_path):

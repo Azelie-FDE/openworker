@@ -226,7 +226,7 @@ def build_engine(
     extra_skill_dirs: Optional[list[str | Path]] = None,
 ) -> TurnEngine:
     ws = Path(workspace).expanduser().resolve() if workspace else None
-    if agent.needs_workspace and ws is None:
+    if agent.requires_folder and ws is None:
         raise ValueError(f"agent '{agent.name}' requires a workspace")
 
     # The session's directories. Explicit `roots` (orphan Cowork: scratch + added folders) wins;
@@ -241,9 +241,7 @@ def build_engine(
 
     workspace_trusted = bool(ws and WorkspaceTrustStore().is_trusted(ws))
     config = load_config(ws, workspace_trusted=workspace_trusted)
-    executor = (
-        LocalExecutor(cwd=ws) if (agent.needs_workspace and ws is not None) else None
-    )
+    executor = LocalExecutor(cwd=ws) if ws is not None else None
     todo = TodoList()
     context = AgentContext(
         workspace=ws, executor=executor, todo=todo, roots=root_list or None
@@ -275,8 +273,8 @@ def build_engine(
                     routing_targets=routing_targets,
                 )
             )
-    # Knowledge surfaces with a multi-root workspace can ask the user mid-task for another folder.
-    if agent.family == "knowledge" and root_list:
+    # Surfaces with a multi-root workspace can ask the user mid-task for another folder.
+    if root_list:
         registry.register(request_directory_tool())
     # Anything with a shell can hit a missing CLI (a scanner, aws, kubectl). Give it a way to
     # ask instead of silently dropping the check that needed it (OPE-85).
@@ -313,9 +311,9 @@ def build_engine(
     # passes its shared router; this fallback covers the TUI / direct build_engine() callers.
     # Resolved here (not at engine construction) because the explorer subagent captures it.
     provider = provider or ProviderRouter(secrets, default_provider="openai")
-    # Code-family personas can fan broad research out to read-only explorer subagents, keeping
+    # Repo-focused personas can fan broad research out to read-only explorer subagents, keeping
     # their own context for the actual change.
-    if agent.family == "code" and ws is not None:
+    if agent.subagents and ws is not None:
         registry.register_all(
             explorer_tools(
                 workspace=ws,
@@ -324,9 +322,9 @@ def build_engine(
                 model_settings=model_settings,
             )
         )
-    # Scheduling: knowledge surfaces with a workspace can set up scheduled tasks (origin = this
+    # Scheduling: opted-in surfaces with a workspace can set up scheduled tasks (origin = this
     # session). Code stays out (it fans out to explorers instead).
-    if task_store is not None and ws is not None and agent.family == "knowledge":
+    if task_store is not None and ws is not None and agent.scheduling:
         origin = {
             "surface": agent.name,
             "session_id": session_id or "",
@@ -336,9 +334,9 @@ def build_engine(
         registry.register_all(
             scheduling_tools(task_store, origin=origin, default_workspace=str(ws))
         )
-    # Self-wake: knowledge surfaces can suspend + schedule their own resumption (timer /
+    # Self-wake: scheduling surfaces can suspend + schedule their own resumption (timer /
     # on-completion / on-event). The scheduler tick resumes due wakes.
-    if wake_store is not None and session_id and agent.family == "knowledge":
+    if wake_store is not None and session_id and agent.scheduling:
         registry.register_all(selfwake_tools(wake_store, session_id))
 
     instructions = f"{agent.system_prompt}\n\n{_NARRATION_GUIDANCE}"
@@ -445,15 +443,11 @@ def build_engine(
     # Per-turn ephemeral context, appended to the latest user message since mid-thread system
     # messages aren't reliable across providers. Three producers: the plan-mode reminder (mode can
     # flip mid-session, so it's checked each turn, not baked into the instructions), the live
-    # directory list (orphan Cowork can gain folders mid-session; Cowork/MyHelper only), and the
+    # directory list (any multi-root session can gain folders mid-session), and the
     # memory-SAVING notice (same reason as plan mode — the switch flips either way mid-chat).
     # Note what is NOT here: the memories and the user's rules. Those are knowledge, fixed at
     # session start (§7.1).
-    roots_context = (
-        (lambda: render_context(root_list))
-        if root_list and agent.family == "knowledge"
-        else None
-    )
+    roots_context = (lambda: render_context(root_list)) if root_list else None
 
     # Late-bound engine ref: the closure needs the conversation history (for the disable
     # countermand) but the engine is constructed after the closure. Filled below.

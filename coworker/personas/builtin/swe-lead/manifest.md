@@ -4,7 +4,8 @@ id: swe-lead
 name: SWE Lead
 icon: users
 tagline: Leads a software team — plans, staffs, assigns, verifies
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 team: lead
 tools: [code_files, search, todo]

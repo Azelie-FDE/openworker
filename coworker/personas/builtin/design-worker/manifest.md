@@ -4,7 +4,8 @@ id: design-worker
 name: Design Worker
 icon: layout
 tagline: UI/UX implementation under a team lead
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 team: worker
 tools: [code_files, git, search, shell, todo]

@@ -4,7 +4,8 @@ id: change-worker
 name: Change Worker
 icon: code
 tagline: Incident diagnosis from the change side — what shipped, when, and what it touched
-family: code
+requires_folder: true
+subagents: true
 version: "1"
 team: worker
 tools: [shell, code_files, git, search, todo]

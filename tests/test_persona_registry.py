@@ -137,20 +137,20 @@ def test_set_default_enables_and_persists(tmp_path):
 
 def test_agent_resolution(tmp_path):
     reg = _reg(tmp_path)
-    assert reg.agent("ops").family == "knowledge"
-    assert reg.agent("code").family == "code"
+    assert reg.agent("ops").requires_folder is False
+    assert reg.agent("code").requires_folder is True
     # Unknown id → default persona.
     assert reg.agent("does-not-exist").name == reg.default_id()
 
 
-def test_list_all_carries_workspace_enum(tmp_path, internal):
-    # Post-§16 collapse: workspace derives from family — code → git, knowledge →
-    # deliverable (scratch). Ops is a scratch persona now.
+def test_list_all_carries_requires_folder(tmp_path, internal):
+    # The workspace enum collapsed into the requires_folder trait
+    # (workspace-scratch-design.md): Code gates a folder; scratch personas don't.
     reg = _reg(tmp_path)
-    ws = {p["id"]: p["workspace"] for p in reg.list_all()}
-    assert ws["code"] == "git"
-    assert ws["cowork"] == "deliverable"
-    assert ws["ops"] == "deliverable"
+    gated = {p["id"]: p["requires_folder"] for p in reg.list_all()}
+    assert gated["code"] is True
+    assert gated["cowork"] is False
+    assert gated["ops"] is False
 
 
 def test_set_unknown_persona_raises(tmp_path):

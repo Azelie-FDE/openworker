@@ -27,10 +27,9 @@ def test_parse_valid():
     m = parse_manifest(VALID)
     assert m.id == "demo" and m.name == "Demo Coworker"
     assert m.tools == ["files", "search", "shell", "todo"]
-    assert m.family == "knowledge" and m.workspace == "deliverable"
+    assert m.requires_folder is False and m.scheduling is True
     assert m.messaging is True and m.connectors == ("github",)
     assert m.recommended_models == ["anthropic:claude-opus-4-8"]
-    assert m.needs_workspace is True
     assert m.system_prompt.startswith("You are a demo coworker")
 
 
@@ -81,7 +80,7 @@ def test_to_agent_carries_traits_and_tools(tmp_path):
     from coworker.tools.todo import TodoList
 
     agent = parse_manifest(VALID).to_agent()
-    assert agent.name == "demo" and agent.family == "knowledge"
+    assert agent.name == "demo" and agent.requires_folder is False
     assert agent.messaging and agent.connectors
     ctx = AgentContext(workspace=tmp_path, executor=object(), todo=TodoList())
     names = {getattr(t, "__name__", "") for t in agent.build_tools(ctx)}
@@ -93,10 +92,10 @@ def test_list_field_accepts_comma_string():
     assert parse_manifest(text).tools == ["files", "search"]
 
 
-def test_workspace_key_is_accepted_but_derived_from_family():
-    # §16 collapse: the old enum still parses (back-compat + typo detection) but behavior
-    # derives from family — knowledge → scratch ("deliverable"), code → "git". A manifest
-    # can no longer demand a folder gate (`project`) or opt out of a workspace (`none`).
+def test_legacy_family_key_maps_to_traits():
+    # Legacy shim (workspace-scratch-design.md): pre-trait bundles declared
+    # `family: code|knowledge` (plus a dead `workspace:` enum, ignored). `family: code`
+    # maps to the folder-gated profile; explicit new keys always win.
     text = """---
 id: opsy
 workspace: project
@@ -105,12 +104,18 @@ tools: [files, search, shell, todo]
 Operate things.
 """
     m = parse_manifest(text)
-    assert m.workspace == "deliverable" and m.needs_workspace is True
+    assert m.requires_folder is False and m.subagents is False and m.scheduling is True
 
     coded = parse_manifest(
         "---\nid: dev\nfamily: code\nworkspace: none\ntools: [git]\n---\nCode."
     )
-    assert coded.workspace == "git" and coded.needs_workspace is True
+    assert coded.requires_folder and coded.subagents and not coded.scheduling
+
+    # New keys override the shim.
+    mixed = parse_manifest(
+        "---\nid: dev2\nfamily: code\nrequires_folder: false\ntools: [git]\n---\nCode."
+    )
+    assert mixed.requires_folder is False and mixed.subagents is True
 
 
 @pytest.mark.parametrize(
@@ -122,7 +127,6 @@ Operate things.
         ("---\nid: x\ntools: [files]\n---\n", "no body"),
         ("---\nid: x\ntools: [nope]\n---\nbody", "unknown tool"),
         ("---\nid: x\nfamily: alien\ntools: []\n---\nbody", "family"),
-        ("---\nid: x\nworkspace: cloud\ntools: []\n---\nbody", "workspace"),
         (
             "---\nid: x\ndefault_permission_mode: yolo\ntools: []\n---\nbody",
             "permission",
