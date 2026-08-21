@@ -117,6 +117,7 @@ function normalizeTodos(raw: unknown): TodoItem[] {
 // consults the real persona's requires_folder once available).
 const gatesWorkspaceFallback = (a: string) => a === "code";
 const LAST_SESSION_KEY = "coworker:last-session-by-agent:v1";
+const RAIL_HIDDEN_KEY = "coworker:rail-hidden:v1";
 const NAV_COLLAPSED_KEY = "coworker:nav-collapsed:v1";
 
 type LastSession = { sessionId: string; workspace: string; updatedAt: number };
@@ -283,7 +284,16 @@ export function App() {
   const [boardDetailId, setBoardDetailId] = useState<number | null>(null);
   // # team chat overlay — opened from the team entry's chat row.
   const [chatTeam, setChatTeam] = useState<string | null>(null);
-  const [railHidden, setRailHidden] = useState(false);
+  // UX-038 follow-up (owner ruling 2026-08-21): the rail starts HIDDEN and the
+  // topbar toggle persists per-device. Deep links (artifact/board chips, Access)
+  // still force-show transiently — they never overwrite the stored preference.
+  const [railHidden, setRailHidden] = useState<boolean>(() => {
+    try { return localStorage.getItem(RAIL_HIDDEN_KEY) !== "0"; } catch { return true; }
+  });
+  const setRailHiddenPersist = useCallback((v: boolean) => {
+    setRailHidden(v);
+    try { localStorage.setItem(RAIL_HIDDEN_KEY, v ? "1" : "0"); } catch { /* best effort */ }
+  }, []);
   // Left-nav collapse (⌘B): when collapsed the sidebar leaves the grid so content reclaims the
   // width; hovering the left edge peeks it back as a floating overlay. Persisted per-device.
   const [navCollapsed, setNavCollapsed] = useState<boolean>(() => {
@@ -1786,7 +1796,7 @@ export function App() {
           {/* Right: session-settings icon (§23) + panel toggle. Model/mode/persona chrome is
               gone — the facts live in the subtitle, the controls in the composer (§22). */}
           <div className="main-topbar-side main-topbar-actions" onPointerDown={beginWindowDrag}>
-            {agent === "cowork" && railHidden && artifactCount > 0 && (
+            {railHidden && artifactCount > 0 && (
               <button
                 className="topbar-artifacts-btn"
                 onMouseDown={(e) => e.stopPropagation()}
@@ -1804,7 +1814,7 @@ export function App() {
               <button
                 className="topbar-icon-btn"
                 onMouseDown={(e) => e.stopPropagation()}
-                onClick={() => setRailHidden((h) => !h)}
+                onClick={() => setRailHiddenPersist(!railHidden)}
                 aria-label={railHidden ? "Show side panel" : "Hide side panel"}
                 title={railHidden ? "Show side panel" : "Hide side panel"}
               >

@@ -354,6 +354,16 @@ const PROVIDERS = [
 
 /** Install the API + WebSocket mocks on a page. Returns handles for assertions/seed data. */
 export async function mockApi(page: import("@playwright/test").Page) {
+  // The rail defaults to HIDDEN (UX-038 follow-up). Existing specs were written
+  // against a visible rail, so run them in the "user opened it" state; the
+  // default + persistence themselves are pinned by rail-default.spec.ts.
+  await page.addInitScript(() => {
+    try {
+      if (!localStorage.getItem("ocw-e2e-rail-default")) {
+        localStorage.setItem("coworker:rail-hidden:v1", "0");
+      }
+    } catch { /* ignore */ }
+  });
   const subscriptions: any[] = [
     // One existing subscription (a non-pinned session) so the Slack page's per-workspace
     // "Listening" row has an entry. Relay-mode channels are team-qualified (slack:T…/C…).
