@@ -378,14 +378,25 @@ function VoiceInputSection() {
 function PersonasSection({ onOpenPersona }: { onOpenPersona?: (id: string) => void }) {
   const [galleryBump, setGalleryBump] = useState(0);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  // The Gallery is OUR distribution channel during development — internal builds only
+  // (owner 2026-08-21). Users install from GitHub / folder / zip.
+  const [internal, setInternal] = useState(false);
 
   return (
     <section>
-      <PanelHead
-        title="Coworkers"
-        sub="Which coworkers are enabled and shown in the picker — the starred one is the default for new sessions."
+      <PanelHead title="Coworkers" sub="Manage your coworkers and add new ones." />
+      <p className="text-[13px] text-muted leading-relaxed max-w-[560px] mt-5 mb-1">
+        Coworkers are agents specialized for a particular role or task. They come equipped
+        with the tools and skills to be successful in that role. Enabling a coworker lets
+        you pick it when starting a conversation — the starred one is the default for new
+        sessions.
+      </p>
+      <PersonasTab
+        key={galleryBump}
+        onOpenPersona={onOpenPersona}
+        onMeta={(m) => setInternal(m.internal)}
       />
-      <PersonasTab key={galleryBump} onOpenPersona={onOpenPersona} />
+      {internal && (
       <button
         className="mt-6 w-full rounded-xl2 border border-line bg-panel px-4 py-3.5 flex items-center gap-3 text-left hover:border-lineStrong"
         data-testid="gallery-link"
@@ -400,6 +411,7 @@ function PersonasSection({ onOpenPersona }: { onOpenPersona?: (id: string) => vo
         </span>
         <span className="text-[12.5px] text-accent shrink-0">Open →</span>
       </button>
+      )}
       {galleryOpen && (
         <GalleryModal
           onClose={() => setGalleryOpen(false)}

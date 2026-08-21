@@ -10,8 +10,9 @@ test("picker's Import door lands on Settings ▸ Coworkers at the Add section", 
   await page.getByTestId("coworker-chip").click();
   await page.getByTestId("import-coworker").click();
 
-  // Settings ▸ Coworkers opened, with the Add section (the import surface) present.
-  await expect(page.getByText("Add coworkers")).toBeVisible();
+  // Settings ▸ Coworkers opened, with the installer disclosure auto-opened (UX-035:
+  // it's collapsed by default; the Import door pops it).
+  await expect(page.getByTestId("install-disclosure")).toBeVisible();
   await expect(page.getByRole("combobox")).toBeVisible();
 });
 
@@ -23,7 +24,9 @@ test("zip import: trust warning leads, tools collapse behind a chevron, replaces
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Coworkers", exact: true }).click();
 
-  // Pick the Bundle zip mode and feed a file through the hidden input.
+  // Open the installer disclosure, pick the Bundle zip mode, feed a file through
+  // the hidden input.
+  await page.getByTestId("install-disclosure").click();
   await page.getByRole("combobox").selectOption("zip");
   await page.getByTestId("persona-zip-input").setInputFiles({
     name: "team-sec.zip",
@@ -53,10 +56,10 @@ test("zip import: trust warning leads, tools collapse behind a chevron, replaces
   // Imported coworker landed disabled in the list above, pending consent —
   // and the card itself carries the Enable action (no hunting back up the list).
   const row = page.locator(".divide-y > div").filter({ hasText: "Team Security Coworker" });
-  await expect(row.getByRole("checkbox", { name: "Enabled" })).not.toBeChecked();
+  await expect(row.getByRole("switch")).toHaveAttribute("aria-checked", "false");
   await card.getByTestId("consent-enable-team-sec").click();
   await expect(card.getByTestId("consent-enabled")).toContainText("it's in your coworker picker");
-  await expect(row.getByRole("checkbox", { name: "Enabled" })).toBeChecked();
+  await expect(row.getByRole("switch")).toHaveAttribute("aria-checked", "true");
 });
 
 test("Export… zips an installed coworker's bundle to a chosen folder", async ({ page }) => {
@@ -65,8 +68,9 @@ test("Export… zips an installed coworker's bundle to a chosen folder", async (
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Coworkers", exact: true }).click();
 
-  // The installed (non-builtin) fixture persona carries the Export affordance;
-  // the native folder pick is server-mocked → /tmp/picked-folder.
-  await page.getByTestId("persona-export-acme-notes").click();
+  // Export moved to the coworker detail page (UX-035); the native folder pick is
+  // server-mocked → /tmp/picked-folder.
+  await page.getByTestId("persona-configure-acme-notes").click();
+  await page.getByTestId("persona-export").click();
   await expect(page.getByText("Exported to /tmp/picked-folder/acme-notes-coworker-v1.zip")).toBeVisible();
 });

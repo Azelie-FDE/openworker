@@ -32,7 +32,7 @@ test("Settings: Coworkers tab opens by default; flag \"0\" hides it", async ({ p
   await page.getByTestId("account-row").click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Coworkers", exact: true }).click();
-  await expect(page.getByText("Add coworkers")).toBeVisible();
+  await expect(page.getByTestId("install-disclosure")).toBeVisible();
 });
 
 test("Settings: the flag escape hatch hides the Coworkers tab", async ({ page }) => {

@@ -1038,6 +1038,9 @@ export interface Persona {
   enabled: boolean;
   surfaced: boolean;
   default: boolean;
+  // Distribution flag (ships:false = internal builds only) + settings-page group.
+  ships?: boolean;
+  group?: string; // "general" | "security"
   version?: string;
   installed_at?: string;
 }
@@ -1064,6 +1067,13 @@ export interface PersonaConsent {
 export async function getPersonas(): Promise<Persona[]> {
   const res = await fetch(`${httpBase()}/v1/personas`);
   return (await res.json()).personas;
+}
+
+/** Personas plus the build flag: `internal` builds may show unshipped coworkers + the Gallery. */
+export async function getPersonasIndex(): Promise<{ personas: Persona[]; internal: boolean }> {
+  const res = await fetch(`${httpBase()}/v1/personas`);
+  const body = await res.json();
+  return { personas: body.personas ?? [], internal: !!body.internal };
 }
 
 export async function updatePersona(
@@ -1194,13 +1204,27 @@ export interface PersonaDetail {
   icon: string;
   tagline: string;
   description: string;
+  media: string[]; // bundle media/ screenshots, served via /v1/personas/{id}/media/{name}
+  builtin: boolean;
+  group: string;
   enabled: boolean; // persona on/off (shown in the picker)
+  surfaced: boolean;
+  default: boolean;
   tools: string[];
   recommended_models: string[];
   default_permission_mode: string;
   workspace: string;
   recommends: PersonaRecommendation[];
   default_connections: PersonaDefaultConnection[];
+}
+
+/** Fetch one bundle screenshot with launch auth and hand back an object URL. */
+export async function getPersonaMediaUrl(id: string, name: string): Promise<string> {
+  const res = await fetch(
+    `${httpBase()}/v1/personas/${encodeURIComponent(id)}/media/${encodeURIComponent(name)}`,
+  );
+  if (!res.ok) throw new Error(`media ${name}: ${res.status}`);
+  return URL.createObjectURL(await res.blob());
 }
 
 export async function getPersonaDetail(id: string): Promise<PersonaDetail> {

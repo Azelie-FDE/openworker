@@ -45,6 +45,8 @@ test("signed out: modal prompts for sign-in, manual install path unaffected", as
   // Esc closes; the Personas page (with its dir/Git importer) is still there.
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("gallery-modal")).not.toBeVisible();
+  // The manual installer (collapsed disclosure, UX-035) is still there.
+  await page.getByTestId("install-disclosure").click();
   await expect(page.getByRole("button", { name: "Install", exact: true })).toBeVisible();
 });
 
@@ -98,12 +100,12 @@ test("back link returns from the solo page to the catalog", async ({ page }) => 
 test("delete: non-builtin personas removable after confirm; built-ins are not", async ({
   page,
 }) => {
+  // UX-035: delete moved off the list rows onto the coworker detail page.
   await openPersonas(page);
-  // Built-ins expose no delete affordance.
-  await expect(page.getByTestId("persona-delete-cowork")).toHaveCount(0);
-  // Non-builtin: trash → inline confirm → row gone (works signed out).
   await expect(page.getByText("Acme Notes")).toBeVisible();
-  await page.getByTestId("persona-delete-acme-notes").click();
-  await page.getByTestId("persona-delete-confirm-acme-notes").click();
+  await page.getByTestId("persona-configure-acme-notes").click();
+  await page.getByTestId("persona-delete").click();
+  await page.getByTestId("persona-delete-confirm").click();
+  // Back on the list, the row is gone (works signed out).
   await expect(page.getByText("Acme Notes")).not.toBeVisible();
 });

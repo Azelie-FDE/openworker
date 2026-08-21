@@ -53,15 +53,18 @@ const SETTINGS = {
   },
 };
 
+// UX-035 lineup: Chat is gone; Code ships disabled; the security bundles group under
+// "Security"; ops is ships:false (visible here because the mock plays an internal build).
 const PERSONAS = {
+  internal: true,
   personas: [
-    { id: "cowork", name: "OpenWorker", icon: "cowork", tagline: "Produce a deliverable — research, analysis, scripts", needs_workspace: true, builtin: true, family: "knowledge", workspace: "deliverable", tools: ["files", "search"], enabled: true, surfaced: true, default: true },
-    { id: "code", name: "Code", icon: "code", tagline: "Work in a codebase — files, git, shell", needs_workspace: true, builtin: true, family: "code", workspace: "git", tools: ["code_files", "git"], enabled: true, surfaced: true, default: false },
-    { id: "chat", name: "Chat", icon: "chat", tagline: "Quick questions — no workspace", needs_workspace: false, builtin: true, family: "knowledge", workspace: "none", tools: [], enabled: false, surfaced: false, default: false },
-    { id: "ops", name: "Ops Coworker", icon: "wrench", tagline: "Operate and investigate — runbooks, logs, infrastructure", needs_workspace: true, builtin: true, family: "knowledge", workspace: "deliverable", tools: ["files", "shell"], enabled: true, surfaced: true, default: false },
+    { id: "cowork", name: "OpenWorker", icon: "cowork", tagline: "Produce a deliverable — research, analysis, scripts", needs_workspace: true, builtin: true, family: "knowledge", workspace: "deliverable", tools: ["files", "search"], enabled: true, surfaced: true, default: true, ships: true, group: "general" },
+    { id: "code", name: "Code", icon: "code", tagline: "Work in a codebase — files, git, shell", needs_workspace: true, builtin: true, family: "code", workspace: "git", tools: ["code_files", "git"], enabled: false, surfaced: false, default: false, ships: true, group: "general" },
+    { id: "security", name: "Security Coworker", icon: "shield", tagline: "Find and fix security issues — scan, triage, PR", needs_workspace: true, builtin: true, family: "code", workspace: "git", tools: ["code_files", "git", "shell"], enabled: true, surfaced: true, default: false, ships: true, group: "security" },
+    { id: "ops", name: "Ops Coworker", icon: "wrench", tagline: "Operate and investigate — runbooks, logs, infrastructure", needs_workspace: true, builtin: true, family: "knowledge", workspace: "deliverable", tools: ["files", "shell"], enabled: true, surfaced: true, default: false, ships: false, group: "general" },
     // A non-builtin install (disabled pending consent — invisible to picker specs) so the
     // Personas page's delete/enable affordances have a target.
-    { id: "acme-notes", name: "Acme Notes", icon: "pencil", tagline: "Acme's note-taking coworker", needs_workspace: true, builtin: false, family: "knowledge", workspace: "deliverable", tools: ["files"], enabled: false, surfaced: false, default: false },
+    { id: "acme-notes", name: "Acme Notes", icon: "pencil", tagline: "Acme's note-taking coworker", needs_workspace: true, builtin: false, family: "knowledge", workspace: "deliverable", tools: ["files"], enabled: false, surfaced: false, default: false, ships: true, group: "general" },
   ],
 };
 
@@ -1395,8 +1398,24 @@ export async function mockApi(page: import("@playwright/test").Page) {
       personas.splice(i, 1);
       return json({ ok: true, personas });
     }
-    if (/\/v1\/personas\/[^/]+$/.test(p)) return json(PERSONA_DETAIL);
-    if (p.endsWith("/v1/personas")) return json({ personas });
+    if (/\/v1\/personas\/[^/]+$/.test(p)) {
+      // Detail merges the live list row over the static shape, so enable/surface/default
+      // state and builtin-ness track the same mutable array the list serves.
+      const id = decodeURIComponent(p.split("/").pop() || "");
+      const base = personas.find((x) => x.id === id);
+      return json({
+        ...PERSONA_DETAIL,
+        media: [],
+        surfaced: true,
+        default: false,
+        builtin: true,
+        group: "general",
+        ...(base || {}),
+        recommends: PERSONA_DETAIL.recommends,
+        default_connections: PERSONA_DETAIL.default_connections,
+      });
+    }
+    if (p.endsWith("/v1/personas")) return json({ internal: PERSONAS.internal, personas });
     if (p.endsWith("/v1/sessions")) return json({ sessions });
     if (/\/v1\/connectors\/slack\/unauthorized\/[^/]+$/.test(p) && m === "POST") {
       const id = p.split("/").pop();

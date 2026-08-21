@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  deletePersona,
-  exportPersona,
-  getPersonas,
+  getPersonasIndex,
   getSessions,
   installPersona,
   updatePersona,
@@ -12,14 +10,13 @@ import {
 import { chooseFolder } from "../tauri";
 import type { SessionInfo } from "../types";
 import { Icon } from "./Icon";
+import { Toggle } from "./Toggle";
 
-// Personas management: enable a persona, choose whether it shows in the new-session picker,
-// set the default, and install more from a local directory or a GitHub repo (snapshotted).
-// Re-skinned to the mock's Tailwind card idiom (§ Settings-as-page); the page title supplies the
-// heading, so this drops its own "Personas" sub-header.
+// Personas management (UX-035): grouped General/Security lists with ONE toggle per row
+// (enable implies picker); in-picker nuance, set-default, export and delete live on the
+// per-coworker detail page. Unshipped coworkers (ships:false) and the installer are quiet
+// text disclosures at the bottom; Folder/Zip install through native pickers.
 const CARD = "rounded-xl2 border border-line bg-panel";
-const SEC_H = "text-[11px] uppercase tracking-[0.05em] text-faint font-semibold";
-const CHECK = "flex items-center gap-1.5 text-[12.5px] text-muted select-none shrink-0";
 const SELECT = "px-2.5 py-2 rounded-lg border border-line bg-paper text-[13px] text-ink shrink-0";
 const INPUT =
   "flex-1 min-w-0 px-3 py-2 rounded-lg border border-line bg-paper text-[13px] text-ink outline-none focus:border-accent";
@@ -27,14 +24,26 @@ const BTN_ACCENT = "text-[12.5px] px-3 py-2 rounded-lg bg-accent text-white shri
 const BTN_BORDERED =
   "text-[12.5px] px-2.5 py-1.5 rounded-lg border border-line bg-paper hover:border-lineStrong shrink-0 disabled:opacity-40 disabled:hover:border-line";
 
-export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) => void }) {
+const QUIET_ROW =
+  "w-full flex items-center gap-2 px-4 pt-2 mt-6 text-[12.5px] text-muted select-none";
+
+export function PersonasTab({
+  onOpenPersona,
+  onMeta,
+}: {
+  onOpenPersona?: (id: string) => void;
+  // Lets the section gate internal-build affordances (the Gallery entry point).
+  onMeta?: (meta: { internal: boolean }) => void;
+}) {
   const [personas, setPersonas] = useState<Persona[]>([]);
+  const [internal, setInternal] = useState(false);
   const [mode, setMode] = useState<"git" | "dir" | "zip">("git");
   const [src, setSrc] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [consent, setConsent] = useState<PersonaConsent[] | null>(null);
-  const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  const [showUnshipped, setShowUnshipped] = useState(false);
+  const [showInstall, setShowInstall] = useState(false);
   // Disabling archives the persona's conversations (server-side), so when there are any we
   // arm an inline confirm (same two-step idiom as delete) instead of flipping immediately.
   const [confirmOff, setConfirmOff] = useState<string | null>(null);
@@ -43,12 +52,25 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
   // front and center (sharing v1).
   const addRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    const focus = () => addRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const focus = () => {
+      setShowInstall(true); // the installer is a collapsed disclosure — open it first
+      setTimeout(
+        () => addRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }),
+        0,
+      );
+    };
     window.addEventListener("ocw-focus-import", focus);
     return () => window.removeEventListener("ocw-focus-import", focus);
   }, []);
 
-  const reload = () => getPersonas().then(setPersonas).catch(() => {});
+  const reload = () =>
+    getPersonasIndex()
+      .then((r) => {
+        setPersonas(r.personas);
+        setInternal(r.internal);
+        onMeta?.({ internal: r.internal });
+      })
+      .catch(() => {});
   const reloadSessions = () => getSessions().then(setSessions).catch(() => {});
   useEffect(() => {
     reload();
@@ -74,17 +96,6 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
     else toggle(p.id, { enabled: false });
   };
 
-  const remove = async (id: string) => {
-    setConfirmDel(null);
-    const r = await deletePersona(id);
-    if (!r.ok) {
-      setMsg(r.error || "delete failed");
-      return;
-    }
-    if (r.personas) setPersonas(r.personas);
-    else reload();
-  };
-
   const finishInstall = (r: Awaited<ReturnType<typeof installPersona>>) => {
     setBusy(false);
     if (!r.ok) {
@@ -95,6 +106,16 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
     if (r.personas) setPersonas(r.personas);
     setMsg(`Installed ${(r.consent || []).length} coworker(s) — review and enable below.`);
     setSrc("");
+  };
+
+  // Folder installs go through the native picker — no path typing (owner, 2026-08-21).
+  const installDir = async () => {
+    const dir = await chooseFolder();
+    if (!dir) return;
+    setBusy(true);
+    setMsg(null);
+    setConsent(null);
+    finishInstall(await installPersona({ dir }));
   };
 
   const installZip = async (file: File) => {
@@ -108,21 +129,12 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
     finishInstall(await installPersona({ zip_b64: btoa(bin), filename: file.name }));
   };
 
-  const exportOne = async (p: Persona) => {
-    const dir = await chooseFolder();
-    if (!dir) return;
-    const r = await exportPersona(p.id, dir);
-    setMsg(r.ok ? `Exported to ${r.path}` : r.error || "export failed");
-  };
-
   const install = async () => {
     if (!src.trim()) return;
     setBusy(true);
     setMsg(null);
     setConsent(null);
-    const r = await installPersona(
-      mode === "git" ? { git_url: src.trim() } : { dir: src.trim() },
-    );
+    const r = await installPersona({ git_url: src.trim() });
     setBusy(false);
     if (!r.ok) {
       setMsg(r.error || "install failed");
@@ -134,171 +146,192 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
     setSrc("");
   };
 
+  const unshipped = personas.filter((p) => p.ships === false);
+
+  const group = (title: string | null, list: Persona[]) => {
+    if (list.length === 0) return null;
+    return (
+      <div className={title ? "" : "mt-1.5"}>
+        {title && (
+          <div className="text-[12px] font-semibold text-muted px-4 mt-6 mb-1.5 first:mt-0">
+            {title}
+          </div>
+        )}
+        <div className={CARD + " divide-y divide-line"}>
+          {list.map((p) => (
+            <div key={p.id} className="px-[18px] py-4">
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[14px] font-medium flex items-center gap-1.5">
+                    <span className="truncate">{p.name}</span>
+                    {p.default && (
+                      <span className="text-accent" title="Default for new sessions">★</span>
+                    )}
+                  </div>
+                  <div className="text-[12px] text-faint truncate mt-0.5">{p.tagline}</div>
+                </div>
+                <Toggle
+                  checked={p.enabled}
+                  onChange={(next) =>
+                    next ? toggle(p.id, { enabled: true }) : requestDisable(p)
+                  }
+                  title={p.enabled ? "Disable this coworker" : "Enable this coworker"}
+                />
+                {onOpenPersona && (
+                  <button
+                    className="text-faint hover:text-ink shrink-0 p-1"
+                    title={`Configure ${p.name}`}
+                    aria-label={`Configure ${p.name}`}
+                    data-testid={`persona-configure-${p.id}`}
+                    onClick={() => onOpenPersona(p.id)}
+                  >
+                    <Icon name="sliders" size={15} />
+                  </button>
+                )}
+              </div>
+              {confirmOff === p.id && (
+                <div
+                  className="mt-2 flex items-center gap-2.5 text-[12px] text-muted"
+                  data-testid={`persona-disable-warning-${p.id}`}
+                >
+                  <span className="min-w-0">
+                    Disabling archives its {liveCount(p.id)} conversation
+                    {liveCount(p.id) === 1 ? "" : "s"} — they stay available under “Show
+                    archived”.
+                  </span>
+                  <button
+                    className="text-[12px] px-2.5 py-1.5 rounded-lg bg-accent text-white shrink-0"
+                    data-testid={`persona-disable-confirm-${p.id}`}
+                    onClick={() => {
+                      setConfirmOff(null);
+                      toggle(p.id, { enabled: false });
+                    }}
+                  >
+                    Disable
+                  </button>
+                  <button className={BTN_BORDERED} onClick={() => setConfirmOff(null)}>
+                    Keep enabled
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div>
-      {/* No intro line here — the PanelHead above already explains the page
-          (the two stacked one-liners read as duplicates, owner 2026-08-21). */}
-      <div className={CARD + " divide-y divide-line mb-6"}>
-        {personas.map((p) => (
-          <div key={p.id} className="px-4 py-3">
-            <div className="flex items-center gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="text-[13.5px] font-medium flex items-center gap-1.5">
-                <span className="truncate">{p.name}</span>
-                {p.default && <span className="text-accent" title="Default for new sessions">★</span>}
-                {p.builtin && <span className="text-[11px] text-faint font-normal">· built-in</span>}
-              </div>
-              <div className="text-[12px] text-muted truncate">{p.tagline}</div>
-            </div>
-            <label className={CHECK}>
-              <input
-                type="checkbox"
-                checked={p.enabled}
-                onChange={(e) =>
-                  e.target.checked ? toggle(p.id, { enabled: true }) : requestDisable(p)
-                }
-              />
-              Enabled
-            </label>
-            <label className={CHECK + (p.enabled ? "" : " opacity-40")}>
-              <input
-                type="checkbox"
-                checked={p.surfaced}
-                disabled={!p.enabled}
-                onChange={(e) => toggle(p.id, { surfaced: e.target.checked })}
-              />
-              In picker
-            </label>
-            <button
-              className={BTN_BORDERED}
-              disabled={p.default || !p.enabled}
-              onClick={() => toggle(p.id, { default: true })}
+      {/* One toggle per row (enable implies picker); ★ marks the default. Everything
+          else — in-picker nuance, default, export, delete — lives on the detail page. */}
+      {group("General", personas.filter((p) => p.ships !== false && p.group !== "security"))}
+      {group("Security", personas.filter((p) => p.ships !== false && p.group === "security"))}
+
+      {unshipped.length > 0 && (
+        <>
+          <button
+            className={QUIET_ROW}
+            data-testid="unshipped-disclosure"
+            onClick={() => setShowUnshipped((v) => !v)}
+          >
+            <Icon
+              name="chevronRight"
+              size={12}
+              className={"transition-transform" + (showUnshipped ? " rotate-90" : "")}
+            />
+            <span>Not in this release · {unshipped.length} coworkers</span>
+            <span className="ml-auto text-faint text-[12px]">
+              {internal ? "internal build" : "not in this release"}
+            </span>
+          </button>
+          {showUnshipped && group(null, unshipped)}
+        </>
+      )}
+
+      <button
+        ref={addRef as any}
+        className={QUIET_ROW}
+        data-testid="install-disclosure"
+        onClick={() => setShowInstall((v) => !v)}
+      >
+        <Icon
+          name="chevronRight"
+          size={12}
+          className={"transition-transform" + (showInstall ? " rotate-90" : "")}
+        />
+        <span>Install a coworker</span>
+        <span className="ml-auto text-faint text-[12px]">GitHub · folder · .zip</span>
+      </button>
+      {showInstall && (
+        <div className={CARD + " mt-1.5 p-4"}>
+          <div className="flex items-center gap-2">
+            <select
+              className={SELECT}
+              value={mode}
+              onChange={(e) => setMode(e.target.value as "git" | "dir" | "zip")}
             >
-              Set default
-            </button>
-            {onOpenPersona && (
-              <button
-                className="text-faint hover:text-ink shrink-0 p-1"
-                title={`Configure ${p.name}`}
-                aria-label={`Configure ${p.name}`}
-                data-testid={`persona-configure-${p.id}`}
-                onClick={() => onOpenPersona(p.id)}
-              >
-                <Icon name="sliders" size={15} />
-              </button>
-            )}
-            {!p.builtin && (
-              <button
-                className={BTN_BORDERED}
-                title="Export this coworker as a shareable bundle"
-                data-testid={`persona-export-${p.id}`}
-                onClick={() => void exportOne(p)}
-              >
-                Export…
-              </button>
-            )}
-            {!p.builtin &&
-              (confirmDel === p.id ? (
-                <span className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    className="text-[12px] px-2 py-1.5 rounded-lg bg-danger text-white"
-                    data-testid={`persona-delete-confirm-${p.id}`}
-                    onClick={() => remove(p.id)}
-                  >
-                    Delete
-                  </button>
-                  <button className={BTN_BORDERED} onClick={() => setConfirmDel(null)}>
-                    Keep
-                  </button>
-                </span>
-              ) : (
-                <button
-                  className="text-faint hover:text-danger shrink-0 p-1"
-                  title="Delete this coworker"
-                  aria-label={`Delete ${p.name}`}
-                  data-testid={`persona-delete-${p.id}`}
-                  onClick={() => setConfirmDel(p.id)}
-                >
-                  <Icon name="trash" size={14} />
+              <option value="git">GitHub URL</option>
+              <option value="dir">Local folder</option>
+              <option value="zip">Bundle zip</option>
+            </select>
+            {mode === "git" ? (
+              <>
+                <input
+                  className={INPUT}
+                  placeholder="https://github.com/acme/ops-coworker"
+                  value={src}
+                  onChange={(e) => setSrc(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && install()}
+                />
+                <button className={BTN_ACCENT} disabled={busy || !src.trim()} onClick={install}>
+                  {busy ? "Installing…" : "Install"}
                 </button>
-              ))}
-            </div>
-            {confirmOff === p.id && (
-              <div
-                className="mt-2 flex items-center gap-2.5 text-[12px] text-muted"
-                data-testid={`persona-disable-warning-${p.id}`}
-              >
-                <span className="min-w-0">
-                  Disabling archives its {liveCount(p.id)} conversation
-                  {liveCount(p.id) === 1 ? "" : "s"} — they stay available under “Show
-                  archived”.
-                </span>
+              </>
+            ) : mode === "dir" ? (
+              <>
                 <button
-                  className="text-[12px] px-2.5 py-1.5 rounded-lg bg-accent text-white shrink-0"
-                  data-testid={`persona-disable-confirm-${p.id}`}
-                  onClick={() => {
-                    setConfirmOff(null);
-                    toggle(p.id, { enabled: false });
+                  className={BTN_BORDERED}
+                  disabled={busy}
+                  data-testid="persona-dir-choose"
+                  onClick={() => void installDir()}
+                >
+                  {busy ? "Installing…" : "Choose folder…"}
+                </button>
+                <span className="text-[12px] text-faint">
+                  Opens the system folder picker; installs on selection.
+                </span>
+              </>
+            ) : (
+              <label className={BTN_BORDERED + " cursor-pointer"}>
+                {busy ? "Installing…" : "Choose a .zip bundle…"}
+                <input
+                  type="file"
+                  accept=".zip"
+                  className="hidden"
+                  data-testid="persona-zip-input"
+                  disabled={busy}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void installZip(f);
+                    e.target.value = "";
                   }}
-                >
-                  Disable
-                </button>
-                <button className={BTN_BORDERED} onClick={() => setConfirmOff(null)}>
-                  Keep enabled
-                </button>
-              </div>
+                />
+              </label>
             )}
           </div>
-        ))}
-      </div>
-
-      <div ref={addRef} className={SEC_H + " mb-1.5"}>Add coworkers</div>
-      <p className="text-[12px] text-muted mb-3 leading-relaxed">
-        Load from a local directory or a public GitHub repo. Files are copied into a managed area (a
-        snapshot), so the coworker stays stable even if the source changes. No code runs — a coworker only
-        composes vetted tools.
-      </p>
-      <div className="flex items-center gap-2">
-        <select
-          className={SELECT}
-          value={mode}
-          onChange={(e) => setMode(e.target.value as "git" | "dir" | "zip")}
-        >
-          <option value="git">GitHub URL</option>
-          <option value="dir">Local directory</option>
-          <option value="zip">Bundle zip</option>
-        </select>
-        {mode === "zip" ? (
-          <label className={BTN_BORDERED + " cursor-pointer"}>
-            {busy ? "Installing…" : "Choose a .zip bundle…"}
-            <input
-              type="file"
-              accept=".zip"
-              className="hidden"
-              data-testid="persona-zip-input"
-              disabled={busy}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void installZip(f);
-                e.target.value = "";
-              }}
-            />
-          </label>
-        ) : (
-          <>
-            <input
-              className={INPUT}
-              placeholder={mode === "git" ? "https://github.com/acme/ops-coworker" : "/path/to/coworkers"}
-              value={src}
-              onChange={(e) => setSrc(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && install()}
-            />
-            <button className={BTN_ACCENT} disabled={busy || !src.trim()} onClick={install}>
-              {busy ? "Installing…" : "Install"}
-            </button>
-          </>
-        )}
-      </div>
+          <div className="flex items-start gap-2 mt-3 text-[12px] text-muted leading-relaxed">
+            <span className="text-warnInk shrink-0">⚠</span>
+            <span>
+              Only install coworkers from sources you trust and can hold accountable — a
+              coworker runs with access to your system. Files are snapshotted into a managed
+              area; no third-party code runs, but the instructions steer the coworker. Best
+              used by teams whose lead builds and distributes coworkers through official
+              channels.
+            </span>
+          </div>
+        </div>
+      )}
       {msg && <div className="text-[12.5px] text-muted mt-2.5">{msg}</div>}
 
       {consent && consent.length > 0 && (

@@ -26,7 +26,7 @@ test("enabling an installed persona surfaces it in picker + sidebar without relo
   const row = page.locator(".divide-y > div").filter({ hasText: "Acme Notes" });
   // Controlled checkbox: the DOM state flips only after the POST round-trip, so click + expect
   // (a plain .check() asserts the state synchronously and fails).
-  const enabled = row.getByRole("checkbox", { name: "Enabled" });
+  const enabled = row.getByRole("switch");
   await enabled.click();
   await expect(enabled).toBeChecked();
 
@@ -50,8 +50,10 @@ test("disabling a persona with conversations asks first, then archives them", as
   await page.getByTestId("account-row").click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Coworkers", exact: true }).click();
+  // Ops is ships:false — it lives in the collapsed "Not in this release" group.
+  await page.getByTestId("unshipped-disclosure").click();
   const row = page.locator(".divide-y > div").filter({ hasText: "Ops Coworker" });
-  const enabled = row.getByRole("checkbox", { name: "Enabled" });
+  const enabled = row.getByRole("switch");
 
   // Unchecking only ARMS the confirm — the flag must not flip yet.
   await enabled.click();
@@ -76,9 +78,11 @@ test("disabling a persona with no conversations skips the confirm", async ({ pag
   await page.getByTestId("account-row").click();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Coworkers", exact: true }).click();
-  const row = page.locator(".divide-y > div").filter({ hasText: "Code" });
-  const enabled = row.getByRole("checkbox", { name: "Enabled" });
+  // Security ships enabled and has no conversations in the fixtures (Code now ships
+  // disabled, so it can't exercise the disable path).
+  const row = page.locator(".divide-y > div").filter({ hasText: "Security Coworker" });
+  const enabled = row.getByRole("switch");
   await enabled.click();
-  await expect(page.getByTestId("persona-disable-warning-code")).toHaveCount(0);
+  await expect(page.getByTestId("persona-disable-warning-security")).toHaveCount(0);
   await expect(enabled).not.toBeChecked();
 });
