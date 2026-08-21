@@ -62,8 +62,10 @@
   --paper: #f5f6f7;          /* cool light gray — washes/chips over panel or canvas */
   --panel: #ffffff;
   /* UX-039 surface hierarchy: content brightest, chrome tinted. The chat column sits on
-     --canvas; the sidebar + right rail sit on --chrome and recede. */
-  --canvas: #ffffff;
+     --canvas; the sidebar + right rail sit on --chrome and recede. Canvas is a whisper
+     off pure white (owner call 2026-08-21: full #fff read as glare) — still clearly
+     brighter than the chrome, and panel-white cards still lift off it. */
+  --canvas: #fafbfc;
   --chrome: #f2f3f5;
   --chrome-hover: #e9ebee;
   --ink: #17191c;
