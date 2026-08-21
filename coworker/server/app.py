@@ -2073,6 +2073,20 @@ def create_app(manager: SessionManager) -> FastAPI:
             """
             name = str(args.get("name", "")).strip()
             info = toolchain.describe(name)
+            if not info:
+                # Not in the pinned catalog: never show an install card that can only
+                # end in "no pinned build" AFTER approval (owner-hit 2026-08-20 — agents
+                # routed ordinary brew/pip installs through the card). Steer to the
+                # shell, which has its own approval flow.
+                return {
+                    "installed": False,
+                    "error": (
+                        f"'{name}' is not in the pinned tool catalog "
+                        f"({', '.join(sorted(toolchain.MANAGED))}). Install it yourself "
+                        "with the shell (brew/pip/…, subject to the normal command "
+                        "approval), or proceed without it and note the gap."
+                    ),
+                }
             item = manager.inbox.add_tool_request(
                 session_id,
                 f"Install {name}?" if name else "Install a tool?",

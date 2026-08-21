@@ -1132,6 +1132,23 @@ class TurnEngine:
                     "your report which checks were degraded."
                 ),
             }
+        elif _toolchain.describe(name) is None:
+            # Not in the pinned catalog: no card at all (owner-hit 2026-08-20 — agents
+            # routed ordinary brew/pip installs through the install card, which could
+            # only fail after approval). The agent has a shell with its own approval
+            # flow; steer it there instead of at the user.
+            catalog = ", ".join(sorted(_toolchain.MANAGED))
+            result = {
+                "installed": False,
+                "error": (
+                    f"'{name}' is not in the pinned tool catalog ({catalog})."
+                ),
+                "guidance": (
+                    "Install it yourself with the shell (brew/pip/…, subject to the "
+                    "normal command approval), or continue without it and say in your "
+                    "report which checks were degraded."
+                ),
+            }
         else:
             # The prompt must say up front whether WE can install this (pinned build for
             # this platform) — a card that offers Install for a tool we can't fetch turns

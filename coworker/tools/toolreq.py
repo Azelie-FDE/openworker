@@ -17,8 +17,13 @@ from aisuite.agents import ToolMetadata, tool
 
 def request_tool_tool() -> object:
     def request_tool(name: str, reason: str) -> dict:
-        """Ask the user to install a command-line tool you need but can't find on this
-        machine (e.g. `gitleaks`, `osv-scanner`, `semgrep`).
+        """Ask the user to install one of the PINNED catalog tools you need but can't find
+        on this machine. The catalog is a small closed set — currently `gitleaks`,
+        `trivy`, `osv-scanner` — installed at a pinned, checksum-verified version.
+
+        For ANY other missing CLI (semgrep, jq, kubectl, …) do NOT use this tool: install
+        it yourself with the shell (brew/pip/…), which goes through the normal command
+        approval, or proceed without it.
 
         Keep `reason` to ONE sentence: which check needs the tool. The prompt the user
         sees already explains what the install is (pinned version, publisher, checksum)

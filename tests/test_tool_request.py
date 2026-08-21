@@ -118,7 +118,7 @@ async def test_decline_recheck_finds_a_copy_the_user_installed_themselves(tmp_pa
 async def test_event_tells_the_truth_about_installability(tmp_path, monkeypatch):
     """Owner-hit 2026-08-14: the card offered Install for a tool with no pinned build —
     the surface guessed because the event said nothing. The event must carry the
-    registry's verdict, and no metadata means NO."""
+    registry's verdict for catalog tools."""
     from coworker import toolchain
 
     monkeypatch.setattr(toolchain, "_platform_key", lambda: "darwin_arm64")
@@ -133,10 +133,29 @@ async def test_event_tells_the_truth_about_installability(tmp_path, monkeypatch)
     assert data["summary"]
     assert data["source"] == "github.com/gitleaks"
 
-    events = await _run(_engine(tmp_path, requester, tool="not-a-managed-tool"))
-    data = [e for e in events if e.type is EventType.TOOL_REQUESTED][0].data
-    assert data["installable"] is False
-    assert data["version"] == "" and data["summary"] == ""
+
+@pytest.mark.asyncio
+async def test_non_catalog_tool_gets_no_card_and_a_shell_steer(tmp_path, monkeypatch):
+    """Owner-hit 2026-08-20: agents routed ordinary brew/pip installs through the
+    install card, which could only fail AFTER the user approved. A non-catalog name
+    must produce NO prompt at all — just a result steering the agent to the shell."""
+    from coworker import toolchain
+
+    monkeypatch.setattr(toolchain, "_platform_key", lambda: "darwin_arm64")
+    called = []
+
+    async def requester(args, tool_call_id=None):
+        called.append(args)
+        return {"installed": False, "reason": "declined"}
+
+    engine = _engine(tmp_path, requester, tool="semgrep")
+    events = await _run(engine)
+    assert not [e for e in events if e.type is EventType.TOOL_REQUESTED]
+    assert called == []  # the user was never asked
+    tool_msg = [m for m in engine.messages if m.get("role") == "tool"][-1]
+    body = str(tool_msg["content"])
+    assert "not in the pinned tool catalog" in body
+    assert "shell" in body and "gitleaks" in body  # the catalog is named
 
 
 @pytest.mark.asyncio
