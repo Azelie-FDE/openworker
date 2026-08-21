@@ -70,6 +70,6 @@ test("coworker picker recovers when the persona fetch dies during sidecar boot",
 
   // The menu must list real coworkers, not just its Import/Manage footer.
   const menu = page.locator(".setup-menu");
-  await expect(menu.getByText("Code Coworker")).toBeVisible({ timeout: 10_000 });
+  await expect(menu.getByText("Security Coworker")).toBeVisible({ timeout: 10_000 });
   await expect(menu.getByTestId("import-coworker")).toBeVisible();
 });
