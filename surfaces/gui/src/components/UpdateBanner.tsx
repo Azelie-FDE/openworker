@@ -78,13 +78,13 @@ export function UpdateBanner() {
   const busy = phase === "downloading" || phase === "installing";
 
   return (
-    // Docked over the sidebar column (FB-002, owner call): 264px grid column minus the
+    // Docked over the sidebar column (FB-002, owner call): 300px grid column minus the
     // 12px side margins, bottom offset clearing the ~57px account row so the card sits
     // just above it. z-[35]: above the account menu's click-away backdrop (z-30) so the
     // card stays clickable, but BELOW the menu itself (z-40) — an open menu must never
     // be occluded by a passive status card.
     <div
-      className="fixed bottom-[64px] left-3 z-[35] w-[240px] rounded-xl border border-line bg-panel shadow-2xl px-4 py-3.5"
+      className="fixed bottom-[64px] left-3 z-[35] w-[276px] rounded-xl border border-line bg-panel shadow-2xl px-4 py-3.5"
       role="status"
       data-testid="update-banner"
     >
