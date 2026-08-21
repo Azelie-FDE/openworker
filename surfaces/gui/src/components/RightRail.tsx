@@ -176,8 +176,16 @@ export function RightRail({
   }, [selected?.path, sessionId]);
 
   // Notify the app when a preview opens/closes (drives the left-nav auto-collapse).
+  // Edge-triggered on the ACTUAL transition — a callback-identity change must never
+  // replay "open" while the viewer sits open (that re-collapsed a nav the user had
+  // just expanded; owner-hit 2026-08-21).
+  const prevPreviewOpen = useRef(false);
   useEffect(() => {
-    onPreviewChange?.(!!selected);
+    const open = !!selected;
+    if (open !== prevPreviewOpen.current) {
+      prevPreviewOpen.current = open;
+      onPreviewChange?.(open);
+    }
   }, [!!selected, onPreviewChange]);
 
   const reloadSelected = () => {

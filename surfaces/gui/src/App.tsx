@@ -304,16 +304,22 @@ export function App() {
   }, [navCollapsed, setNavCollapsedPersist]);
   // #3: collapse the nav while a full artifact preview is open, restore it on close (unless the
   // user manually toggled meanwhile). The collapse is transient — it never overwrites the pref.
+  // STABLE identity (no deps): depending on navCollapsed changed this callback's identity on
+  // every nav toggle, which re-ran the rail's notify effect with the viewer still open and
+  // re-collapsed the nav the instant the user expanded it (owner-hit 2026-08-21). The current
+  // collapse state is read through the functional updater instead.
   const onArtifactPreview = useCallback((open: boolean) => {
     if (open) {
-      if (navBeforePreview.current === null) navBeforePreview.current = navCollapsed;
       setNavPeek(false);
-      setNavCollapsed(true);
+      setNavCollapsed((cur) => {
+        if (navBeforePreview.current === null) navBeforePreview.current = cur;
+        return true;
+      });
     } else if (navBeforePreview.current !== null) {
       setNavCollapsed(navBeforePreview.current);
       navBeforePreview.current = null;
     }
-  }, [navCollapsed]);
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
