@@ -1016,12 +1016,12 @@ export function Sidebar(props: Props) {
         <div className="brand-wordmark text-[14px]">OpenWorker<span className="beta-tag">BETA</span></div>
       </div>
 
-      {/* New session: a plain button — the coworker pick moved to the composer's setup
-          row (UX-029), so the old ▾ persona menu is gone. Starts the last-used persona;
-          the setup row re-targets the draft in place. */}
-      <div className="px-3 pt-2">
+      {/* New session: a quiet nav row like its siblings (UX-040 — the filled accent block
+          shouted over the whole panel). The coworker pick lives in the composer's setup
+          row (UX-029); this starts the last-used persona. */}
+      <div className="px-2.5 pt-2">
         <button
-          className="w-full text-left px-3 py-2 rounded-lg bg-accent text-white text-[13px] font-medium hover:opacity-95 flex items-center gap-2"
+          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-left font-medium text-ink hover:bg-chromeHover"
           onClick={() => props.onNewSession(props.agent)}
         >
           <Icon name="plus" size={15} className="shrink-0" /> New session
@@ -1057,8 +1057,9 @@ export function Sidebar(props: Props) {
 
       {/* Scroll area: Pinned band + the RECENT header (with group/filter control), then the body —
           grouped (per-persona accordion) or flat (chronological list). */}
-      <div className="flex-1 overflow-y-auto px-2.5 mt-3 pb-2">
-        <div className="space-y-4">
+      {/* UX-040 rhythm: clear air between the fixed nav block and the content bands. */}
+      <div className="flex-1 overflow-y-auto px-2.5 mt-[22px] pb-2">
+        <div className="space-y-5">
           {pinnedBand()}
           {scheduledBand()}
           <div>
