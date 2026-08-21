@@ -388,8 +388,7 @@ function PersonasSection({ onOpenPersona }: { onOpenPersona?: (id: string) => vo
       <p className="text-[13px] text-muted leading-relaxed max-w-[560px] mt-5 mb-1">
         Coworkers are agents specialized for a particular role or task. They come equipped
         with the tools and skills to be successful in that role. Enabling a coworker lets
-        you pick it when starting a conversation — the starred one is the default for new
-        sessions.
+        you pick it when starting a conversation.
       </p>
       <PersonasTab
         key={galleryBump}

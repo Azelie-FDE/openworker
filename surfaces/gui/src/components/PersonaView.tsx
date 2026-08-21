@@ -182,11 +182,6 @@ export function PersonaView({
             <div className="min-w-0">
               <h1 className="text-[20px] font-semibold tracking-tight">
                 {fullPersonaName(detail.name, personaId)}
-                {detail.default && (
-                  <span className="text-accent text-[15px] ml-1.5" title="Default for new sessions">
-                    ★
-                  </span>
-                )}
               </h1>
               <p className="text-[13px] text-muted mt-0.5">{detail.tagline}</p>
             </div>

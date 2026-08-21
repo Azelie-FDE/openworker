@@ -151,42 +151,50 @@ export function PersonasTab({
   const group = (title: string | null, list: Persona[]) => {
     if (list.length === 0) return null;
     return (
-      <div className={title ? "" : "mt-1.5"}>
+      <div className={title ? "mt-7" : "mt-1.5"}>
         {title && (
-          <div className="text-[12px] font-semibold text-muted px-4 mt-6 mb-1.5 first:mt-0">
-            {title}
-          </div>
+          <div className="text-[12px] font-semibold text-muted px-4 mb-1.5">{title}</div>
         )}
         <div className={CARD + " divide-y divide-line"}>
           {list.map((p) => (
             <div key={p.id} className="px-[18px] py-4">
               <div className="flex items-center gap-3">
                 <div className="min-w-0 flex-1">
-                  <div className="text-[14px] font-medium flex items-center gap-1.5">
-                    <span className="truncate">{p.name}</span>
-                    {p.default && (
-                      <span className="text-accent" title="Default for new sessions">★</span>
-                    )}
-                  </div>
+                  <div className="text-[14px] font-medium truncate">{p.name}</div>
                   <div className="text-[12px] text-faint truncate mt-0.5">{p.tagline}</div>
                 </div>
-                <Toggle
-                  checked={p.enabled}
-                  onChange={(next) =>
-                    next ? toggle(p.id, { enabled: true }) : requestDisable(p)
-                  }
-                  title={p.enabled ? "Disable this coworker" : "Enable this coworker"}
-                />
-                {onOpenPersona && (
-                  <button
-                    className="text-faint hover:text-ink shrink-0 p-1"
-                    title={`Configure ${p.name}`}
-                    aria-label={`Configure ${p.name}`}
-                    data-testid={`persona-configure-${p.id}`}
-                    onClick={() => onOpenPersona(p.id)}
+                {p.default ? (
+                  /* The default coworker cannot be disabled or hidden — no toggle, no
+                     configure; a quiet tag says why (owner 2026-08-21). It regains its
+                     controls the moment another coworker is made default. */
+                  <span
+                    className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-paper border border-lineStrong text-muted shrink-0"
+                    title="Default for new sessions"
+                    data-testid="persona-default-tag"
                   >
-                    <Icon name="sliders" size={15} />
-                  </button>
+                    Default
+                  </span>
+                ) : (
+                  <>
+                    <Toggle
+                      checked={p.enabled}
+                      onChange={(next) =>
+                        next ? toggle(p.id, { enabled: true }) : requestDisable(p)
+                      }
+                      title={p.enabled ? "Disable this coworker" : "Enable this coworker"}
+                    />
+                    {onOpenPersona && (
+                      <button
+                        className="text-faint hover:text-ink shrink-0 p-1"
+                        title={`Configure ${p.name}`}
+                        aria-label={`Configure ${p.name}`}
+                        data-testid={`persona-configure-${p.id}`}
+                        onClick={() => onOpenPersona(p.id)}
+                      >
+                        <Icon name="sliders" size={15} />
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
               {confirmOff === p.id && (
