@@ -91,6 +91,11 @@ test("per-session mute round-trips; the summary follows", async ({ page }) => {
   const body = page.getByRole("region", { name: "Session access" });
   // Muting Slack for this session drops it from the live summary (the fixture flips
   // enabled on POST and the section reloads).
-  await body.getByTitle("Enabled for this session — tap to mute here").nth(1).click();
+  await body
+    .getByTitle(
+      "On for this session. Off mutes it for this session only — the connector stays connected.",
+    )
+    .nth(1)
+    .click();
   await expect(section.getByTestId("access-summary")).toHaveText("Browser, GitHub · 1 folder");
 });

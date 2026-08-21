@@ -36,7 +36,11 @@ test("HTML artifact offers Open in browser as the unsandboxed escape hatch", asy
   page,
 }) => {
   await openReport(page);
+  // UX-038: the open action lives in the labeled ⋯ menu now.
+  await page.getByTestId("artifact-more").click();
   await expect(page.getByTestId("artifact-open-browser")).toBeVisible();
+  await expect(page.getByTestId("artifact-copy-contents")).toBeVisible();
+  await expect(page.getByTestId("artifact-copy-path")).toBeVisible();
 });
 
 test("a transcript chip opens the viewer on the FIRST click even with the rail hidden", async ({
@@ -70,4 +74,33 @@ test("Artifacts section renders for a folder-gated coworker too (universal scrat
   await expect(page.getByTestId("rail-toggle-artifacts")).toBeVisible();
   await page.getByTestId("rail-toggle-artifacts").click();
   await expect(page.locator(".artifact-row", { hasText: "security-review.html" })).toBeVisible();
+});
+
+test("Show sidebar sticks while the artifact viewer is open", async ({ page }) => {
+  // Owner-hit 2026-08-21: opening the viewer auto-collapses the nav (one-shot
+  // courtesy), but clicking "Show sidebar" then instantly re-collapsed it — the
+  // notify effect replayed "open" on a callback identity change. The user's
+  // explicit toggle must win.
+  await openReport(page);
+  await expect(page.getByRole("button", { name: "Show sidebar" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Show sidebar" }).click();
+  await page.waitForTimeout(400); // give a regression time to re-collapse
+  await expect(page.getByRole("button", { name: "Show sidebar" })).toHaveCount(0);
+  await expect(page.getByText("New session").first()).toBeVisible();
+  // The viewer stays open too — expanding the nav is navigation, not dismissal.
+  await expect(page.getByTestId("artifact-frame")).toBeVisible();
+});
+
+test("viewer breadcrumb goes back and ✕ closes (UX-038)", async ({ page }) => {
+  await openReport(page);
+  // The breadcrumb parent is the back action — returns to the rail sections.
+  await page.getByTestId("artifact-crumb-back").click();
+  await expect(page.getByTestId("rail-toggle-artifacts")).toBeVisible();
+
+  // Reopen (the section is still expanded from openReport), then ✕ closes the same way.
+  await page.locator(".artifact-row", { hasText: "security-review.html" }).click();
+  await expect(page.getByTestId("artifact-frame")).toBeVisible();
+  await page.getByTestId("artifact-close").click();
+  await expect(page.getByTestId("rail-toggle-artifacts")).toBeVisible();
 });

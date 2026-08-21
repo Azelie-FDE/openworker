@@ -176,8 +176,16 @@ export function RightRail({
   }, [selected?.path, sessionId]);
 
   // Notify the app when a preview opens/closes (drives the left-nav auto-collapse).
+  // Edge-triggered on the ACTUAL transition — a callback-identity change must never
+  // replay "open" while the viewer sits open (that re-collapsed a nav the user had
+  // just expanded; owner-hit 2026-08-21).
+  const prevPreviewOpen = useRef(false);
   useEffect(() => {
-    onPreviewChange?.(!!selected);
+    const open = !!selected;
+    if (open !== prevPreviewOpen.current) {
+      prevPreviewOpen.current = open;
+      onPreviewChange?.(open);
+    }
   }, [!!selected, onPreviewChange]);
 
   const reloadSelected = () => {
@@ -568,18 +576,60 @@ function ArtifactViewer({
   onOpenEntry?: (path: string) => void;
 }) {
   const [reloadKey, setReloadKey] = useState(0);
+  // UX-038: the ambiguous icon cluster collapsed into ONE labeled ⋯ menu; the
+  // breadcrumb parent is the back action and ✕ closes. Copy CONTENTS is the
+  // primary copy — the path copy (a 2026-07-12 tester fix) lives under it, labeled.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [menuOpen]);
   const isHtml = content?.kind === "html" && !content.error;
   // Best viewed in a real app: spreadsheets, PDFs, and Office docs (pptx/docx can't preview inline)
   const isApp = content?.kind === "sheet" || content?.kind === "pdf" || content?.kind === "office";
+  // Text-bearing kinds can copy their contents; images/PDFs/sheets have nothing textual to copy.
+  const copyableText = typeof content?.content === "string" && !content?.error;
+  const crumbRoot = artifact.origin === "files" ? "Files" : "Artifacts";
+  const item = (
+    testid: string,
+    icon: Parameters<typeof Icon>[0]["name"],
+    label: string,
+    onClick: () => void,
+  ) => (
+    <button
+      className="artifact-menu-item"
+      data-testid={testid}
+      onClick={() => {
+        setMenuOpen(false);
+        onClick();
+      }}
+    >
+      <Icon name={icon} size={14} />
+      <span>{label}</span>
+    </button>
+  );
 
   return (
     <div className="artifact-viewer">
       <div className="artifact-head">
-        <button className="artifact-icon-btn" onClick={onBack} aria-label="Back to artifacts" title="Back">
-          <Icon name="arrowLeft" size={16} />
-        </button>
         <div className="artifact-heading">
-          <div className="artifact-title"><span>{artifact.origin === "files" ? "Files" : "Artifacts"}</span><span className="artifact-sep">/</span><span>{artifact.name}</span></div>
+          <div className="artifact-title">
+            <button
+              className="artifact-crumb-link"
+              data-testid="artifact-crumb-back"
+              onClick={onBack}
+              title={`Back to ${crumbRoot}`}
+            >
+              {crumbRoot}
+            </button>
+            <span className="artifact-sep">/</span>
+            <span>{artifact.name}</span>
+          </div>
           <div className="artifact-path">{artifact.path}</div>
         </div>
         <div className="rail-actions">
@@ -596,47 +646,48 @@ function ArtifactViewer({
               <Icon name="refresh" size={16} />
             </button>
           )}
-          {isApp && (
+          <div className="artifact-menu-wrap" ref={menuRef}>
             <button
               className="artifact-icon-btn"
-              onClick={() => revealArtifact(sessionId, artifact.path, "open")}
-              aria-label="Open in default app"
-              title="Open in default app"
+              data-testid="artifact-more"
+              aria-label="More actions"
+              title="More"
+              onClick={() => setMenuOpen((v) => !v)}
             >
-              <Icon name="panelOpen" size={16} />
+              <Icon name="moreHorizontal" size={16} />
             </button>
-          )}
-          {isHtml && (
-            // The sandboxed preview is deliberately offline and null-origin; a real
-            // browser tab (system default app, outside app privileges) is the escape
-            // hatch for sharing or printing the page.
-            <button
-              className="artifact-icon-btn"
-              data-testid="artifact-open-browser"
-              onClick={() => revealArtifact(sessionId, artifact.path, "open")}
-              aria-label="Open in browser"
-              title="Open in browser"
-            >
-              <Icon name="panelOpen" size={16} />
-            </button>
-          )}
-          {/* Copy the ABSOLUTE path — the workspace-relative one is useless outside the app
-              (tester catch 2026-07-12: it copied just "slack-connector-debug.md"). */}
+            {menuOpen && (
+              <div className="artifact-menu" data-testid="artifact-menu">
+                {copyableText &&
+                  item("artifact-copy-contents", "copy", "Copy contents", () =>
+                    navigator.clipboard?.writeText(content?.content || ""),
+                  )}
+                {item("artifact-copy-path", "file", "Copy path", () =>
+                  navigator.clipboard?.writeText(artifact.abs_path || artifact.path),
+                )}
+                <div className="artifact-menu-div" />
+                {isHtml &&
+                  item("artifact-open-browser", "panelOpen", "Open in browser", () =>
+                    revealArtifact(sessionId, artifact.path, "open"),
+                  )}
+                {isApp &&
+                  item("artifact-open-app", "panelOpen", "Open in default app", () =>
+                    revealArtifact(sessionId, artifact.path, "open"),
+                  )}
+                {item("artifact-reveal", "folder", "Reveal in Finder", () =>
+                  revealArtifact(sessionId, artifact.path, "reveal"),
+                )}
+              </div>
+            )}
+          </div>
           <button
             className="artifact-icon-btn"
-            onClick={() => navigator.clipboard?.writeText(artifact.abs_path || artifact.path)}
-            aria-label="Copy path"
-            title="Copy full path"
+            data-testid="artifact-close"
+            onClick={onBack}
+            aria-label="Close the viewer"
+            title="Close"
           >
-            <Icon name="copy" size={16} />
-          </button>
-          <button
-            className="artifact-icon-btn"
-            onClick={() => revealArtifact(sessionId, artifact.path, "reveal")}
-            aria-label="Show in folder"
-            title="Show in folder"
-          >
-            <Icon name="folder" size={16} />
+            <Icon name="x" size={16} />
           </button>
         </div>
       </div>
