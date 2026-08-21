@@ -250,7 +250,7 @@ def test_session_set_override(tmp_path, monkeypatch):
 
 def test_declared_connector_allowlist_gates_session_tools(tmp_path):
     """OPE-93, owner-hit 2026-08-15: a security coworker declaring only [code tools]
-    had browser_snapshot in-session, because `connectors: true` exposed EVERY connected
+    had browser_read_page in-session, because `connectors: true` exposed EVERY connected
     connector. The grant is now declared ∩ connected — an undeclared connector's tools
     never enter the session, regardless of what the user has connected."""
     from coworker.agent import build_engine

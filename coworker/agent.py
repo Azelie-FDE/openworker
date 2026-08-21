@@ -6,6 +6,7 @@ the skill catalog (progressive disclosure) + load_skill into a TurnEngine.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -454,7 +455,12 @@ def build_engine(
     _engine_box: list = []
 
     def context_provider() -> str:
-        parts = []
+        # Live clock, every turn (owner ruling 2026-08-20): the environment block's
+        # "Today's date" is a session-START snapshot — stale for long-lived/self-waking
+        # sessions — and carries no time of day, which absolute scheduling
+        # (sleep_until, scheduled tasks) needs to compute wake times.
+        now = datetime.now().astimezone()
+        parts = [f"Now: {now.strftime('%Y-%m-%d %H:%M')} ({now.tzname()})"]
         if permissions.mode is Mode.PLAN:
             parts.append(_PLAN_MODE_CONTEXT)
         elif permissions.mode is Mode.DISCUSS:

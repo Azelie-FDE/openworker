@@ -43,7 +43,7 @@ def test_ops_persona_composes_knowledge_toolset(tmp_path):
     assert _names(reg.agent("ops"), ctx) == _names(cowork_agent(), ctx)
     a = reg.agent("ops")
     assert not a.requires_folder and a.scheduling and a.messaging and a.connectors
-    assert "read_file_lines" in _names(a, ctx)  # multi-root knowledge files
+    assert "read_file" in _names(a, ctx)  # windowed reader, multi-root aware
 
 
 def test_code_keeps_single_root_file_tools(tmp_path):

@@ -2009,7 +2009,7 @@ class SessionManager:
             delivered += await self._maybe_backstop_lead(team)
         return delivered
 
-    # The lead owns its cadence (sleep_for, stretch-when-quiet); this backstop only
+    # The lead owns its cadence (sleep_until, stretch-when-quiet); this backstop only
     # exists because prompts aren't guarantees. A forgotten timer must never orphan
     # a running team — and it de-facto covers a worker dying without a transition
     # (its item goes stale; the backstop wake surfaces it in the digest).
@@ -2045,7 +2045,7 @@ class SessionManager:
             " set.\n\n"
             + (self.team_staleness_digest(sid) or "Board state unavailable.")
             + "\n\nGlance, act only if something needs you, and set your next"
-            " check-in with sleep_for (start 3–5 minutes; stretch when quiet)."
+            " check-in with sleep_until (start 3–5 minutes out; stretch when quiet)."
         )
         self._team_inflight.add(sid)
 
@@ -4047,7 +4047,7 @@ class SessionManager:
 
     async def resume_due_wakes(self) -> int:
         """Resume sessions whose self-wakes are due (called each scheduler tick). A suspended
-        agent (it called sleep_for / wake_on / wake_on_event and ended its turn) is re-invoked on
+        agent (it called sleep_until / wake_on / wake_on_event and ended its turn) is re-invoked on
         its own session with a wake message so it continues where it left off. Returns the count.
         """
         resumed = 0
