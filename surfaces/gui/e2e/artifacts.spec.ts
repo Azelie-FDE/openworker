@@ -36,7 +36,11 @@ test("HTML artifact offers Open in browser as the unsandboxed escape hatch", asy
   page,
 }) => {
   await openReport(page);
+  // UX-038: the open action lives in the labeled ⋯ menu now.
+  await page.getByTestId("artifact-more").click();
   await expect(page.getByTestId("artifact-open-browser")).toBeVisible();
+  await expect(page.getByTestId("artifact-copy-contents")).toBeVisible();
+  await expect(page.getByTestId("artifact-copy-path")).toBeVisible();
 });
 
 test("a transcript chip opens the viewer on the FIRST click even with the rail hidden", async ({
@@ -86,4 +90,17 @@ test("Show sidebar sticks while the artifact viewer is open", async ({ page }) =
   await expect(page.getByText("New session").first()).toBeVisible();
   // The viewer stays open too — expanding the nav is navigation, not dismissal.
   await expect(page.getByTestId("artifact-frame")).toBeVisible();
+});
+
+test("viewer breadcrumb goes back and ✕ closes (UX-038)", async ({ page }) => {
+  await openReport(page);
+  // The breadcrumb parent is the back action — returns to the rail sections.
+  await page.getByTestId("artifact-crumb-back").click();
+  await expect(page.getByTestId("rail-toggle-artifacts")).toBeVisible();
+
+  // Reopen (the section is still expanded from openReport), then ✕ closes the same way.
+  await page.locator(".artifact-row", { hasText: "security-review.html" }).click();
+  await expect(page.getByTestId("artifact-frame")).toBeVisible();
+  await page.getByTestId("artifact-close").click();
+  await expect(page.getByTestId("rail-toggle-artifacts")).toBeVisible();
 });
