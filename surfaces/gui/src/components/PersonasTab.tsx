@@ -27,14 +27,7 @@ const BTN_BORDERED =
 const QUIET_ROW =
   "w-full flex items-center gap-2 px-4 pt-2 mt-6 text-[12.5px] text-muted select-none";
 
-export function PersonasTab({
-  onOpenPersona,
-  onMeta,
-}: {
-  onOpenPersona?: (id: string) => void;
-  // Lets the section gate internal-build affordances (the Gallery entry point).
-  onMeta?: (meta: { internal: boolean }) => void;
-}) {
+export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) => void }) {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [internal, setInternal] = useState(false);
   const [mode, setMode] = useState<"git" | "dir" | "zip">("git");
@@ -68,7 +61,6 @@ export function PersonasTab({
       .then((r) => {
         setPersonas(r.personas);
         setInternal(r.internal);
-        onMeta?.({ internal: r.internal });
       })
       .catch(() => {});
   const reloadSessions = () => getSessions().then(setSessions).catch(() => {});

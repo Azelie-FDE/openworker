@@ -2084,7 +2084,13 @@ export function App() {
               setBoardDetailId(id);
               setBoardOpen(true);
             }}
-            isLead={teamMembers.length > 0 || (!!curSession?.team && curSession.team.role !== "worker")}
+            /* team serializes as {} for plain sessions — lead-ness needs an actual
+               role, else every solo session loses its Progress panel (owner-hit
+               2026-08-21: the rail showed nothing but "More"). */
+            isLead={
+              teamMembers.length > 0 ||
+              (curSession?.team?.role != null && curSession.team.role !== "worker")
+            }
             teamMembers={teamMembers}
             teamChatEnabled={!!curSession?.team?.chat_enabled}
             teamChatUnread={curSession?.team?.chat_unread || 0}

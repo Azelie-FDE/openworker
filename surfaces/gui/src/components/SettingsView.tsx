@@ -40,7 +40,6 @@ import { Icon } from "./Icon";
 import { PanelHead } from "./IntegrationsView";
 import { ModelsTab } from "./ManageTabs";
 import { MemorySection } from "./MemorySection";
-import { GalleryModal } from "./GalleryModal";
 import { PersonasTab } from "./PersonasTab";
 import { SkillsTab } from "./SkillsTab";
 import { showPersonas } from "../flags";
@@ -375,13 +374,10 @@ function VoiceInputSection() {
 // -- Personas: installed/enabled/delete management, the dir/Git importer, and the
 // entry point to the Persona Gallery (a screen-sized modal — installs finish back
 // here, disabled pending consent; a gallery install re-mounts the list in place).
+// The Gallery entry point is GONE (owner 2026-08-21) — coworkers install from
+// GitHub / folder / zip only. GalleryModal stays in the tree for the gallery's
+// possible return as a first-class distribution surface, but nothing mounts it.
 function PersonasSection({ onOpenPersona }: { onOpenPersona?: (id: string) => void }) {
-  const [galleryBump, setGalleryBump] = useState(0);
-  const [galleryOpen, setGalleryOpen] = useState(false);
-  // The Gallery is OUR distribution channel during development — internal builds only
-  // (owner 2026-08-21). Users install from GitHub / folder / zip.
-  const [internal, setInternal] = useState(false);
-
   return (
     <section>
       <PanelHead title="Coworkers" sub="Manage your coworkers and add new ones." />
@@ -390,33 +386,7 @@ function PersonasSection({ onOpenPersona }: { onOpenPersona?: (id: string) => vo
         with the tools and skills to be successful in that role. Enabling a coworker lets
         you pick it when starting a conversation.
       </p>
-      <PersonasTab
-        key={galleryBump}
-        onOpenPersona={onOpenPersona}
-        onMeta={(m) => setInternal(m.internal)}
-      />
-      {internal && (
-      <button
-        className="mt-6 w-full rounded-xl2 border border-line bg-panel px-4 py-3.5 flex items-center gap-3 text-left hover:border-lineStrong"
-        data-testid="gallery-link"
-        onClick={() => setGalleryOpen(true)}
-      >
-        <Icon name="sparkle" size={16} className="text-accent shrink-0" />
-        <span className="min-w-0 flex-1">
-          <span className="block text-[13.5px] font-medium">Browse the Coworker Gallery</span>
-          <span className="block text-[12px] text-muted">
-            Curated coworkers from the OpenWorker team — see what each can do before installing.
-          </span>
-        </span>
-        <span className="text-[12.5px] text-accent shrink-0">Open →</span>
-      </button>
-      )}
-      {galleryOpen && (
-        <GalleryModal
-          onClose={() => setGalleryOpen(false)}
-          onInstalled={() => setGalleryBump((b) => b + 1)}
-        />
-      )}
+      <PersonasTab onOpenPersona={onOpenPersona} />
     </section>
   );
 }
