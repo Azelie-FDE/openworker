@@ -66,8 +66,11 @@
      off pure white (owner call 2026-08-21: full #fff read as glare) — still clearly
      brighter than the chrome, and panel-white cards still lift off it. */
   --canvas: #fafbfc;
-  --chrome: #f2f3f5;
-  --chrome-hover: #e9ebee;
+  --chrome: #f7f8f9;
+  --chrome-hover: #eef0f2;
+  /* The canvas edge: a soft bloom over the chrome (with the hairline) so the content
+     reads as a sheet, not a tile meeting a tile. Owner call 2026-08-21. */
+  --edge-shadow: -14px 0 28px -18px rgba(15, 18, 22, 0.12);
   --ink: #17191c;
   --muted: #4d535c;          /* OPE-126 contrast fix (was #5b616b) */
   --faint: #6f7680;          /* OPE-126 contrast fix — old #9aa1aa was ~2.5:1 on white */
@@ -118,8 +121,9 @@ html[data-theme="dark"] {
   --panel: #1c1e22;
   /* Dark keeps the same hierarchy: canvas lifted a step ABOVE the chrome. */
   --canvas: #191b1f;
-  --chrome: #121316;
-  --chrome-hover: #1d2025;
+  --chrome: #16171b;
+  --chrome-hover: #212329;
+  --edge-shadow: -14px 0 28px -18px rgba(0, 0, 0, 0.55);
   --ink: #e6e8eb;
   --muted: #9aa1ab;
   --faint: #62686f;
@@ -264,6 +268,7 @@ body {
   position: relative; display: flex; flex-direction: column;
   min-height: 0; overflow: hidden;
   background: var(--canvas);  /* UX-039: the content column is the brightest surface */
+  box-shadow: var(--edge-shadow);
 }
 .main-topbar {
   position: absolute;
