@@ -496,3 +496,86 @@ def test_delete_mcp_shuts_down_connection_and_forgets_tokens(tmp_path):
     assert res["ok"]
     assert conn.shutdown.is_set()
     assert mgr.secrets.get(mcp_oauth.PROFILE_PREFIX + "gone-srv") is None
+
+
+# -- notice dedupe: state CHANGE, not state (owner ruling 2026-08-21) -----------
+
+
+@pytest.mark.asyncio
+async def test_session_notice_fires_once_per_failure_episode(tmp_path, monkeypatch):
+    """A continuously-broken server stamps only the FIRST session after it breaks;
+    a changed error re-notices; recovery then re-breakage re-notices. The
+    Connectors page carries the standing error in between."""
+    from types import SimpleNamespace
+
+    from coworker.server import SessionManager
+
+    mgr = SessionManager(data_dir=tmp_path / "data")
+    server = SimpleNamespace(
+        name="flaky", transport="stdio", url=None, auth=None, enabled=True, include_tools=None, exclude_tools=None, requires_approval=True
+    )
+    monkeypatch.setattr(
+        "coworker.server.manager.load_mcp_servers", lambda *a, **k: [server]
+    )
+
+    fail_with: list[str] = ["boom one"]
+
+    async def ensure(s, **kw):
+        if fail_with:
+            raise RuntimeError(fail_with[0])
+        return SimpleNamespace(tools=[])
+
+    monkeypatch.setattr(mgr.mcp, "ensure", ensure)
+    monkeypatch.setattr(mgr.mcp, "last_stderr", lambda n: None)
+
+    await mgr.prepare_mcp_tools("s1", workspace=str(tmp_path))
+    assert [n for n, _ in mgr.pop_mcp_failures("s1")] == ["flaky"]
+
+    # Same error, next session: quiet (the Connectors page still shows it).
+    await mgr.prepare_mcp_tools("s2", workspace=str(tmp_path))
+    assert mgr.pop_mcp_failures("s2") == []
+    assert mgr._mcp_errors.get("flaky")  # standing error intact
+
+    # Different error: notice again.
+    fail_with[0] = "boom two"
+    await mgr.prepare_mcp_tools("s3", workspace=str(tmp_path))
+    assert [n for n, _ in mgr.pop_mcp_failures("s3")] == ["flaky"]
+
+    # Recovery clears the dedupe; the next breakage notices afresh.
+    fail_with.clear()
+    await mgr.prepare_mcp_tools("s4", workspace=str(tmp_path))
+    assert mgr.pop_mcp_failures("s4") == []
+    fail_with.append("boom three")
+    await mgr.prepare_mcp_tools("s5", workspace=str(tmp_path))
+    assert [n for n, _ in mgr.pop_mcp_failures("s5")] == ["flaky"]
+
+
+@pytest.mark.asyncio
+async def test_notice_dedupe_survives_restart(tmp_path, monkeypatch):
+    """The dedupe is persisted: relaunching the app must not re-stamp the same
+    unchanged complaint into the first session (the owner-hit annoyance)."""
+    from types import SimpleNamespace
+
+    server = SimpleNamespace(
+        name="flaky", transport="stdio", url=None, auth=None, enabled=True, include_tools=None, exclude_tools=None, requires_approval=True
+    )
+    monkeypatch.setattr(
+        "coworker.server.manager.load_mcp_servers", lambda *a, **k: [server]
+    )
+
+    async def ensure(s, **kw):
+        raise RuntimeError("same boom")
+
+    from coworker.server import SessionManager
+
+    mgr = SessionManager(data_dir=tmp_path / "data")
+    monkeypatch.setattr(mgr.mcp, "ensure", ensure)
+    monkeypatch.setattr(mgr.mcp, "last_stderr", lambda n: None)
+    await mgr.prepare_mcp_tools("s1", workspace=str(tmp_path))
+    assert [n for n, _ in mgr.pop_mcp_failures("s1")] == ["flaky"]
+
+    reborn = SessionManager(data_dir=tmp_path / "data")
+    monkeypatch.setattr(reborn.mcp, "ensure", ensure)
+    monkeypatch.setattr(reborn.mcp, "last_stderr", lambda n: None)
+    await reborn.prepare_mcp_tools("s2", workspace=str(tmp_path))
+    assert reborn.pop_mcp_failures("s2") == []

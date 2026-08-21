@@ -1193,6 +1193,9 @@ class SessionManager:
             try:
                 conn = await self.mcp.ensure(server)
                 self._mcp_errors.pop(server.name, None)
+                # Recovery resets the notice dedupe: if this server breaks again
+                # later, the next session gets a fresh transcript notice.
+                self._clear_mcp_notified(server.name)
             except Exception as exc:
                 if mcp_oauth.is_auth_required(exc):
                     # Stored tokens no longer refresh (vendor rotated/expired
@@ -1218,9 +1221,19 @@ class SessionManager:
                     logger.warning(
                         "mcp %s failed to connect: %s", server.name, msg[:500]
                     )
-                self._mcp_session_failures.setdefault(session_id, []).append(
-                    server.name
-                )
+                # Transcript notice on state CHANGE, not state (owner ruling
+                # 2026-08-21): a continuously-broken server stamps only the first
+                # session after it breaks (or breaks differently) — the Connectors
+                # page carries the standing error. Personas that DECLARE the server
+                # in their manifest keep the every-session notice: for them the
+                # missing tools are material every time (the 2026-08-20 drill case).
+                declared = persona_mcp is not None and server.name in persona_mcp
+                if declared or self._should_notify_mcp_failure(
+                    server.name, self._mcp_errors.get(server.name, "")
+                ):
+                    self._mcp_session_failures.setdefault(session_id, []).append(
+                        server.name
+                    )
                 continue
             callables = build_callables(
                 server,
@@ -1238,6 +1251,21 @@ class SessionManager:
                     )
             out.extend(callables)
         return out
+
+    def _should_notify_mcp_failure(self, name: str, error: str) -> bool:
+        """True once per failure episode: the first session after `name` starts
+        failing (or its error text changes) notices; unchanged-broken stays quiet.
+        Persisted in prefs so an app relaunch doesn't re-stamp the same complaint."""
+        notified = self._prefs.setdefault("mcp_notified_errors", {})
+        if notified.get(name) == error:
+            return False
+        notified[name] = error
+        self._save_prefs()
+        return True
+
+    def _clear_mcp_notified(self, name: str) -> None:
+        if self._prefs.get("mcp_notified_errors", {}).pop(name, None) is not None:
+            self._save_prefs()
 
     def pop_mcp_failures(self, session_id: str) -> list[tuple[str, Optional[str]]]:
         """Drain (name, error) for servers that failed while preparing this session's
@@ -1337,6 +1365,7 @@ class SessionManager:
                 # survive an app restart, so it lives in prefs, not memory.
                 self._prefs.setdefault("mcp_last_test", {})[name] = int(time.time())
                 self._save_prefs()
+                self._clear_mcp_notified(name)
                 return {"ok": True, "tools": len(conn.tools)}
             except Exception as exc:
                 if (
@@ -1425,6 +1454,7 @@ class SessionManager:
             self._mcp_auth_hints.discard(name)
             if self._prefs.get("mcp_last_test", {}).pop(name, None) is not None:
                 self._save_prefs()
+            self._clear_mcp_notified(name)
             # Removing a server must not leave its connection running until the next
             # restart, nor its OAuth tokens + DCR registration in the secret store —
             # "Remove" is the user saying this server is GONE (owner review 2026-08-21).
