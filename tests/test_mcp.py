@@ -417,3 +417,58 @@ def test_last_test_at_persists_and_clears_on_delete(tmp_path, monkeypatch):
     manager2.delete_mcp("fs")
     manager3 = SessionManager(data_dir=tmp_path / "data")
     assert manager3._prefs.get("mcp_last_test", {}).get("fs") is None
+
+
+# -- verify(): Test must actually test (owner-hit 2026-08-21) -------------------
+
+
+@pytest.mark.asyncio
+async def test_verify_round_trips_a_live_connection_and_refreshes_tools():
+    """Test-on-Live used to return the cached connection untouched — a silent
+    no-op that couldn't detect a dead server. verify() must round-trip and
+    refresh the tool list."""
+    from types import SimpleNamespace
+
+    from coworker.mcp.client import MCPManager, _Conn
+
+    mgr = MCPManager()
+
+    class _Session:
+        async def list_tools(self):
+            return SimpleNamespace(tools=[SimpleNamespace(name="fresh_tool")])
+
+    conn = _Conn(_Session(), tools=[SimpleNamespace(name="stale_tool")])
+    mgr._conns["srv"] = conn
+    server = SimpleNamespace(name="srv", transport="http", url="http://x", auth=None)
+
+    out = await mgr.verify(server)
+    assert out is conn
+    assert [t.name for t in out.tools] == ["fresh_tool"]
+
+
+@pytest.mark.asyncio
+async def test_verify_tears_down_a_dead_connection_and_reconnects():
+    from types import SimpleNamespace
+
+    from coworker.mcp.client import MCPManager, _Conn
+
+    mgr = MCPManager()
+
+    class _DeadSession:
+        async def list_tools(self):
+            raise RuntimeError("connection reset")
+
+    dead = _Conn(_DeadSession(), tools=[])
+    mgr._conns["srv"] = dead
+    server = SimpleNamespace(name="srv", transport="http", url="http://x", auth=None)
+
+    fresh = object()
+
+    async def fake_ensure(s, *, interactive=False):
+        return fresh
+
+    mgr.ensure = fake_ensure  # type: ignore[method-assign]
+    out = await mgr.verify(server, interactive=True)
+    assert out is fresh
+    assert dead.shutdown.is_set()
+    assert "srv" not in mgr._conns

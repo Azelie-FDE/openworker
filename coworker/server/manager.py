@@ -1330,7 +1330,9 @@ class SessionManager:
             self._mcp_auth_hints.discard(name)
             try:
                 # The ONE place a browser sign-in may start: an explicit connect.
-                conn = await self.mcp.ensure(server, interactive=True)
+                # verify (not ensure): an already-live server gets a real round-trip
+                # and a refreshed tool list instead of a cached yes.
+                conn = await self.mcp.verify(server, interactive=True)
                 # The Connectors row says "Ready · tested ⟨when⟩" — the claim must
                 # survive an app restart, so it lives in prefs, not memory.
                 self._prefs.setdefault("mcp_last_test", {})[name] = int(time.time())
