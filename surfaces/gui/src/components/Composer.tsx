@@ -50,6 +50,12 @@ const PERMISSION_OPTIONS: ModeOption[] = [
   },
 ];
 
+/** The picker's label for a mode value ("auto-approve" -> "Auto-Approve"). Exported so the
+ * transcript's mode markers read the same names the user just chose from. */
+export function modeLabel(value: string): string {
+  return PERMISSION_OPTIONS.find((o) => o.value === value)?.label || value;
+}
+
 // No hardcoded model fallback: until the server supplies the list (a few seconds after a
 // cold app boot), the picker renders a disabled "Loading models…" chip. A baked-in list
 // goes stale and silently offers ids the backend never confirmed (caught 2026-07-21).

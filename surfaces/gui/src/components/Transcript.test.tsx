@@ -332,7 +332,7 @@ describe("mode notice", () => {
   ];
 
   it("renders the title and one paragraph per blank-line break", () => {
-    render(<Transcript items={BANNER} running={false} />);
+    render(<Transcript items={BANNER} running={false} onApprove={() => {}} />);
     const block = screen.getByTestId("mode-notice");
     expect(block.textContent).toContain("Auto-Approve is on.");
     expect(block.querySelectorAll("p")).toHaveLength(2);
@@ -341,7 +341,9 @@ describe("mode notice", () => {
   });
 
   it("leaves untitled status notices as plain one-liners", () => {
-    render(<Transcript items={[{ kind: "notice", tone: "info", text: "Context compacted" }]} running={false} />);
+    render(
+      <Transcript items={[{ kind: "notice", tone: "info", text: "Context compacted" }]} running={false} onApprove={() => {}} />,
+    );
     expect(screen.queryByTestId("mode-notice")).toBeNull();
     expect(screen.getByText("Context compacted").className).not.toContain("notice-block");
   });
