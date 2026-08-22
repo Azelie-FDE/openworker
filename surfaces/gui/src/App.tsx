@@ -117,6 +117,18 @@ function readLastSessions(): Record<string, LastSession> {
   }
 }
 
+// Shown once the first time Auto-Approve is active in a session (spec §1.5). Says what the
+// mode buys, what it can never override, and — deliberately unhedged — where it can be
+// wrong. It reduces interruptions, not risk, and the last line has to leave that clear.
+const AUTO_APPROVE_NOTICE = [
+  "Your session model lets routine actions through without asking; anything it isn't sure " +
+    "about still comes to you — whatever the rules settle outright, it never sees.",
+  "It reduces interruptions from lower-risk actions, not the risk from what it can't tell: " +
+    "what a script will do, or whether an instruction came from you or from a web page or " +
+    "email. Shell commands aren't sandboxed — they reach anything you can. These are model " +
+    "judgments, not guarantees — a false allow executes unchecked.",
+].join("\n\n");
+
 function rememberLastSession(agent: string, sessionId: string, workspace: string | null) {
   if (!agent || !sessionId) return;
   try {
@@ -187,6 +199,10 @@ export function App() {
   const [streaming, setStreamingState] = useState("");
   // Ref mirror of `streaming`: the WS handler closure is built once per socket and can't read
   // fresh state — the interrupted/error flush below needs the live buffer at event time.
+  // Auto-Approve banner: once per session, however the mode was entered (picked in the
+  // composer, applied by a plan approval, or restored with the session). Keyed on the
+  // session id, so toggling out and back stays quiet but a new session explains itself.
+  const autoApproveNoticeFor = useRef("");
   const streamingRef = useRef("");
   const setStreaming = (value: string | ((s: string) => string)) => {
     streamingRef.current = typeof value === "function" ? value(streamingRef.current) : value;
@@ -870,6 +886,15 @@ export function App() {
     atBottomRef.current = true;
     setFollowing(true);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (mode !== "auto-approve" || autoApproveNoticeFor.current === sessionId) return;
+    autoApproveNoticeFor.current = sessionId;
+    setItems((p) => [
+      ...p,
+      { kind: "notice", tone: "info", title: "Auto-Approve is on.", text: AUTO_APPROVE_NOTICE },
+    ]);
+  }, [mode, sessionId]);
   useEffect(() => {
     if (atBottomRef.current) scrollToBottom();
   }, [items, streaming]);

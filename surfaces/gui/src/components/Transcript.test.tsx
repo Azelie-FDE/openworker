@@ -318,3 +318,31 @@ describe("reviewer deny card (§8.4)", () => {
     expect(screen.queryByTestId("reviewer-allow-anyway")).toBeNull();
   });
 });
+
+// The Auto-Approve banner (spec §1.5): a titled notice is prose, not a status line, so it
+// renders as a heading plus paragraphs rather than one centred grey row.
+describe("mode notice", () => {
+  const BANNER: Item[] = [
+    {
+      kind: "notice",
+      tone: "info",
+      title: "Auto-Approve is on.",
+      text: "First paragraph about what it does.\n\nSecond paragraph about what it can't tell.",
+    },
+  ];
+
+  it("renders the title and one paragraph per blank-line break", () => {
+    render(<Transcript items={BANNER} running={false} />);
+    const block = screen.getByTestId("mode-notice");
+    expect(block.textContent).toContain("Auto-Approve is on.");
+    expect(block.querySelectorAll("p")).toHaveLength(2);
+    // Prose layout, not the centred one-liner used for "Context compacted".
+    expect(block.className).toContain("notice-block");
+  });
+
+  it("leaves untitled status notices as plain one-liners", () => {
+    render(<Transcript items={[{ kind: "notice", tone: "info", text: "Context compacted" }]} running={false} />);
+    expect(screen.queryByTestId("mode-notice")).toBeNull();
+    expect(screen.getByText("Context compacted").className).not.toContain("notice-block");
+  });
+});

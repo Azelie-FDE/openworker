@@ -367,6 +367,15 @@ body {
 
 .notice { font-size: 13px; color: var(--muted); text-align: center; }
 .notice.warn { color: var(--accent); }
+/* Mode banner: prose, so it reads left-aligned in a card rather than as a centred
+   status line. Same `notice` item, switched on by a title. */
+.notice-block {
+  text-align: left; max-width: 62ch; margin: 12px auto; padding: 11px 13px;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--paper);
+  display: flex; flex-direction: column; gap: 7px; line-height: 1.5;
+}
+.notice-block .notice-title { font-weight: 600; color: var(--ink); }
+.notice-block p { margin: 0; }
 
 /* approval */
 .approval {

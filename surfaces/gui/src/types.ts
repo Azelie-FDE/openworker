@@ -152,7 +152,10 @@ export type Item =
       questions?: GroupedQuestion[];
       resolved?: string;
     }
-  | { kind: "notice"; tone: "info" | "warn"; text: string; retriable?: boolean }
+  // `title` switches the one-line status notice to a block: a heading plus
+  // blank-line-separated paragraphs, left-aligned. Used for the Auto-Approve banner,
+  // which is prose rather than a status line.
+  | { kind: "notice"; tone: "info" | "warn"; text: string; retriable?: boolean; title?: string }
   // MEMORY-SPEC §5.1: the save notice, inline in the conversation where the user is
   // already looking (a corner toast vanished before it could be read or undone —
   // owner-hit 2026-07-28). Stays put. `previous` is set when an existing memory was
