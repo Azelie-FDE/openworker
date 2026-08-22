@@ -109,7 +109,6 @@ interface Props {
   onUnattendedChange?: (on: boolean) => void;
   // Auto-Approve metering (§1.7): the "Auto-Approve · N checks" badge + mode-menu summary.
   // Absent/zero hides both; only the LIVE bucket surfaces here (shadow is a Settings concern).
-  reviewerStats?: { checks: number; allow: number; deny: number; unsure: number; tokens_in: number; tokens_out: number; cache_read?: number; cache_write?: number } | null;
   approvalSlot?: ReactNode;
   // Push text + attachments into the composer (e.g. a start-panel task card). The `nonce` makes
   // repeated identical prefills re-apply; the user can still edit before sending.
@@ -623,7 +622,6 @@ export function Composer(props: Props) {
           ) : props.workspace !== undefined ? (
             <ModeMenu
               mode={props.mode}
-              reviewerStats={props.reviewerStats}
               onModeChange={props.onModeChange}
               unattended={props.unattended}
               onUnattendedChange={props.onUnattendedChange}
@@ -876,13 +874,11 @@ function ModeMenu({
   onModeChange,
   unattended,
   onUnattendedChange,
-  reviewerStats,
 }: {
   mode: string;
   onModeChange: (mode: string) => void;
   unattended?: boolean;
   onUnattendedChange?: (on: boolean) => void;
-  reviewerStats?: { checks: number; allow: number; deny: number; unsure: number; tokens_in: number; tokens_out: number; cache_read?: number; cache_write?: number } | null;
 }) {
   const [open, setOpen] = useState(false);
   // The Auto-Approve entry is gated on the server flag. Fetch once on first open; a session
@@ -916,11 +912,6 @@ function ModeMenu({
         }
       >
         {current?.label || mode}
-        {mode === "auto-approve" && !!reviewerStats?.checks && (
-          <span className="text-faint" data-testid="reviewer-badge">
-            · {reviewerStats.checks} {reviewerStats.checks === 1 ? "check" : "checks"}
-          </span>
-        )}
         <Icon name="chevronDown" size={11} className="text-faint" />
       </button>
       {open && (

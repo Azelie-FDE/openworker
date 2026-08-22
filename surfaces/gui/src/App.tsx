@@ -22,7 +22,6 @@ import {
   getSettings,
   getPersonas,
   getInbox,
-  getReviewerStats,
   getUnattended,
   PERSONAS_CHANGED,
   resolveInboxItem,
@@ -386,7 +385,6 @@ export function App() {
   // A pending composer prefill (text + attachments) pushed from the session start panel.
   // Auto-Approve metering (§1.7): live reviewer counts for the composer badge. Polled with
   // the session inbox; null until the first fetch (badge hidden).
-  const [reviewerStats, setReviewerStats] = useState<import("./api").ReviewerStats | null>(null);
   const [composerPrefill, setComposerPrefill] = useState<{ text: string; attachments?: Attachment[]; nonce: number }>();
 
   // Persona metadata drives workspace behavior by FAMILY, not by hardcoded id (so a DevOps/SecOps
@@ -1063,7 +1061,6 @@ export function App() {
     const load = () => {
       getInbox(sessionId, "pending").then(setSessionInbox).catch(() => setSessionInbox([]));
       getUnattended(sessionId).then(markUnattended).catch(() => markUnattended(false));
-      getReviewerStats(sessionId).then(setReviewerStats).catch(() => setReviewerStats(null));
     };
     load();
     const t = setInterval(load, 4000);
@@ -2045,7 +2042,6 @@ export function App() {
               sessionId={sessionId}
               workspace={workspace || ""}
               unattended={unattended}
-              reviewerStats={reviewerStats?.live ?? null}
               onUnattendedChange={agent !== "chat" ? toggleUnattended : undefined}
               prefill={composerPrefill}
               resetKey={sessionId}
