@@ -39,7 +39,7 @@ const PERMISSION_OPTIONS: ModeOption[] = [
   {
     value: "auto-approve",
     label: "Auto-Approve",
-    description: "Your session model clears routine actions; doubtful ones still ask",
+    description: "Your session model lets lower-risk actions through; anything it isn't sure about asks you",
     gated: true,
   },
   {
