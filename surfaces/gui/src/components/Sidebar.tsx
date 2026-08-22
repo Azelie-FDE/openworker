@@ -639,7 +639,11 @@ export function Sidebar(props: Props) {
           />
         ) : (
           <>
-            <span className="min-w-0 flex-1 block truncate text-[13px] font-medium">
+            <span
+              className={
+                "min-w-0 flex-1 block truncate text-[13px] " + (active ? "font-medium" : "")
+              }
+            >
               {title}
             </span>
             <span

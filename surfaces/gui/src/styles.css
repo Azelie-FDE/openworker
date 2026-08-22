@@ -332,7 +332,9 @@ body {
 .main-workspace { position: relative; display: flex; min-height: 0; flex: 1; overflow: hidden; }
 .main-chat { position: relative; display: flex; flex-direction: column; min-width: 0; flex: 1; padding-top: 48px; }
 .main.rail-open .main-chat { margin-right: 332px; }
-.main-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 24px 8% 24px; }
+/* 40px top gutter: the transcript needs clear air under the edgeless glass topbar
+   (owner call 2026-08-21 — bubbles sat nearly against the title). */
+.main-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 40px 8% 24px; }
 
 /* idle hero */
 .hero { max-width: 720px; margin: 6vh auto 0; }
@@ -866,8 +868,11 @@ button.btn.danger { color: var(--accent); }
 }
 .topbar-artifacts-btn:hover { color: var(--ink); border-color: var(--accent); }
 .topbar-artifacts-count {
+  /* Neutral count (owner call 2026-08-21): a passive tally is not a primary action,
+     an active state, or a live signal — the accent budget says no cobalt here. */
   min-width: 17px; padding: 0 5px; border-radius: 9px;
-  background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; text-align: center;
+  background: color-mix(in srgb, var(--faint) 28%, transparent);
+  color: var(--ink); font-size: 11px; font-weight: 600; text-align: center;
 }
 /* the inline add-folder form sits under the "Analyze the files in a directory" task row */
 .intro-addfolder { padding: 4px 6px 14px 6px; border-top: 1px solid var(--line); }
