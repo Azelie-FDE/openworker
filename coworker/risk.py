@@ -30,9 +30,11 @@ SHELL_TOOL = "run_shell"
 # URL's path/query can carry data outbound, so it is NOT a pure read — it must reach the
 # gate. `web_search` reaches a FIXED destination (the configured provider), but its query
 # is model-chosen free text — the same outbound channel — so it gates too (spec §2.2).
-# The browser connector's URL tools are the same channel by another name (OPE-111):
-# classifying them here gives them the full egress treatment (domain allowlist, host-named
-# cards) instead of a bare approval gate.
+# `browser_open_url` is the same channel by another name (OPE-111): classifying it here
+# gives it the full egress treatment (domain allowlist, host-named cards) instead of a bare
+# approval gate. Its old sibling `browser_read_url` was retired upstream; what replaced it,
+# `browser_read_page`, takes no URL and only reads the already-open page, so it is a
+# genuine read and stays out.
 # Contact-enrichment lookups are the `web_search` case with worse payloads: a fixed
 # destination (Apollo/Hunter), a model-chosen query — except the query IS someone's name
 # and email, and the someone is a third party who never agreed to it. Catalogued as reads
@@ -48,7 +50,6 @@ _ENRICHMENT_TOOLS = {
 EGRESS_TOOLS = {
     "web_fetch",
     "web_search",
-    "browser_read_url",
     "browser_open_url",
 } | _ENRICHMENT_TOOLS
 

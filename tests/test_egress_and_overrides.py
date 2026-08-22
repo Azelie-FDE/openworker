@@ -132,7 +132,7 @@ _CATALOG_WRITES_IN_DISGUISE = (
 )
 # Model-chosen URLs: web_fetch by another name, so they take the full egress path
 # (domain allowlist, host-named cards), not the bare approval gate.
-_CATALOG_EGRESS_IN_DISGUISE = ("browser_read_url", "browser_open_url")
+_CATALOG_EGRESS_IN_DISGUISE = ("browser_open_url",)
 
 
 def test_disguised_catalog_writes_gate():
@@ -167,7 +167,7 @@ def test_override_cannot_relax_a_catalog_write(tmp_path):
 def test_catalog_reads_stay_relaxed_and_unprompted(tmp_path):
     from coworker.connectors.tool_defs import approval_for_tool
 
-    for name in ("browser_snapshot", "email_search", "github_get_issue"):
+    for name in ("browser_read_page", "email_search", "github_get_issue"):
         assert approval_for_tool(name) is False, name
         assert classify(name) is RiskClass.READ, name
     # And the plugin-relaxation path is untouched for genuine reads.

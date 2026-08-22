@@ -269,6 +269,9 @@ class PermissionEngine:
     # subdomain suffix (see `_domain_allowed`).
     allowed_domains: list[str] = field(default_factory=list)
     session_allow_domains: set[str] = field(default_factory=set)
+    # Session-wide read-only grant (owner ask 2026-08-11): auto-allow shell commands the
+    # conservative classifier (coworker/readonly.py) accepts. User-elected per session.
+    session_readonly: bool = False
     # Task-scoped standing rules (§25): {tool: {allowed targets}}, seeded from the owning
     # ScheduledTask's target-shaped entries. Kept by reference and re-read every check, so a
     # rule minted mid-run ("Allow every time") applies to the run's next call too.
@@ -401,6 +404,13 @@ class PermissionEngine:
                 and command in self.session_allow_commands
             ):
                 return Decision(True, "command allowed for session")
+            # Also a session grant, so §1.5 applies: in Auto-Approve the reviewer judges
+            # these rather than the classifier waving them through.
+            if honor_session_grants and self.session_readonly and command:
+                from .readonly import is_readonly_command
+
+                if is_readonly_command(command):
+                    return Decision(True, "read-only command (session grant)")
         if is_egress:
             url = str(arguments.get("url", ""))
             if self._domain_allowed(url, include_session=honor_session_grants):
@@ -439,6 +449,9 @@ class PermissionEngine:
     def allow_command_for_session(self, command: str) -> None:
         if command:
             self.session_allow_commands.add(command)
+
+    def allow_readonly_for_session(self) -> None:
+        self.session_readonly = True
 
     def allow_domain_for_session(self, url_or_domain: str) -> None:
         """Remember an egress destination for this session ("Always allow this domain").

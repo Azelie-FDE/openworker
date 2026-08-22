@@ -32,7 +32,7 @@ def test_integration_tools_reads_are_free_writes_gate(tmp_path):
     )
     # OPE-111: a model-chosen URL fetch is egress, not a read — it gates like web_fetch.
     assert (
-        tools["browser_read_url"].__aisuite_tool_metadata__.requires_approval is True
+        tools["browser_read_page"].__aisuite_tool_metadata__.requires_approval is False
     )
     assert (
         tools["github_create_issue"].__aisuite_tool_metadata__.requires_approval is True
@@ -44,7 +44,7 @@ def test_browser_automation_reads_are_free_interactions_gate():
 
     tools = {t.__name__: t for t in make_browser_automation_tools()}
     assert (
-        tools["browser_snapshot"].__aisuite_tool_metadata__.requires_approval is False
+        tools["browser_read_page"].__aisuite_tool_metadata__.requires_approval is False
     )
     # OPE-111: opening a model-chosen URL is egress, not a read — it gates.
     assert (
