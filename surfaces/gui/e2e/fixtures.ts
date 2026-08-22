@@ -352,7 +352,7 @@ const PROVIDERS = [
   { name: "ollama", title: "Ollama (local models)", needs_key: false, fields: [{ key: "base_url", label: "Endpoint", secret: false, required: false, help: "", placeholder: "http://127.0.0.1:11434", default: "http://127.0.0.1:11434" }], configured: true, values: {}, suggested_models: ["qwen3-coder:30b"], key_set_at: null, last_used_at: null },
   // openai-codex: the subscription OAuth provider — no key form; the gallery card and
   // form render sign-in state instead (auth: "oauth"). Starts signed out.
-  { name: "openai-codex", title: "Codex subscription", needs_key: false, auth: "oauth", signed_in: false, account: null, authorizing: false, last_error: null, blurb: "Sign in with your ChatGPT plan and run OpenAI models through your subscription — no API key. Tokens stay on this machine.", fields: [], configured: false, values: {}, suggested_models: ["gpt-5.6-sol"], key_set_at: null, last_used_at: null },
+  { name: "openai-codex", title: "ChatGPT subscription", needs_key: false, auth: "oauth", signed_in: false, account: null, authorizing: false, last_error: null, blurb: "Sign in with your ChatGPT plan and run OpenAI models through your subscription — no API key. Tokens stay on this machine.", fields: [], configured: false, values: {}, suggested_models: ["gpt-5.6-sol"], key_set_at: null, last_used_at: null },
 ];
 
 /** Install the API + WebSocket mocks on a page. Returns handles for assertions/seed data. */

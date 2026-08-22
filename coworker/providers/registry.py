@@ -362,7 +362,7 @@ DESCRIPTORS: list[ProviderDescriptor] = [
     ),
     ProviderDescriptor(
         name="openai-codex",
-        title="Codex subscription",
+        title="ChatGPT subscription",
         needs_key=False,
         fields=[],
         build=_build_codex,
