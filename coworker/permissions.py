@@ -407,9 +407,16 @@ class PermissionEngine:
             # Also a session grant, so §1.5 applies: in Auto-Approve the reviewer judges
             # these rather than the classifier waving them through.
             if honor_session_grants and self.session_readonly and command:
-                from .readonly import is_readonly_command
+                from .readonly import is_readonly_command, read_targets
 
-                if is_readonly_command(command):
+                # The classifier vets what a command DOES; the roots vet what it READS
+                # (OPE-130). Without the second half, a grant the user reads as "stop
+                # asking about my project files" also covers ~/.aws/credentials, another
+                # repo's history, and OpenWorker's own secrets file — none of which the
+                # self-protection floor catches, since that guards writes, not reads.
+                if is_readonly_command(command) and all(
+                    self._under_root(t) for t in read_targets(command)
+                ):
                     return Decision(True, "read-only command (session grant)")
         if is_egress:
             url = str(arguments.get("url", ""))
