@@ -1895,6 +1895,7 @@ export function App() {
                     onApprove={approve}
                     running={running}
                     onRetry={retry}
+                    onOpenConnectors={() => setSurface("integrations")}
                     onUndoMemory={(id, previous) => void undoMemorySave(id, previous)}
                     // §33 ref #3: sub-threshold streamed text renders INSIDE the live turn
                     // group (header when collapsed, quiet line when expanded) — never as a

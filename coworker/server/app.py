@@ -2383,10 +2383,13 @@ def create_app(manager: SessionManager) -> FastAPI:
         # them (drill 2026-08-20: three silent startup failures in a row).
         for name, err in manager.pop_mcp_failures(session_id):
             detail = f": {err}" if err else ""
+            # `server` makes the notice structured: the GUI renders one quiet line
+            # with the full error behind a disclosure + an Open-Connectors action
+            # (owner ruling 2026-08-21) instead of a wall of stderr.
             engine._append_notice(
                 "mcp_error",
-                f"MCP server “{name}” failed to start{detail}"[:300]
-                + " — see Settings ▸ Connectors",
+                f"MCP server “{name}” failed to start{detail}"[:500],
+                server=name,
             )
         # Auto-compaction failure prompt (OPE-27): only an ATTENDED session may be asked
         # Retry/Trim — unattended runs auto-trim (the policy in engine._compact_now).

@@ -126,6 +126,14 @@ def _approval_body(request) -> str:
     return "\n".join(p for p in (reason, preview) if p)
 
 
+def _stable_error(error: str) -> str:
+    """An error string with per-process noise removed, for change detection only:
+    hex object addresses and long digit runs (pids, ports, timestamps) vary between
+    identical failures across relaunches."""
+    stable = re.sub(r"0x[0-9a-fA-F]+", "0xADDR", error or "")
+    return re.sub(r"\d{4,}", "N", stable)
+
+
 class SessionManager:
     def __init__(
         self,
@@ -1259,11 +1267,15 @@ class SessionManager:
     def _should_notify_mcp_failure(self, name: str, error: str) -> bool:
         """True once per failure episode: the first session after `name` starts
         failing (or its error text changes) notices; unchanged-broken stays quiet.
-        Persisted in prefs so an app relaunch doesn't re-stamp the same complaint."""
+        Persisted in prefs so an app relaunch doesn't re-stamp the same complaint.
+        Compared on a NORMALIZED error: stderr often embeds per-process values
+        (0x… object addresses, pids), which made "the same" failure look new on
+        every relaunch and re-stamp every session (owner-hit 2026-08-21)."""
+        stable = _stable_error(error)
         notified = self._prefs.setdefault("mcp_notified_errors", {})
-        if notified.get(name) == error:
+        if notified.get(name) == stable:
             return False
-        notified[name] = error
+        notified[name] = stable
         self._save_prefs()
         return True
 

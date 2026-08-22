@@ -96,3 +96,34 @@ test("a replayed error notice at the tail offers Retry", async ({ page }) => {
   await expect(page.getByText("Error: provider unavailable")).toBeVisible();
   await expect(page.getByTestId("notice-retry")).toBeVisible();
 });
+
+test("a dead MCP server replays as one quiet line with Details and Open Connectors", async ({
+  page,
+}) => {
+  // Owner ruling 2026-08-21: never a wall of stderr in the transcript — the summary
+  // names the server; the raw error hides behind Details; Open Connectors is the fix path.
+  await seedSessionMessages(page, "pinned-cowork-1", [
+    { role: "user", content: "hi", ts: TS },
+    { role: "assistant", content: "Hello!" },
+    {
+      role: "notice",
+      kind: "mcp_error",
+      server: "sales-db",
+      text: "MCP server “sales-db” failed to start: unhandled errors in a TaskGroup — aws configure export-credentials --profile aicreator exited 255",
+    },
+  ]);
+  await page.goto("/");
+  await page.getByText("Draft the launch note").first().click();
+
+  const line = page.getByTestId("mcp-notice");
+  await expect(line).toContainText("sales-db");
+  await expect(line).toContainText("didn’t start");
+  // The raw error stays hidden until asked for.
+  await expect(page.getByTestId("mcp-notice-detail")).toHaveCount(0);
+  await page.getByTestId("mcp-notice-details").click();
+  await expect(page.getByTestId("mcp-notice-detail")).toContainText("TaskGroup");
+
+  // Open Connectors jumps to the Integrations surface.
+  await page.getByTestId("mcp-notice-connectors").click();
+  await expect(page.getByText("Connectors", { exact: true }).first()).toBeVisible();
+});

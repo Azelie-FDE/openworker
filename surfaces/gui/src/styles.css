@@ -2018,3 +2018,21 @@ html[data-platform="linux"] ::-webkit-scrollbar-thumb:hover { background-color: 
 .artifact-menu-item:hover { background: var(--paper); }
 .artifact-menu-item svg { color: var(--muted); flex: none; }
 .artifact-menu-div { height: 1px; margin: 5px 4px; background: var(--line); }
+
+/* One-line MCP failure notice (owner ruling 2026-08-21): quiet summary + Details
+   disclosure + Open Connectors. Replaces the old full-error accent-blue paragraph. */
+.mcp-notice { max-width: 768px; margin: 0 auto; font-size: var(--fs-ui); color: var(--muted); }
+.mcp-notice-line { display: flex; align-items: center; gap: 8px; justify-content: center; }
+.mcp-notice-line > span[aria-hidden] { color: var(--warn-ink); flex: none; }
+.mcp-notice-act {
+  font: inherit; font-size: 12px; border: 0; background: none; color: var(--faint);
+  cursor: pointer; text-decoration: underline; text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px; padding: 0; flex: none;
+}
+.mcp-notice-act:hover { color: var(--ink); }
+.mcp-notice-detail {
+  margin: 8px auto 0; padding: 10px 12px; max-width: 640px; overflow-x: auto;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+  font-family: var(--mono); font-size: var(--fs-mono); line-height: 1.5;
+  color: var(--muted); white-space: pre-wrap; text-align: left;
+}

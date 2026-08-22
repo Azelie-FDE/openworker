@@ -81,7 +81,17 @@ export function itemsFromMessages(messages: ConversationMessage[]): Item[] {
               : m.kind === "mcp_error"
                 ? // A configured MCP server failed to start for this session — informational,
                   // NOT retriable (retry re-runs the model turn, which can't fix a dead server).
-                  { kind: "notice", tone: "warn", text: m.text || "An MCP server failed to start" }
+                  // With a `server` field it renders as one quiet line + disclosure; legacy
+                  // notices (no field) keep showing their full text.
+                  m.server
+                  ? {
+                      kind: "notice",
+                      tone: "warn",
+                      text: `MCP server “${m.server}” didn’t start — its tools are unavailable here`,
+                      server: String(m.server),
+                      detail: m.text || undefined,
+                    }
+                  : { kind: "notice", tone: "warn", text: m.text || "An MCP server failed to start" }
                 : { kind: "notice", tone: "warn", text: "Error: " + (m.text || "unknown"), retriable: true },
       );
     }

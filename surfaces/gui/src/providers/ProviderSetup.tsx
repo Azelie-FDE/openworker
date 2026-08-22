@@ -221,12 +221,10 @@ export function useProviderSetup(opts?: { onSaved?: () => void }): ProviderSetup
 
   const statusFor = (p: ProviderInfo, o?: { lastUsed?: boolean }) => {
     if (p.auth === "oauth") {
+      // The card keeps just the state — the account email truncated badly at card
+      // width (owner-hit 2026-08-21); the detail pane shows who is signed in.
       if (p.signed_in)
-        return (
-          <span className="block text-[12px] text-ok font-medium truncate">
-            ✓ Signed in{p.account ? <span className="text-muted font-normal"> · {p.account}</span> : ""}
-          </span>
-        );
+        return <span className="block text-[12px] text-ok font-medium truncate">✓ Signed in</span>;
       return <span className="block text-[12px] text-faint truncate">Sign in with your plan</span>;
     }
     if (p.configured && p.needs_key) {
@@ -248,7 +246,14 @@ export function useProviderSetup(opts?: { onSaved?: () => void }): ProviderSetup
 
   return {
     providers,
-    ordered: [...providers].sort((a, b) => providerRank(a.name) - providerRank(b.name)),
+    // Alphabetical by display title (owner ruling 2026-08-21: a curated order reads
+    // as vendor bias). The old providerRank curation stays only as the tiebreaker
+    // for identical titles.
+    ordered: [...providers].sort(
+      (a, b) =>
+        a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) ||
+        providerRank(a.name) - providerRank(b.name),
+    ),
     refreshProviders,
     sel,
     info,

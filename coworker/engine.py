@@ -283,13 +283,15 @@ class TurnEngine:
             return message.get("kind") == "error"
         return False
 
-    def _append_notice(self, kind: str, text: Optional[str] = None) -> None:
+    def _append_notice(self, kind: str, text: Optional[str] = None, **fields: Any) -> None:
         """Persist a turn-ending marker (error/interrupted) as a display-only `notice`
         message: it survives reload like the transcript does, but `_outbound_messages`
-        drops the role so no provider ever sees it."""
+        drops the role so no provider ever sees it. Extra `fields` (e.g. the failing
+        MCP server's name) persist on the message for structured rendering."""
         notice: dict[str, Any] = {"role": "notice", "kind": kind, "ts": time.time()}
         if text:
             notice["text"] = text
+        notice.update({k: v for k, v in fields.items() if v is not None})
         self.messages.append(notice)
 
     async def retry(self) -> AsyncIterator[Event]:
