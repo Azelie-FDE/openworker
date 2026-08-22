@@ -47,7 +47,9 @@ class AuditStore:
                 resource TEXT,
                 call_id TEXT,
                 tokens_in INTEGER DEFAULT 0,
-                tokens_out INTEGER DEFAULT 0
+                tokens_out INTEGER DEFAULT 0,
+                cache_read INTEGER DEFAULT 0,
+                cache_write INTEGER DEFAULT 0
             )
             """)
         # Existing databases predate the reviewer columns (2026-08-12): call_id joins a
@@ -58,6 +60,13 @@ class AuditStore:
             ("call_id", "TEXT"),
             ("tokens_in", "INTEGER DEFAULT 0"),
             ("tokens_out", "INTEGER DEFAULT 0"),
+            # Cached-prefix share of a reviewer check (2026-08-22). Without these the
+            # metering badge could only ever see the FRESH tokens — ~75 of a ~1,500-token
+            # check once the provider caches the instruction prefix — so it under-reported
+            # cost by more the longer a session ran. Same defect class as OPE-101, one
+            # layer further out.
+            ("cache_read", "INTEGER DEFAULT 0"),
+            ("cache_write", "INTEGER DEFAULT 0"),
         ):
             try:
                 self._conn.execute(
@@ -78,8 +87,8 @@ class AuditStore:
             self._conn.execute(
                 """
                 INSERT INTO audit_events
-                    (session_id, agent, workspace, connector, tool, stage, status, approval, args, result_preview, reason, resource, call_id, tokens_in, tokens_out)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (session_id, agent, workspace, connector, tool, stage, status, approval, args, result_preview, reason, resource, call_id, tokens_in, tokens_out, cache_read, cache_write)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event.get("session_id") or "",
@@ -97,6 +106,8 @@ class AuditStore:
                     str(event.get("call_id") or ""),
                     int(event.get("tokens_in") or 0),
                     int(event.get("tokens_out") or 0),
+                    int(event.get("cache_read") or 0),
+                    int(event.get("cache_write") or 0),
                 ),
             )
             self._conn.commit()
@@ -112,14 +123,19 @@ class AuditStore:
                     """
                     SELECT status, COUNT(*) AS n,
                            COALESCE(SUM(tokens_in), 0) AS tin,
-                           COALESCE(SUM(tokens_out), 0) AS tout
+                           COALESCE(SUM(tokens_out), 0) AS tout,
+                           COALESCE(SUM(cache_read), 0) AS cread,
+                           COALESCE(SUM(cache_write), 0) AS cwrite
                     FROM audit_events
                     WHERE session_id = ? AND stage = ?
                     GROUP BY status
                     """,
                     (session_id, stage),
                 ).fetchall()
-            out = {"checks": 0, "allow": 0, "deny": 0, "unsure": 0, "tokens_in": 0, "tokens_out": 0}
+            out = {
+                "checks": 0, "allow": 0, "deny": 0, "unsure": 0,
+                "tokens_in": 0, "tokens_out": 0, "cache_read": 0, "cache_write": 0,
+            }
             for row in rows:
                 status = str(row["status"])
                 if status in ("allow", "deny", "unsure"):
@@ -127,6 +143,8 @@ class AuditStore:
                 out["checks"] += int(row["n"])
                 out["tokens_in"] += int(row["tin"])
                 out["tokens_out"] += int(row["tout"])
+                out["cache_read"] += int(row["cread"])
+                out["cache_write"] += int(row["cwrite"])
             return out
 
         return {"live": _bucket("reviewer_verdict"), "shadow": _bucket("reviewer_shadow")}

@@ -1030,6 +1030,8 @@ class TurnEngine:
                     call_id=tool_call.id,
                     tokens_in=verdict.tokens_in,
                     tokens_out=verdict.tokens_out,
+                    cache_read=verdict.cache_read,
+                    cache_write=verdict.cache_write,
                 )
             except Exception:
                 pass  # shadow must never surface a failure
@@ -1117,6 +1119,8 @@ class TurnEngine:
                 reason=verdict.reason,
                 tokens_in=verdict.tokens_in,
                 tokens_out=verdict.tokens_out,
+                cache_read=verdict.cache_read,
+                cache_write=verdict.cache_write,
             )
             if verdict.verdict == "allow":
                 allowed = True

@@ -109,7 +109,7 @@ interface Props {
   onUnattendedChange?: (on: boolean) => void;
   // Auto-Approve metering (§1.7): the "Auto-Approve · N checks" badge + mode-menu summary.
   // Absent/zero hides both; only the LIVE bucket surfaces here (shadow is a Settings concern).
-  reviewerStats?: { checks: number; allow: number; deny: number; unsure: number; tokens_in: number; tokens_out: number } | null;
+  reviewerStats?: { checks: number; allow: number; deny: number; unsure: number; tokens_in: number; tokens_out: number; cache_read?: number; cache_write?: number } | null;
   approvalSlot?: ReactNode;
   // Push text + attachments into the composer (e.g. a start-panel task card). The `nonce` makes
   // repeated identical prefills re-apply; the user can still edit before sending.
@@ -882,7 +882,7 @@ function ModeMenu({
   onModeChange: (mode: string) => void;
   unattended?: boolean;
   onUnattendedChange?: (on: boolean) => void;
-  reviewerStats?: { checks: number; allow: number; deny: number; unsure: number; tokens_in: number; tokens_out: number } | null;
+  reviewerStats?: { checks: number; allow: number; deny: number; unsure: number; tokens_in: number; tokens_out: number; cache_read?: number; cache_write?: number } | null;
 }) {
   const [open, setOpen] = useState(false);
   // The Auto-Approve entry is gated on the server flag. Fetch once on first open; a session
@@ -962,7 +962,15 @@ function ModeMenu({
                   This session: {reviewerStats.checks} {reviewerStats.checks === 1 ? "check" : "checks"} ·{" "}
                   {reviewerStats.allow} cleared · {reviewerStats.deny} blocked · {reviewerStats.unsure} asked you
                   {reviewerStats.tokens_in + reviewerStats.tokens_out > 0 && (
-                    <> · ~{Math.round((reviewerStats.tokens_in + reviewerStats.tokens_out) / 100) / 10}k tokens</>
+                    // Fresh and cached shown separately: cached input bills at ~10%, so
+                    // one blended number would either overstate cost or hide most of the
+                    // work. Two honest figures beat one misleading one.
+                    <>
+                      {" "}· ~{Math.round((reviewerStats.tokens_in + reviewerStats.tokens_out) / 100) / 10}k tokens
+                      {(reviewerStats.cache_read ?? 0) > 0 && (
+                        <> (+{Math.round((reviewerStats.cache_read ?? 0) / 100) / 10}k cached)</>
+                      )}
+                    </>
                   )}
                 </div>
               </>

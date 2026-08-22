@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pytest
 
@@ -942,3 +942,24 @@ def test_the_reviewer_is_never_asked_about_a_skill_save(tmp_path):
     # The human decided, and not a single reviewer token was spent asking.
     assert approvals == ["save_skill"]
     assert engine.reviewer.asked == []
+
+
+def test_verdict_audit_rows_carry_the_verdicts_cache_figures(tmp_path):
+    # The Verdict's cache_read/cache_write must survive into the audit row —
+    # this is the exact seam where OPE-101's numbers were dropped one layer earlier.
+    engine, rows, _approvals = _engine(
+        tmp_path,
+        [_tool_turn(("run_shell", {"command": "pytest -q"})), AssistantTurn(text="ok", finish_reason="stop")],
+    )
+
+    class _CachedVerdictReviewer(_FakeReviewer):
+        async def review(self, **kw):
+            verdict = await super().review(**kw)
+            return replace(verdict, tokens_in=75, tokens_out=60, cache_read=1400, cache_write=25)
+
+    engine.reviewer = _CachedVerdictReviewer({"run_shell": "allow"})
+    _run(engine, "run the tests")
+
+    verdict_rows = [r for r in rows if r.get("stage") == "reviewer_verdict"]
+    assert verdict_rows and verdict_rows[0]["cache_read"] == 1400
+    assert verdict_rows[0]["cache_write"] == 25

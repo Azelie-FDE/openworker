@@ -105,6 +105,7 @@ def test_reviewer_stats_aggregates_by_stage(tmp_path):
     assert stats["live"] == {
         "checks": 4, "allow": 2, "deny": 1, "unsure": 1,
         "tokens_in": 380, "tokens_out": 90,
+        "cache_read": 0, "cache_write": 0,
     }
     assert stats["shadow"]["checks"] == 1 and stats["shadow"]["allow"] == 1
     store.close()
@@ -146,3 +147,77 @@ def test_audit_migration_adds_columns_to_a_legacy_db(tmp_path):
 def test_reviewer_stats_endpoint(client):
     empty = client.get("/v1/sessions/nope/reviewer-stats").json()
     assert empty["live"]["checks"] == 0 and empty["shadow"]["checks"] == 0
+
+
+def test_reviewer_stats_carry_the_cached_share(tmp_path):
+    # The badge could only ever see FRESH tokens (~75 of a ~1,500-token check once the
+    # provider caches the instruction prefix), so it under-reported cost by more the
+    # longer a session ran. The cached share now rides every verdict row into the sums.
+    from coworker.audit import AuditStore
+
+    store = AuditStore(tmp_path / "audit.db")
+    for _ in range(3):
+        store.append(
+            {
+                "session_id": "s1",
+                "tool": "run_shell",
+                "stage": "reviewer_verdict",
+                "status": "allow",
+                "tokens_in": 75,
+                "tokens_out": 60,
+                "cache_read": 1400,
+                "cache_write": 0,
+            }
+        )
+    live = store.reviewer_stats("s1")["live"]
+    assert live["checks"] == 3
+    assert (live["tokens_in"], live["tokens_out"]) == (225, 180)
+    assert (live["cache_read"], live["cache_write"]) == (4200, 0)
+
+
+def test_existing_databases_gain_the_cache_columns(tmp_path):
+    # A database created before 2026-08-22 has no cache columns. Opening it must migrate
+    # in place — old rows read as zero, new rows record the real figures.
+    import sqlite3
+
+    from coworker.audit import AuditStore
+
+    db = tmp_path / "audit.db"
+    con = sqlite3.connect(db)
+    con.execute(
+        """
+        CREATE TABLE audit_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            session_id TEXT, agent TEXT, workspace TEXT, connector TEXT,
+            tool TEXT, stage TEXT, status TEXT, approval TEXT, args TEXT,
+            result_preview TEXT, reason TEXT, resource TEXT, call_id TEXT,
+            tokens_in INTEGER DEFAULT 0, tokens_out INTEGER DEFAULT 0
+        )
+        """
+    )
+    con.execute(
+        "INSERT INTO audit_events (session_id, tool, stage, status, tokens_in, tokens_out)"
+        " VALUES ('s1', 'run_shell', 'reviewer_verdict', 'allow', 100, 50)"
+    )
+    con.commit()
+    con.close()
+
+    store = AuditStore(db)  # migration happens on open
+    store.append(
+        {
+            "session_id": "s1",
+            "tool": "run_shell",
+            "stage": "reviewer_verdict",
+            "status": "allow",
+            "tokens_in": 75,
+            "tokens_out": 60,
+            "cache_read": 1400,
+            "cache_write": 25,
+        }
+    )
+    live = store.reviewer_stats("s1")["live"]
+    assert live["checks"] == 2
+    assert (live["tokens_in"], live["tokens_out"]) == (175, 110)
+    # The pre-migration row contributes zero cached, not garbage.
+    assert (live["cache_read"], live["cache_write"]) == (1400, 25)

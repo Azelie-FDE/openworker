@@ -1657,6 +1657,10 @@ export interface ReviewerBucket {
   unsure: number;
   tokens_in: number;
   tokens_out: number;
+  // Cached-prefix share of the input, billed at ~10%. Without it the badge only ever
+  // showed the FRESH tokens — a fraction of what a check really processes.
+  cache_read: number;
+  cache_write: number;
 }
 export interface ReviewerStats {
   live: ReviewerBucket;   // the mode actually deciding (Mode.AUTO_APPROVE)
