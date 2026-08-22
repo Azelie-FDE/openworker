@@ -963,3 +963,26 @@ def test_verdict_audit_rows_carry_the_verdicts_cache_figures(tmp_path):
     verdict_rows = [r for r in rows if r.get("stage") == "reviewer_verdict"]
     assert verdict_rows and verdict_rows[0]["cache_read"] == 1400
     assert verdict_rows[0]["cache_write"] == 25
+
+
+def test_reviewer_follows_a_model_switch(tmp_path):
+    # The reviewer is bound at session build with the session's model (§1.5). Before this,
+    # switch_model() updated the ENGINE's model only, so after a mid-session switch the
+    # reviewer silently kept judging with the model the user had moved away from — old
+    # capabilities, old pricing, and metering attributed to the wrong model.
+    engine, _rows, _approvals = _engine(tmp_path, [AssistantTurn(text="ok", finish_reason="stop")])
+    engine.reviewer = Reviewer(provider=_Scripted([]), model="openai:gpt-5.6-sol")
+    engine.messages.append({"role": "user", "content": "hi"})  # a real switch, not first bind
+
+    engine.switch_model("anthropic:claude-sonnet-5")
+
+    assert engine.model == "anthropic:claude-sonnet-5"
+    assert engine.reviewer.model == "anthropic:claude-sonnet-5"
+
+
+def test_model_switch_with_no_reviewer_attached_still_works(tmp_path):
+    engine, _rows, _approvals = _engine(tmp_path, [AssistantTurn(text="ok", finish_reason="stop")])
+    engine.reviewer = None
+    engine.messages.append({"role": "user", "content": "hi"})
+    engine.switch_model("anthropic:claude-sonnet-5")  # must not raise
+    assert engine.model == "anthropic:claude-sonnet-5"

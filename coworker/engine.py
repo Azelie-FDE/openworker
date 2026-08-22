@@ -308,6 +308,12 @@ class TurnEngine:
             return None
         had_history = any(m.get("role") != "system" for m in self.messages)
         self.model = model
+        # The reviewer judges with the session's own model (§1.5: "if it's trusted to
+        # drive the agent, it's strong enough to review it"). Bound once at session build,
+        # it would otherwise keep the OLD model for the rest of the session after a
+        # switch — silently reviewing with a model the user moved away from.
+        if self.reviewer is not None:
+            self.reviewer.model = model
         if not had_history:
             return None
         from .providers.matrix import model_labels

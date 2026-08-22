@@ -955,26 +955,6 @@ function ModeMenu({
                 <span className="text-[11px] text-faint leading-snug">{o.description}</span>
               </button>
             ))}
-            {mode === "auto-approve" && !!reviewerStats?.checks && (
-              <>
-                <div className="my-1 border-t border-line" />
-                <div className="px-2.5 py-1.5 text-[11px] text-faint leading-snug" data-testid="reviewer-summary">
-                  This session: {reviewerStats.checks} {reviewerStats.checks === 1 ? "check" : "checks"} ·{" "}
-                  {reviewerStats.allow} cleared · {reviewerStats.deny} blocked · {reviewerStats.unsure} asked you
-                  {reviewerStats.tokens_in + reviewerStats.tokens_out > 0 && (
-                    // Fresh and cached shown separately: cached input bills at ~10%, so
-                    // one blended number would either overstate cost or hide most of the
-                    // work. Two honest figures beat one misleading one.
-                    <>
-                      {" "}· ~{Math.round((reviewerStats.tokens_in + reviewerStats.tokens_out) / 100) / 10}k tokens
-                      {(reviewerStats.cache_read ?? 0) > 0 && (
-                        <> (+{Math.round((reviewerStats.cache_read ?? 0) / 100) / 10}k cached)</>
-                      )}
-                    </>
-                  )}
-                </div>
-              </>
-            )}
             {onUnattendedChange && (
               <>
                 <div className="my-1 border-t border-line" />
