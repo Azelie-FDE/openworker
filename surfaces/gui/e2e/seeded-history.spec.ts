@@ -127,3 +127,28 @@ test("a dead MCP server replays as one quiet line with Details and Open Connecto
   await page.getByTestId("mcp-notice-connectors").click();
   await expect(page.getByText("Connectors", { exact: true }).first()).toBeVisible();
 });
+
+test("a LEGACY mcp_error notice (pre-server-field) also collapses to the quiet line", async ({
+  page,
+}) => {
+  // Old sessions persisted the full text + a plain "see Settings ▸ Connectors" pointer;
+  // display-time parsing recovers the server name so old transcripts clean up too.
+  await seedSessionMessages(page, "pinned-cowork-1", [
+    { role: "user", content: "hi", ts: TS },
+    {
+      role: "notice",
+      kind: "mcp_error",
+      text: "MCP server “sales-db” failed to start: unhandled errors in a TaskGroup <function f at 0x102ab40f0> — see Settings ▸ Connectors",
+    },
+  ]);
+  await page.goto("/");
+  await page.getByText("Draft the launch note").first().click();
+
+  const line = page.getByTestId("mcp-notice");
+  await expect(line).toContainText("sales-db");
+  await page.getByTestId("mcp-notice-details").click();
+  const detail = page.getByTestId("mcp-notice-detail");
+  await expect(detail).toContainText("TaskGroup");
+  // The old plain-text pointer is dropped — the button replaces it.
+  await expect(detail).not.toContainText("see Settings");
+});
