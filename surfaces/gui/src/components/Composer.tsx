@@ -29,17 +29,18 @@ import {
 type ModeOption = Option & { caution?: boolean; gated?: boolean };
 
 // "auto" is the legacy wire value for Bypass approvals (server: Mode.BYPASS_APPROVALS).
-// Auto-Approve is `gated`: shown only when getSettings().auto_approve is true (the feature
-// flag, off by default). Copy (owner, 2026-08-12): two lines like every other entry —
-// "your session model" carries the who-judges fact inline; per-check cost surfaces in the
-// metering badge, not as picker text.
+// Auto-approve is `gated`: shown only when getSettings().auto_approve is true (the feature
+// flag, off by default). Copy (owner, 2026-08-22): imperative like the sibling entries;
+// "your session model" carries the who-judges fact inline; per-check cost is logged, not
+// picker text.
 const PERMISSION_OPTIONS: ModeOption[] = [
   { value: "discuss", label: "Discuss", description: "Chat and explore — no edits or commands" },
   { value: "interactive", label: "Ask for approval", description: "Ask before edits and commands" },
   {
     value: "auto-approve",
-    label: "Auto-Approve",
-    description: "Your session model lets lower-risk actions through; anything it isn't sure about asks you",
+    label: "Auto-approve",
+    description:
+      "Let your session model classify actions and handle approvals, prompting you for anything it's unsure about",
     gated: true,
   },
   {
@@ -50,7 +51,7 @@ const PERMISSION_OPTIONS: ModeOption[] = [
   },
 ];
 
-/** The picker's label for a mode value ("auto-approve" -> "Auto-Approve"). Exported so the
+/** The picker's label for a mode value ("auto-approve" -> "Auto-approve"). Exported so the
  * transcript's mode markers read the same names the user just chose from. */
 export function modeLabel(value: string): string {
   return PERMISSION_OPTIONS.find((o) => o.value === value)?.label || value;
@@ -107,8 +108,8 @@ interface Props {
   // when" is one mental model. Absent handler = no toggle (e.g. Chat).
   unattended?: boolean;
   onUnattendedChange?: (on: boolean) => void;
-  // Auto-Approve metering (§1.7): the "Auto-Approve · N checks" badge + mode-menu summary.
-  // Absent/zero hides both; only the LIVE bucket surfaces here (shadow is a Settings concern).
+  // The pending-approval card rendered above the input (plan / work-items / team / tool /
+  // folder requests). Attended sessions only — Unattended parks the prompt in the Inbox.
   approvalSlot?: ReactNode;
   // Push text + attachments into the composer (e.g. a start-panel task card). The `nonce` makes
   // repeated identical prefills re-apply; the user can still edit before sending.

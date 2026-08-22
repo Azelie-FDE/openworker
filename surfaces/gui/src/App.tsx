@@ -59,7 +59,7 @@ import { Icon } from "./components/Icon";
 import { Sidebar } from "./components/Sidebar";
 import { ThinkingBlock, Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
-import { modeNotice, type ModeMark } from "./modeNotice";
+import { modeNoticeStep, type ModeNoticeState } from "./modeNotice";
 import { Markdown } from "./components/Markdown";
 import { SearchModal } from "./components/SearchModal";
 import { SessionIntro } from "./components/SessionIntro";
@@ -216,11 +216,16 @@ export function App() {
   const [streaming, setStreamingState] = useState("");
   // Ref mirror of `streaming`: the WS handler closure is built once per socket and can't read
   // fresh state — the interrupted/error flush below needs the live buffer at event time.
-  // Mode markers in the transcript: which session has already seen the full Auto-Approve
+  // Mode markers in the transcript: which session has already seen the full Auto-approve
   // explanation, and what mode the transcript last recorded (so a switch can be told apart
-  // from a re-render or a session change). See `modeNotice`.
-  const autoApproveNoticeFor = useRef("");
-  const lastModeMark = useRef<ModeMark>(null);
+  // from a re-render or a session change). See `modeNoticeStep`.
+  const modeNoticeState = useRef<ModeNoticeState>({ mark: null, bannerShownFor: "" });
+  // Which session the current `mode` value is CONFIRMED for. On a session switch, `mode`
+  // still holds the previous session's value until the server's `ready` event delivers the
+  // real one — announcing anything in that window posts the old session's banner into the
+  // new transcript (seen 2026-08-22: a fresh Ask-for-approval session opened with the
+  // Auto-approve banner, then a stray "Ask for approval is on." marker when `ready` landed).
+  const [modeConfirmedFor, setModeConfirmedFor] = useState("");
   const streamingRef = useRef("");
   const setStreaming = (value: string | ((s: string) => string)) => {
     streamingRef.current = typeof value === "function" ? value(streamingRef.current) : value;
@@ -684,6 +689,9 @@ export function App() {
           setConnected(true);
           if (d.model) setModel(d.model);
           if (d.mode) setMode(d.mode);
+          // Even when d.mode is absent (older servers), this is the best truth we'll get —
+          // unblock the mode-notice effect for this session either way.
+          setModeConfirmedFor(sessionId);
           if (d.command_trust?.required) setWorkspaceTrustRequest(d.command_trust);
           // Cowork: adopt the server-provisioned scratch dir (only when we don't already have one).
           if (d.workspace) setWorkspace((cur) => cur || d.workspace);
@@ -1011,11 +1019,12 @@ export function App() {
   }, [sessionId]);
 
   useEffect(() => {
-    const item = modeNotice(mode, sessionId, lastModeMark.current, autoApproveNoticeFor.current);
-    lastModeMark.current = { session: sessionId, mode };
-    if (mode === "auto-approve") autoApproveNoticeFor.current = sessionId;
+    // The step is a no-op while `mode` still belongs to the previous session (until `ready`
+    // confirms it) — see modeNoticeStep for why acting on the stale value misfires.
+    const { item, state } = modeNoticeStep(modeNoticeState.current, mode, sessionId, modeConfirmedFor);
+    modeNoticeState.current = state;
     if (item) setItems((p) => [...p, item]);
-  }, [mode, sessionId]);
+  }, [mode, sessionId, modeConfirmedFor]);
   useEffect(() => {
     if (atBottomRef.current) scrollToBottom();
   }, [items, streaming]);

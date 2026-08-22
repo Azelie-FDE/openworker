@@ -326,7 +326,7 @@ describe("mode notice", () => {
     {
       kind: "notice",
       tone: "info",
-      title: "Auto-Approve is on.",
+      title: "Auto-approve is on.",
       text: "First paragraph about what it does.\n\nSecond paragraph about what it can't tell.",
     },
   ];
@@ -334,7 +334,7 @@ describe("mode notice", () => {
   it("renders the title and one paragraph per blank-line break", () => {
     render(<Transcript items={BANNER} running={false} onApprove={() => {}} />);
     const block = screen.getByTestId("mode-notice");
-    expect(block.textContent).toContain("Auto-Approve is on.");
+    expect(block.textContent).toContain("Auto-approve is on.");
     expect(block.querySelectorAll("p")).toHaveLength(2);
     // Prose layout, not the centred one-liner used for "Context compacted".
     expect(block.className).toContain("notice-block");

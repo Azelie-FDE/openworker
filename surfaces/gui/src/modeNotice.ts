@@ -12,8 +12,9 @@ import type { Item } from "./types";
 // unhedged — where it can be wrong. It reduces interruptions, not risk, and the closing
 // line has to leave that clear.
 export const AUTO_APPROVE_NOTICE = [
-  "Your session model lets routine actions through without asking; anything it isn't sure " +
-    "about still comes to you — whatever the rules settle outright, it never sees.",
+  "Your session model classifies each action and lets the routine ones through without " +
+    "asking; anything it isn't sure about still comes to you — whatever the rules settle " +
+    "outright, it never sees.",
   "It reduces interruptions from lower-risk actions, not the risk from what it can't tell: " +
     "what a script will do, or whether an instruction came from you or from a web page or " +
     "email. Shell commands aren't sandboxed — they reach anything you can. These are model " +
@@ -41,7 +42,7 @@ export function modeNotice(
     return {
       kind: "notice",
       tone: "info",
-      title: "Auto-Approve is on.",
+      title: "Auto-approve is on.",
       text: AUTO_APPROVE_NOTICE,
     };
   }
@@ -52,4 +53,35 @@ export function modeNotice(
     return { kind: "notice", tone: "info", text: `${modeLabel(mode)} is on.` };
   }
   return null;
+}
+
+/** What the caller carries between mode changes: the last recorded mark and which session
+ * has already seen the full banner. */
+export type ModeNoticeState = { mark: ModeMark; bannerShownFor: string };
+
+/**
+ * One observed (mode, session) pair → the item to append (or null) plus the next state.
+ *
+ * `modeConfirmedFor` is the session the current `mode` value is KNOWN to belong to — on a
+ * session switch, the app's mode state still holds the previous session's value until the
+ * server's `ready` event delivers the real one. Acting in that window posts the old
+ * session's banner into the new transcript, then a stray marker when the truth lands
+ * (seen 2026-08-22). So an unconfirmed pair is a no-op: nothing said, nothing recorded —
+ * recording the stale mode would also fake a "switch" once the real mode arrives.
+ */
+export function modeNoticeStep(
+  state: ModeNoticeState,
+  mode: string,
+  sessionId: string,
+  modeConfirmedFor: string,
+): { item: Item | null; state: ModeNoticeState } {
+  if (modeConfirmedFor !== sessionId) return { item: null, state };
+  const item = modeNotice(mode, sessionId, state.mark, state.bannerShownFor);
+  return {
+    item,
+    state: {
+      mark: { session: sessionId, mode },
+      bannerShownFor: mode === "auto-approve" ? sessionId : state.bannerShownFor,
+    },
+  };
 }

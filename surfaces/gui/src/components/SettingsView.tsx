@@ -869,7 +869,7 @@ function AutoApproveCard() {
   if (on === null) return null;
   return (
     <div className={CARD + " p-4 mb-4"} data-testid="auto-approve-card">
-      <div className={FIELD_LABEL}>Auto-Approve (experimental)</div>
+      <div className={FIELD_LABEL}>Auto-approve (experimental)</div>
       <label className="flex items-start gap-3 py-2">
         <input
           type="checkbox"
@@ -879,9 +879,9 @@ function AutoApproveCard() {
           onChange={(e) => saveOn(e.target.checked)}
         />
         <span>
-          <span className="block text-[13px] text-ink">Enable Auto-Approve mode</span>
+          <span className="block text-[13px] text-ink">Enable Auto-approve mode</span>
           <span className="block text-[12px] text-muted">
-            Adds an <em>Auto-Approve</em> option to the mode picker. In that mode, your session
+            Adds an <em>Auto-approve</em> option to the mode picker. In that mode, your session
             model reviews each action that would normally need approval and clears the routine
             ones; anything doubtful still asks you. It can never allow something the rules
             block. One extra model call per check, billed to your usage.
