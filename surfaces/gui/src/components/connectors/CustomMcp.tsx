@@ -88,7 +88,7 @@ function McpGlyph() {
 }
 
 export function CustomMcpGroup({
-  servers,
+  servers: serversProp,
   onOpen,
   onChanged,
 }: {
@@ -96,6 +96,17 @@ export function CustomMcpGroup({
   onOpen: (name: string) => void;
   onChanged: () => void;
 }) {
+  const servers = serversProp;
+  // A probe in flight ("Testing…" / "Signing in…") settles server-side within seconds,
+  // but this page has no standing MCP poll — the chip froze on Testing forever
+  // (owner-hit 2026-08-21, add-by-URL against a guarded server). While any row is
+  // authorizing, poll the parent's refresh until every row settles.
+  const anyAuthorizing = servers.some((s) => s.status === "authorizing");
+  useEffect(() => {
+    if (!anyAuthorizing) return;
+    const t = setInterval(onChanged, 1000);
+    return () => clearInterval(t);
+  }, [anyAuthorizing, onChanged]);
   const presets = MCP_PRESETS.filter((p) => !servers.some((s) => s.name === p.name));
   if (servers.length === 0 && presets.length === 0) return null;
 
@@ -156,6 +167,24 @@ const EXAMPLE = `{
 
 const INPUT =
   "w-full text-[13px] px-3 py-2 rounded-lg border border-line bg-paper text-ink outline-none focus:border-accent";
+
+// A friendly default server name from its URL: walk the hostname's labels left to
+// right, skip the generic ones (mcp/api/data/www…), take the first distinctive label
+// (mcp.linear.app → "linear", data.dlai.link → "dlai"); fall back to the 2nd-level
+// domain. The user can always overtype it.
+const GENERIC_LABELS = new Set(["www", "mcp", "api", "data", "remote", "server", "agent", "app"]);
+function nameFromUrl(raw: string): string {
+  try {
+    const host = new URL(raw).hostname.toLowerCase();
+    const labels = host.split(".").filter(Boolean);
+    if (labels.length < 2) return "";
+    const candidates = labels.slice(0, -1); // drop the TLD
+    const pick = candidates.find((l) => !GENERIC_LABELS.has(l)) || candidates[candidates.length - 1];
+    return pick.replace(/[^a-z0-9-]/g, "");
+  } catch {
+    return "";
+  }
+}
 
 export function AddMcpModal({
   onClose,
@@ -258,7 +287,12 @@ export function AddMcpModal({
             />
             <input
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => {
+                const u = e.target.value;
+                setUrl(u);
+                // Prefill the name once the URL looks real — never overwrite typing.
+                if (!name.trim()) setName(nameFromUrl(u));
+              }}
               placeholder="https://mcp.example.com/mcp"
               spellCheck={false}
               className={INPUT + " font-mono text-[12px]"}
