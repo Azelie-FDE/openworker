@@ -406,3 +406,46 @@ describe("ApprovalCard — session read-only grant", () => {
     expect(screen.queryByTestId("allow-readonly-session")).toBeNull();
   });
 });
+
+// The provenance line (OPE-114 §1): the one fact about a shell command that cannot be read
+// off its text — that the agent itself made the file it is about to run. Rendered on the
+// card as well as sent to the reviewer, because a human approving is just as blind to a
+// script's contents as the reviewer is.
+describe("ApprovalCard — file provenance", () => {
+  const shell = (extra: Partial<ApprovalItem> = {}): ApprovalItem => ({
+    kind: "approval",
+    name: "run_shell",
+    args: { command: "python scripts/setup.py" },
+    reason: "requires approval",
+    category: "shell",
+    ...extra,
+  });
+
+  it("shows the warning when the agent created the file this command runs", () => {
+    render(
+      <ApprovalCard
+        item={shell({ provenance: "scripts/setup.py was created by the agent 3 steps ago" })}
+        onApprove={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/created by the agent 3 steps ago/)).toBeTruthy();
+  });
+
+  it("says nothing about provenance for an ordinary command", () => {
+    render(<ApprovalCard item={shell()} onApprove={vi.fn()} />);
+    expect(screen.queryByText(/by the agent/)).toBeNull();
+  });
+
+  it("shows it for downloaded files too, since that is the sharper case", () => {
+    render(
+      <ApprovalCard
+        item={shell({
+          args: { command: "bash install.sh" },
+          provenance: "install.sh was downloaded by the agent 1 step ago",
+        })}
+        onApprove={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/downloaded by the agent/)).toBeTruthy();
+  });
+});
