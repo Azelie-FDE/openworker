@@ -370,7 +370,9 @@ body {
 /* Mode banner: prose, so it reads left-aligned in a card rather than as a centred
    status line. Same `notice` item, switched on by a title. */
 .notice-block {
-  text-align: left; max-width: 62ch; margin: 12px auto; padding: 11px 13px;
+  /* Full transcript width, like every other item — a narrower measure here reads as a
+     boxed-off square rather than a banner. */
+  text-align: left; margin: 12px 0; padding: 11px 13px;
   border: 1px solid var(--line); border-radius: 9px; background: var(--paper);
   display: flex; flex-direction: column; gap: 7px; line-height: 1.5;
 }
