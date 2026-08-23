@@ -87,7 +87,13 @@ from ..sessions import SessionRecord
 from ..teams import Actor as TeamActor
 from ..teams import BoardError as TeamsBoardError
 from ..teams import JournalStore, Role as TeamRole, TeamStore, board_tools, journal_tools
-from ..teams.model import space_for_workspace
+from ..projects import (
+    project_key,
+    project_label,
+    project_presence,
+    resolve_board_space,
+    resolve_memory_key,
+)
 from ..teams.chat import ChatStore
 from ..teams.registry import TeamRegistry, TeamWorker
 from ..teams.attachments import AttachmentStore
@@ -644,6 +650,7 @@ class SessionManager:
             # and stay usable, only the write tools go. Read at build time; running
             # sessions finish under the mode they started with.
             memory_store=self.memory_store,
+            memory_workspace=self._memory_key_for(record, ws),
             memory_off=not self.memory_settings.enabled,
             # LIVE, not a snapshot: turning saving off mid-conversation must take
             # effect at once (owner-hit 2026-07-28 — a running session kept saving).
@@ -1645,10 +1652,32 @@ class SessionManager:
 
     # ------------------------------------------------------------- agent teams (OPE-96)
 
+    # ------------------------------------------------- project identity (pass 20)
+
+    def _memory_key_for(self, record, ws: Optional[str]) -> Optional[str]:
+        """Binding > git > path, with the one-time path→git re-key on the way."""
+        binding = ((record.bindings if record else {}) or {}).get("memory")
+        return resolve_memory_key(
+            ws,
+            binding=binding,
+            names=self.session_store.names(),
+            memory_store=self.memory_store,
+        )
+
+    def _space_for(self, record, ws: Optional[str]) -> Optional[str]:
+        """Board-space twin of _memory_key_for — same ladder, board collision rule."""
+        binding = ((record.bindings if record else {}) or {}).get("board")
+        return resolve_board_space(
+            ws,
+            binding=binding,
+            names=self.session_store.names(),
+            team_store=self.team_store,
+        )
+
     def _board_space(self, session_id: str) -> Optional[str]:
         record = self.session_store.load(session_id)
         workspace = (record.workspace if record else None) or self.default_workspace
-        return space_for_workspace(workspace) if workspace else None
+        return self._space_for(record, workspace) if workspace else None
 
     def _user_actor(self) -> TeamActor:
         return TeamActor(id="user", role=TeamRole.USER)
@@ -1758,7 +1787,7 @@ class SessionManager:
         record = self.session_store.load(session_id)
         if record is None or not record.workspace:
             return {"approved": False, "error": "the session has no workspace"}
-        space = space_for_workspace(record.workspace)
+        space = self._space_for(record, record.workspace)
         actor = TeamActor(
             id=f"{record.agent}:{session_id[:8]}",
             role=TeamRole.LEAD,
@@ -1839,7 +1868,7 @@ class SessionManager:
             role = "lead"
         if role is None or not ws:
             return []
-        space = space_for_workspace(ws)
+        space = self._space_for(record, ws)
         if role == "worker":
             info = (record.team if record is not None else {}) or {}
             actor = TeamActor(
@@ -2034,7 +2063,7 @@ class SessionManager:
             return {"approved": False, "error": "the lead session has no workspace"}
         if self.teams.for_lead_session(session_id) is not None:
             return {"approved": False, "error": "this session already leads a team"}
-        space = space_for_workspace(record.workspace)
+        space = self._space_for(record, record.workspace)
         workers: list[TeamWorker] = []
         used: set[str] = {"lead", "user", "board"}  # reserved handles
         for member in members:
@@ -4276,6 +4305,7 @@ class SessionManager:
             approver=self._scheduled_approver(task, session_id),
             provider=self.provider,
             memory_store=self.memory_store,
+            memory_workspace=self._memory_key_for(None, task.workspace),
             memory_off=not self.memory_settings.enabled,
             memory_saving_enabled=lambda: self.memory_settings.enabled,
             # Callable, not a snapshot: editing your instructions in Settings applies
@@ -5290,7 +5320,32 @@ class SessionManager:
                 ],
             )
         self.session_store.touch_workspace(str(resolved))
-        return {"ok": True, "roots": self.get_roots(session_id)}
+        # Grant-time notice (pass 20): if this directory's project already has
+        # memory or a board, say so — one line, pointer only, to agent + user.
+        notice = self._project_notice(str(resolved))
+        engine = self._engines.get(session_id)
+        if notice and engine is not None:
+            engine._append_notice("project_presence", notice)
+        return {"ok": True, "roots": self.get_roots(session_id), "notice": notice}
+
+    def _project_notice(self, path: str) -> Optional[str]:
+        """One-line presence pointer for a newly granted directory, or None."""
+        try:
+            key = project_key(path)
+            pres = project_presence(
+                key, memory_store=self.memory_store, team_store=self.team_store
+            )
+        except Exception:
+            return None
+        parts = []
+        if pres["memories"]:
+            parts.append(f"project memory ({pres['memories']} entries)")
+        if pres["board_items"]:
+            parts.append("a board")
+        if not parts:
+            return None
+        label = project_label(key)["label"]
+        return f"“{label}” already has {' and '.join(parts)} — bind it by name or start a session there to use it."
 
     def remove_root(self, session_id: str, path: str) -> dict[str, Any]:
         """Revoke a previously-added folder. The primary scratch cannot be removed."""
@@ -5778,6 +5833,71 @@ class SessionManager:
                 pass
 
         return notify
+
+    # -- project bindings (pass 20 / UX-044) -------------------------------------
+
+    def project_menu(self, session_id: str, kind: str) -> dict[str, Any]:
+        """The submenu payload: the session's derived project (pinned, labeled per
+        the UX-044 rules) + named entries MRU-ordered. The GUI shows 5 and grows a
+        filter at 6+; the full named list ships so the filter reaches everything."""
+        record = self.session_store.load(session_id)
+        ws = (record.workspace if record else None) or self.default_workspace
+        derived_key = project_key(ws) if ws else None
+        names = self.session_store.names()
+        bound = ((record.bindings if record else {}) or {}).get(kind)
+        named = names.list(kind)
+        return {
+            "kind": kind,
+            "bound": bound,
+            "derived": (
+                {**project_label(derived_key), "key": derived_key}
+                if derived_key
+                else None
+            ),
+            "named": [{"name": n["name"], "key": n["key"]} for n in named],
+        }
+
+    def set_binding(
+        self, session_id: str, kind: str, name: Optional[str]
+    ) -> dict[str, Any]:
+        """Bind (or unbind, name=None) a named project for this session. Takes
+        effect at the next engine build — the running engine keeps the knowledge
+        it started with (same doctrine as memory deletions)."""
+        if kind not in ("memory", "board"):
+            return {"ok": False, "error": f"unknown kind {kind!r}"}
+        if self.is_running(session_id):
+            return {"ok": False, "error": "wait for the current task to finish first"}
+        if name and self.session_store.names().resolve(kind, name) is None:
+            return {"ok": False, "error": f"no {kind} named {name!r}"}
+        record = self.session_store.load(session_id)
+        bindings = dict((record.bindings if record else {}) or {})
+        if name:
+            bindings[kind] = name
+        else:
+            bindings.pop(kind, None)
+        if record is None:
+            return {"ok": False, "error": "unknown session"}
+        self.session_store.set_bindings(session_id, bindings)
+        # Rebind applies from the next engine build; drop the cached engine so the
+        # next turn rebuilds with the new key (messages persist via the record).
+        self._engines.pop(session_id, None)
+        return {"ok": True, "bindings": bindings}
+
+    def name_current_project(
+        self, session_id: str, kind: str, name: str
+    ) -> dict[str, Any]:
+        """Give the session's derived project a user name (UX-044 'Name current…')."""
+        record = self.session_store.load(session_id)
+        ws = (record.workspace if record else None) or self.default_workspace
+        if not ws:
+            return {"ok": False, "error": "session has no workspace"}
+        try:
+            entry = self.session_store.names().name_current(
+                kind, name, project_key(ws)
+            )
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, **entry}
 
     def list_memory(self) -> list[dict[str, Any]]:
         return [
