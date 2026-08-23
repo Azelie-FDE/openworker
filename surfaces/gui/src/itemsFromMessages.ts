@@ -85,7 +85,11 @@ export function itemsFromMessages(messages: ConversationMessage[]): Item[] {
                   // the `server` field existed) recover the name from their own text, so old
                   // transcripts collapse too instead of keeping the wall of stderr.
                   mcpNoticeItem(m)
-                : { kind: "notice", tone: "warn", text: "Error: " + (m.text || "unknown"), retriable: true },
+                : m.kind === "project_presence"
+                  ? // Grant-time pointer (pass 20): the granted folder already has
+                    // memory/board — informational, one quiet line.
+                    { kind: "notice", tone: "info", text: m.text || "" }
+                  : { kind: "notice", tone: "warn", text: "Error: " + (m.text || "unknown"), retriable: true },
       );
     }
     // system messages are omitted; tool-result messages are folded into the tool row above
