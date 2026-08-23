@@ -2044,6 +2044,7 @@ export function App() {
               connected={connected}
               modelReady={modelReady}
               onConnectModel={openModelSetup}
+              onOpenMemory={() => openSettings("memory")}
               onConfigureVoiceInput={() => openSettings("voice")}
               onSend={send}
               onInterrupt={interrupt}

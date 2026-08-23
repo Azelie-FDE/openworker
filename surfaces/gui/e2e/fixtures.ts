@@ -542,6 +542,15 @@ export async function mockApi(page: import("@playwright/test").Page) {
   // Installed personas — mutable so enable/surface/delete round-trip through the UI.
   const personas: any[] = PERSONAS.personas.map((p) => ({ ...p }));
   // Sessions — mutable so archive (PATCH), rename (PATCH), and delete round-trip.
+  // UX-044: mutable binding state for the project-menu mocks.
+  const projectBindings: Record<string, string> = {};
+  const projectNames: Record<string, { name: string; key: string }[]> = {
+    memory: [
+      { name: "openworker", key: "/k/openworker" },
+      { name: "personal-ops", key: "/k/ops" },
+    ],
+    board: [{ name: "aicreator-ops", key: "/k/aico" }],
+  };
   const sessions: any[] = [
     { ...PINNED_SESSION },
     ...EXTRA_SESSIONS.map((s) => ({ ...s })),
@@ -1054,6 +1063,32 @@ export async function mockApi(page: import("@playwright/test").Page) {
         return json({ ok: true });
       }
       return json(connections);
+    }
+    // UX-044 project bindings: stateful per-run so specs can bind/unbind/name.
+    if (/\/v1\/sessions\/[^/]+\/project-menu$/.test(p)) {
+      const kind = new URL(req.url()).searchParams.get("kind") || "memory";
+      return json({
+        kind,
+        bound: projectBindings[kind] ?? null,
+        derived: {
+          kind: "folder",
+          label: "~/fleet/ro4d/demo-universe/notes",
+          full: "/Users/u/fleet/ro4d/demo-universe/notes",
+          key: "/Users/u/fleet/ro4d/demo-universe/notes",
+        },
+        named: projectNames[kind] || [],
+      });
+    }
+    if (/\/v1\/sessions\/[^/]+\/bindings$/.test(p) && m === "PUT") {
+      const b = req.postDataJSON() || {};
+      if (b.name) projectBindings[b.kind] = b.name;
+      else delete projectBindings[b.kind];
+      return json({ ok: true, bindings: projectBindings });
+    }
+    if (/\/v1\/sessions\/[^/]+\/project-name$/.test(p) && m === "POST") {
+      const b = req.postDataJSON() || {};
+      (projectNames[b.kind] ||= []).unshift({ name: b.name, key: "/Users/u/fleet/ro4d/demo-universe/notes" });
+      return json({ ok: true, kind: b.kind, name: b.name });
     }
     if (/\/v1\/sessions\/[^/]+\/roots$/.test(p)) {
       if (m === "POST") {
