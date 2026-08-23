@@ -48,7 +48,7 @@ function AttnBadge({ n }: { n: number }) {
   if (!n) return null;
   return (
     <span
-      className="text-[10px] font-semibold text-ink bg-faint/30 rounded-full px-1.5 leading-[15px] shrink-0"
+      className="text-[11px] font-semibold text-ink bg-faint/30 rounded-full px-1.5 leading-[15px] shrink-0"
       title={`${n} awaiting your attention`}
     >
       {n > 99 ? "99+" : n}
@@ -63,7 +63,7 @@ function UnseenBadge({ n, failed }: { n: number; failed?: boolean }) {
   if (!n) return null;
   return (
     <span
-      className="text-[10px] font-semibold text-ink bg-faint/30 rounded-full px-1.5 leading-[15px] shrink-0"
+      className="text-[11px] font-semibold text-ink bg-faint/30 rounded-full px-1.5 leading-[15px] shrink-0"
       title={failed ? `${n} new run${n > 1 ? "s" : ""} — the latest failed` : `${n} new run${n > 1 ? "s" : ""}`}
     >
       {n > 99 ? "99+" : n}
@@ -351,7 +351,7 @@ export function Sidebar(props: Props) {
     <button
       className={
         "w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-left " +
-        (active ? "text-ink bg-paper" : "hover:bg-paper")
+        (active ? "text-ink bg-chromeHover" : "hover:bg-chromeHover")
       }
       onClick={() => {
         setAppMenuOpen(false);
@@ -439,7 +439,7 @@ export function Sidebar(props: Props) {
     const menuOpen = rowMenu?.id === s.session_id;
     const item = (testid: string, icon: IconName, label: string, onClick: () => void) => (
       <button
-        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-left hover:bg-paper"
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[13px] text-left hover:bg-paper"
         data-testid={testid}
         role="menuitem"
         onClick={() => {
@@ -464,8 +464,8 @@ export function Sidebar(props: Props) {
           aria-expanded={menuOpen}
           data-testid="row-menu"
           className={
-            "w-5 h-5 grid place-items-center rounded hover:bg-paper " +
-            (menuOpen ? "text-ink bg-paper" : "text-faint hover:text-ink")
+            "w-5 h-5 grid place-items-center rounded hover:bg-chromeHover " +
+            (menuOpen ? "text-ink bg-chromeHover" : "text-faint hover:text-ink")
           }
           onClick={(e) => (menuOpen ? closeRowMenu() : openRowMenu(s.session_id, e.currentTarget))}
         >
@@ -494,7 +494,7 @@ export function Sidebar(props: Props) {
               {confirmDelId === s.session_id ? (
                 <button
                   title="Click again to permanently delete"
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-left font-medium text-danger hover:bg-paper"
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[13px] text-left font-medium text-danger hover:bg-paper"
                   data-testid="row-menu-delete"
                   role="menuitem"
                   onClick={() => {
@@ -507,7 +507,7 @@ export function Sidebar(props: Props) {
                 </button>
               ) : (
                 <button
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-left text-danger hover:bg-paper"
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[13px] text-left text-danger hover:bg-paper"
                   data-testid="row-menu-delete"
                   role="menuitem"
                   onClick={() => setConfirmDelId(s.session_id)}
@@ -613,7 +613,7 @@ export function Sidebar(props: Props) {
           "group w-full flex items-center gap-2.5 px-2 py-2 rounded-lg cursor-pointer text-left " +
           (active
             ? "bg-ink/[0.055]"
-            : "hover:bg-paper")
+            : "hover:bg-chromeHover")
         }
         title={editing ? undefined : title}
         onClick={() => {
@@ -639,7 +639,11 @@ export function Sidebar(props: Props) {
           />
         ) : (
           <>
-            <span className="min-w-0 flex-1 block truncate text-[13px] font-medium">
+            <span
+              className={
+                "min-w-0 flex-1 block truncate text-[13px] " + (active ? "font-medium" : "")
+              }
+            >
               {title}
             </span>
             <span
@@ -665,7 +669,7 @@ export function Sidebar(props: Props) {
   const pinnedBand = () =>
     pinnedSessions.length > 0 ? (
       <div>
-        <div className="px-1.5 text-[10.5px] uppercase tracking-[0.07em] text-faint font-semibold mb-1">
+        <div className="px-1.5 text-[11px] uppercase tracking-[0.07em] text-faint font-semibold mb-1">
           Pinned
         </div>
         <div className="space-y-0.5">
@@ -680,14 +684,14 @@ export function Sidebar(props: Props) {
   const scheduledBand = () =>
     automations.length > 0 ? (
       <div data-testid="scheduled-band">
-        <div className="px-1.5 text-[10.5px] uppercase tracking-[0.07em] text-faint font-semibold mb-1">
+        <div className="px-1.5 text-[11px] uppercase tracking-[0.07em] text-faint font-semibold mb-1">
           Scheduled
         </div>
         <div className="space-y-0.5">
           {automations.map((a) => (
             <button
               key={a.id}
-              className="w-full flex items-center gap-2 px-1.5 py-1 rounded-lg text-left hover:bg-paper"
+              className="w-full flex items-center gap-2 px-1.5 py-1 rounded-lg text-left hover:bg-chromeHover"
               data-testid={`scheduled-${a.id}`}
               title={a.title}
               onClick={() => props.onOpenAutomation(a.id)}
@@ -712,11 +716,11 @@ export function Sidebar(props: Props) {
     );
     return (
     <div className="relative flex items-center justify-between px-1.5 mb-1" data-testid="recent-header">
-      <span className="text-[10.5px] uppercase tracking-[0.07em] text-faint font-semibold">
+      <span className="text-[11px] uppercase tracking-[0.07em] text-faint font-semibold">
         Recent
       </span>
       <button
-        className="w-6 h-6 grid place-items-center rounded-md text-faint hover:text-ink hover:bg-paper -mr-1"
+        className="w-6 h-6 grid place-items-center rounded-md text-faint hover:text-ink hover:bg-chromeHover -mr-1"
         title="Group & filter conversations"
         aria-label="Group and filter conversations"
         onClick={() => setGroupMenuOpen((v) => !v)}
@@ -731,7 +735,7 @@ export function Sidebar(props: Props) {
             role="menu"
             data-testid="group-filter-menu"
           >
-            <div className="px-2 pt-1 pb-1 text-[10.5px] uppercase tracking-[0.06em] text-faint font-semibold">
+            <div className="px-2 pt-1 pb-1 text-[11px] uppercase tracking-[0.06em] text-faint font-semibold">
               Group by
             </div>
             {([["grouped", "Coworker"], ["flat", "Chronological"]] as ["flat" | "grouped", string][]).map(
@@ -750,7 +754,7 @@ export function Sidebar(props: Props) {
               <>
                 <div className="my-1 border-t border-line" />
                 <div className="px-2 pt-1 pb-1 flex items-center justify-between">
-                  <span className="text-[10.5px] uppercase tracking-[0.06em] text-faint font-semibold">
+                  <span className="text-[11px] uppercase tracking-[0.06em] text-faint font-semibold">
                     Filter by coworker
                   </span>
                   {filterPersonas.size > 0 && (
@@ -870,7 +874,7 @@ export function Sidebar(props: Props) {
             {/* Codex-style Projects: a "+" header affordance, then collapsible folders whose
                 rows carry a right-aligned compact age and truncate to PROJECT_PEEK + "Show more". */}
             <div className="flex items-center justify-between px-1.5 pt-1">
-              <span className="text-[10.5px] uppercase tracking-[0.07em] text-faint font-semibold">
+              <span className="text-[11px] uppercase tracking-[0.07em] text-faint font-semibold">
                 Projects
               </span>
               <button
@@ -912,7 +916,7 @@ export function Sidebar(props: Props) {
                       <Icon name="folder" size={15} className="shrink-0" />
                       <span
                         className={
-                          "truncate min-w-0 text-[12.5px] " + (isActive ? "font-semibold" : "font-medium")
+                          "truncate min-w-0 text-[13px] " + (isActive ? "font-semibold" : "font-medium")
                         }
                       >
                         {baseName(proj)}
@@ -994,7 +998,7 @@ export function Sidebar(props: Props) {
 
   return (
     <div
-      className="sidebar flex flex-col min-h-0 bg-panel border-r border-line"
+      className="sidebar flex flex-col min-h-0 bg-chrome border-r border-line"
       onMouseLeave={props.onPeekLeave}
     >
       {/* Header: collapse/pin control FIRST + wordmark. The pin sits at the same screen position
@@ -1005,7 +1009,7 @@ export function Sidebar(props: Props) {
         {/* Collapse (dock) / pin the sidebar. ⌘B mirrors this. */}
         {props.onCollapse && (
           <button
-            className="nav-pin-btn w-7 h-7 grid place-items-center rounded-md text-faint hover:text-ink hover:bg-paper shrink-0"
+            className="nav-pin-btn w-7 h-7 grid place-items-center rounded-md text-faint hover:text-ink hover:bg-chromeHover shrink-0"
             title={props.collapsed ? "Dock sidebar (⌘B)" : "Collapse sidebar (⌘B)"}
             aria-label={props.collapsed ? "Dock sidebar" : "Collapse sidebar"}
             onClick={props.onCollapse}
@@ -1013,15 +1017,15 @@ export function Sidebar(props: Props) {
             <Icon name="sidebar" size={16} />
           </button>
         )}
-        <div className="brand-wordmark text-[15px]">OpenWorker<span className="beta-tag">BETA</span></div>
+        <div className="brand-wordmark text-[14px]">OpenWorker<span className="beta-tag">BETA</span></div>
       </div>
 
-      {/* New session: a plain button — the coworker pick moved to the composer's setup
-          row (UX-029), so the old ▾ persona menu is gone. Starts the last-used persona;
-          the setup row re-targets the draft in place. */}
-      <div className="px-3 pt-2">
+      {/* New session: a quiet nav row like its siblings (UX-040 — the filled accent block
+          shouted over the whole panel). The coworker pick lives in the composer's setup
+          row (UX-029); this starts the last-used persona. */}
+      <div className="px-2.5 pt-2">
         <button
-          className="w-full text-left px-3 py-2 rounded-lg bg-accent text-white text-[13px] font-medium hover:opacity-95 flex items-center gap-2"
+          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-left font-medium text-ink hover:bg-chromeHover"
           onClick={() => props.onNewSession(props.agent)}
         >
           <Icon name="plus" size={15} className="shrink-0" /> New session
@@ -1032,7 +1036,7 @@ export function Sidebar(props: Props) {
           SearchModal over the whole app. Matches the bottom-nav rows to reduce the boxy look. */}
       <div className="px-2.5 mt-1">
         <button
-          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-left text-muted hover:bg-paper hover:text-ink"
+          className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-left text-muted hover:bg-chromeHover hover:text-ink"
           onClick={() => setSearchModalOpen(true)}
         >
           <Icon name="search" size={15} className="shrink-0" /> Search
@@ -1044,8 +1048,8 @@ export function Sidebar(props: Props) {
       <div className="px-2.5 mt-1">
         <button
           className={
-            "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-left hover:bg-paper hover:text-ink " +
-            (props.scheduledActive ? "text-ink bg-paper" : "text-muted")
+            "w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-left hover:bg-chromeHover hover:text-ink " +
+            (props.scheduledActive ? "text-ink bg-chromeHover" : "text-muted")
           }
           data-testid="nav-automations"
           onClick={props.onOpenScheduled}
@@ -1057,8 +1061,9 @@ export function Sidebar(props: Props) {
 
       {/* Scroll area: Pinned band + the RECENT header (with group/filter control), then the body —
           grouped (per-persona accordion) or flat (chronological list). */}
-      <div className="flex-1 overflow-y-auto px-2.5 mt-3 pb-2">
-        <div className="space-y-4">
+      {/* UX-040 rhythm: clear air between the fixed nav block and the content bands. */}
+      <div className="flex-1 overflow-y-auto px-2.5 mt-[22px] pb-2">
+        <div className="space-y-5">
           {pinnedBand()}
           {scheduledBand()}
           <div>
@@ -1072,7 +1077,7 @@ export function Sidebar(props: Props) {
                   // the block with its sessions (one connected group). Collapsed = a plain row.
                   <div
                     key={s.key}
-                    className={expanded ? "rounded-xl bg-paper/70 overflow-hidden" : ""}
+                    className={expanded ? "rounded-xl bg-chromeHover/70 overflow-hidden" : ""}
                   >
                     <div
                       className={
@@ -1080,8 +1085,8 @@ export function Sidebar(props: Props) {
                         (expanded
                           ? ""
                           : isCurrent(s.key)
-                            ? "rounded-lg bg-paper"
-                            : "rounded-lg hover:bg-paper")
+                            ? "rounded-lg bg-chromeHover"
+                            : "rounded-lg hover:bg-chromeHover")
                       }
                       onClick={() => onHeaderClick(s.key)}
                     >
@@ -1219,7 +1224,7 @@ export function Sidebar(props: Props) {
           <button
             className={
               "w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-[13px] text-left " +
-              (appMenuOpen ? "bg-paper text-ink" : "hover:bg-paper")
+              (appMenuOpen ? "bg-chromeHover text-ink" : "hover:bg-chromeHover")
             }
             data-testid="account-row"
             onClick={() => {
@@ -1232,10 +1237,10 @@ export function Sidebar(props: Props) {
           >
             <span
               className={
-                "w-6 h-6 rounded-full grid place-items-center text-[10.5px] font-semibold shrink-0 " +
+                "w-6 h-6 rounded-full grid place-items-center text-[11px] font-semibold shrink-0 " +
                 (cloud?.signed_in
                   ? "bg-accentSoft text-accent"
-                  : "bg-paper text-faint border border-line")
+                  : "bg-panel text-faint border border-line")
               }
               aria-hidden
             >
@@ -1255,7 +1260,7 @@ export function Sidebar(props: Props) {
             {inboxUnlocked && (
               <span
                 className={
-                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] shrink-0 cursor-pointer " +
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] shrink-0 cursor-pointer " +
                   (totalAttention > 0
                     ? "bg-accentSoft text-accent font-semibold"
                     : "text-faint hover:text-ink")

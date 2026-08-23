@@ -1572,16 +1572,16 @@ export function App() {
           className="fixed top-3 right-3 z-[45] w-[290px] bg-panel border border-line rounded-xl shadow-lg px-3.5 pt-3 pb-2.5"
           data-testid="automation-toast"
         >
-          <div className="flex items-center gap-2 text-[12.5px] font-semibold">
+          <div className="flex items-center gap-2 text-[13px] font-semibold">
             <span className="w-[7px] h-[7px] rounded-full bg-faint toast-pulse" />
             Automation started
           </div>
-          <div className="text-[12.5px] text-muted mt-0.5 ml-[15px] truncate">
+          <div className="text-[13px] text-muted mt-0.5 ml-[15px] truncate">
             {runToast.title} · {runToast.time} run
           </div>
           <div className="flex items-center justify-between ml-[15px] mt-1.5">
             <button
-              className="text-[12.5px] text-accent font-medium"
+              className="text-[13px] text-accent font-medium"
               data-testid="toast-view-run"
               onClick={() => {
                 selectSession(runToast.sessionId, runToast.workspace, runToast.agent);
@@ -1836,7 +1836,7 @@ export function App() {
                 it underneath the topbar; owner-reported CSS bug). */}
             {sessionId.startsWith("__run__") && (
               <div
-                className="flex items-center gap-2 px-4 py-2 mb-1 rounded-lg text-[12.5px] border border-line bg-accentSoft/40"
+                className="flex items-center gap-2 px-4 py-2 mb-1 rounded-lg text-[13px] border border-line bg-accentSoft/40"
                 data-testid="run-banner"
               >
                 <Icon name="clock" size={14} className="text-accent shrink-0" />
@@ -1895,6 +1895,7 @@ export function App() {
                     onApprove={approve}
                     running={running}
                     onRetry={retry}
+                    onOpenConnectors={() => setSurface("integrations")}
                     onUndoMemory={(id, previous) => void undoMemorySave(id, previous)}
                     // §33 ref #3: sub-threshold streamed text renders INSIDE the live turn
                     // group (header when collapsed, quiet line when expanded) — never as a

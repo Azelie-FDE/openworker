@@ -1811,6 +1811,24 @@ def create_app(manager: SessionManager) -> FastAPI:
             manager.verify_provider, name, (body or {}).get("fields")
         )
 
+    @app.post("/v1/providers/openai-codex/signin")
+    async def codex_signin() -> dict[str, Any]:
+        # Opens the system browser and waits on the loopback callback — that can
+        # take minutes, so it runs as a background task; the GUI polls the status
+        # route for the flip (authorizing → signed_in | last_error). Same shape as
+        # the MCP OAuth connect route.
+        manager.begin_codex_signin()
+        asyncio.create_task(manager.codex_signin())
+        return {"ok": True, "started": True}
+
+    @app.get("/v1/providers/openai-codex/status")
+    def codex_status() -> dict[str, Any]:
+        return manager.codex_status()
+
+    @app.post("/v1/providers/openai-codex/signout")
+    def codex_signout() -> dict[str, Any]:
+        return manager.codex_signout()
+
     # -- settings (model API key) -----------------------------------------------
     @app.get("/v1/settings")
     def settings_get() -> dict[str, Any]:
@@ -2365,10 +2383,13 @@ def create_app(manager: SessionManager) -> FastAPI:
         # them (drill 2026-08-20: three silent startup failures in a row).
         for name, err in manager.pop_mcp_failures(session_id):
             detail = f": {err}" if err else ""
+            # `server` makes the notice structured: the GUI renders one quiet line
+            # with the full error behind a disclosure + an Open-Connectors action
+            # (owner ruling 2026-08-21) instead of a wall of stderr.
             engine._append_notice(
                 "mcp_error",
-                f"MCP server “{name}” failed to start{detail}"[:300]
-                + " — see Settings ▸ Connectors",
+                f"MCP server “{name}” failed to start{detail}"[:500],
+                server=name,
             )
         # Auto-compaction failure prompt (OPE-27): only an ATTENDED session may be asked
         # Retry/Trim — unattended runs auto-trim (the policy in engine._compact_now).

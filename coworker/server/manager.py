@@ -126,6 +126,14 @@ def _approval_body(request) -> str:
     return "\n".join(p for p in (reason, preview) if p)
 
 
+def _stable_error(error: str) -> str:
+    """An error string with per-process noise removed, for change detection only:
+    hex object addresses and long digit runs (pids, ports, timestamps) vary between
+    identical failures across relaunches."""
+    stable = re.sub(r"0x[0-9a-fA-F]+", "0xADDR", error or "")
+    return re.sub(r"\d{4,}", "N", stable)
+
+
 class SessionManager:
     def __init__(
         self,
@@ -186,6 +194,10 @@ class SessionManager:
         # feeds list_mcp's status so the GUI can show "authorizing…" and failures.
         self._mcp_authorizing: set[str] = set()
         self._mcp_errors: dict[str, str] = {}
+        # ChatGPT-subscription provider sign-in in flight / its last error — feeds
+        # the providers list + status route so the GUI can show "authorizing…".
+        self._codex_authorizing = False
+        self._codex_error: Optional[str] = None
         # http servers whose anonymous connect came back 401/403 — the failure is
         # "needs sign-in", so the GUI offers the OAuth switch instead of a raw error.
         self._mcp_auth_hints: set[str] = set()
@@ -1255,11 +1267,15 @@ class SessionManager:
     def _should_notify_mcp_failure(self, name: str, error: str) -> bool:
         """True once per failure episode: the first session after `name` starts
         failing (or its error text changes) notices; unchanged-broken stays quiet.
-        Persisted in prefs so an app relaunch doesn't re-stamp the same complaint."""
+        Persisted in prefs so an app relaunch doesn't re-stamp the same complaint.
+        Compared on a NORMALIZED error: stderr often embeds per-process values
+        (0x… object addresses, pids), which made "the same" failure look new on
+        every relaunch and re-stamp every session (owner-hit 2026-08-21)."""
+        stable = _stable_error(error)
         notified = self._prefs.setdefault("mcp_notified_errors", {})
-        if notified.get(name) == error:
+        if notified.get(name) == stable:
             return False
-        notified[name] = error
+        notified[name] = stable
         self._save_prefs()
         return True
 
@@ -2764,21 +2780,30 @@ class SessionManager:
                 for f in d.fields
                 if not f.secret and profile.get(f.key)
             }
-            out.append(
-                {
-                    **d.to_dict(),
-                    "configured": configured,
-                    "values": values,
-                    "suggested_models": self._suggested_models(d.name),
-                    # Key hygiene for the Settings pane: when the key was saved (date, stamped
-                    # by set_provider) and when the provider last served a completion (epoch,
-                    # stamped by the router's on_use hook). Absent for env-only config.
-                    "key_set_at": profile.get("key_set_at"),
-                    "last_used_at": (self._prefs.get("provider_last_used") or {}).get(
-                        d.name
-                    ),
-                }
-            )
+            row = {
+                **d.to_dict(),
+                "configured": configured,
+                "values": values,
+                "suggested_models": self._suggested_models(d.name),
+                # Key hygiene for the Settings pane: when the key was saved (date, stamped
+                # by set_provider) and when the provider last served a completion (epoch,
+                # stamped by the router's on_use hook). Absent for env-only config.
+                "key_set_at": profile.get("key_set_at"),
+                "last_used_at": (self._prefs.get("provider_last_used") or {}).get(
+                    d.name
+                ),
+            }
+            if d.auth == "oauth":
+                # Sign-in state instead of key state; the token values themselves
+                # never leave the SecretStore.
+                row["signed_in"] = configured
+                row["account"] = profile.get("account_email") or profile.get(
+                    "account_id"
+                )
+                if d.name == "openai-codex":
+                    row["authorizing"] = self._codex_authorizing
+                    row["last_error"] = self._codex_error
+            out.append(row)
         return out
 
     def pick_native_folder(self) -> dict[str, Any]:
@@ -2919,6 +2944,58 @@ class SessionManager:
         self._refresh_provider(name)
         return {"ok": True, "provider": name}
 
+    # -- ChatGPT-subscription provider (OAuth, no key) ---------------------------
+    def begin_codex_signin(self) -> None:
+        """Flag `authorizing` BEFORE the background sign-in task starts, so the GUI's
+        first poll after the button press already shows it (same reasoning as
+        begin_mcp_connect)."""
+        self._codex_authorizing = True
+        self._codex_error = None
+
+    async def codex_signin(self) -> dict[str, Any]:
+        """Run the interactive browser sign-in and store the tokens. Long-running
+        (the user completes it in the browser) — routes run it as a background task
+        and the GUI polls codex_status for the flip."""
+        from ..providers import codex_auth
+
+        self._codex_authorizing = True
+        self._codex_error = None
+        try:
+            result = await codex_auth.sign_in(self.secrets)
+        except Exception as exc:
+            self._codex_error = str(exc)
+            return {"ok": False, "error": str(exc)}
+        finally:
+            self._codex_authorizing = False
+        self._refresh_provider("openai-codex")
+        # Same convenience as set_provider: surface the recommended model right away,
+        # and win the default when the current default's provider isn't usable.
+        added = "openai-codex:gpt-5.6-sol"
+        self.add_model(added)
+        if not self._provider_configured(self._model_provider(self.model)):
+            self.set_default_model(added)
+        return result
+
+    def codex_status(self) -> dict[str, Any]:
+        from ..providers import codex_auth
+
+        store = codex_auth.CodexTokenStore(self.secrets)
+        return {
+            "signed_in": store.signed_in(),
+            "account": store.account_label(),
+            "authorizing": self._codex_authorizing,
+            "last_error": self._codex_error,
+            "authorize_url": codex_auth.last_authorize_url,
+        }
+
+    def codex_signout(self) -> dict[str, Any]:
+        from ..providers import codex_auth
+
+        had_tokens = codex_auth.CodexTokenStore(self.secrets).clear()
+        self._codex_error = None
+        self._refresh_provider("openai-codex")
+        return {"ok": True, "had_tokens": had_tokens}
+
     def verify_provider(
         self, name: str, fields: Optional[dict[str, Any]]
     ) -> dict[str, Any]:
@@ -2930,6 +3007,11 @@ class SessionManager:
         d = get_descriptor(name)
         if d is None:
             return {"ok": False, "error": f"unknown provider: {name}"}
+        if d.auth == "oauth":
+            # No key form — verify from the stored token set (signed-out / expired / OK).
+            from ..providers import codex_auth
+
+            return codex_auth.verify(self.secrets)
         fields = fields or {}
         profile = self.secrets.get(f"provider:{name}") or {}
         merged = {}

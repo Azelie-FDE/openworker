@@ -1765,6 +1765,36 @@ export interface ProviderInfo {
   blurb?: string; // one-line note under the title ("Uses X's OpenAI-compatible API…")
   key_set_at?: string | null; // ISO date the key was last (re)saved — absent for env-only config
   last_used_at?: number | null; // epoch secs the provider last served a completion
+  // OAuth providers (auth === "oauth"): browser sign-in instead of a key form.
+  auth?: string | null;
+  signed_in?: boolean;
+  account?: string | null; // signed-in account label (email or id)
+  authorizing?: boolean;
+  last_error?: string | null;
+}
+
+// -- ChatGPT-subscription provider sign-in (OAuth; tokens never reach the GUI) ------
+export interface CodexAuthStatus {
+  signed_in: boolean;
+  account?: string | null;
+  authorizing: boolean;
+  last_error?: string | null;
+  authorize_url?: string | null;
+}
+
+export async function codexSignin(): Promise<{ ok: boolean }> {
+  const res = await fetch(`${httpBase()}/v1/providers/openai-codex/signin`, { method: "POST" });
+  return res.json();
+}
+
+export async function codexAuthStatus(): Promise<CodexAuthStatus> {
+  const res = await fetch(`${httpBase()}/v1/providers/openai-codex/status`);
+  return res.json();
+}
+
+export async function codexSignout(): Promise<{ ok: boolean }> {
+  const res = await fetch(`${httpBase()}/v1/providers/openai-codex/signout`, { method: "POST" });
+  return res.json();
 }
 
 export async function getProviders(): Promise<ProviderInfo[]> {

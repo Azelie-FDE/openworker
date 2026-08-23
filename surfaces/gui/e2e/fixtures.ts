@@ -350,6 +350,9 @@ const PROVIDERS = [
   // ollama: keyless local provider — "configured" without proving anything runs; the
   // onboarding gallery shows "No key needed" and its form is endpoint + Detect (§39).
   { name: "ollama", title: "Ollama (local models)", needs_key: false, fields: [{ key: "base_url", label: "Endpoint", secret: false, required: false, help: "", placeholder: "http://127.0.0.1:11434", default: "http://127.0.0.1:11434" }], configured: true, values: {}, suggested_models: ["qwen3-coder:30b"], key_set_at: null, last_used_at: null },
+  // openai-codex: the subscription OAuth provider — no key form; the gallery card and
+  // form render sign-in state instead (auth: "oauth"). Starts signed out.
+  { name: "openai-codex", title: "ChatGPT subscription", needs_key: false, auth: "oauth", signed_in: false, account: null, authorizing: false, last_error: null, blurb: "Sign in with your ChatGPT plan and run OpenAI models through your subscription — no API key. Tokens stay on this machine.", fields: [], configured: false, values: {}, suggested_models: ["gpt-5.6-sol"], key_set_at: null, last_used_at: null },
 ];
 
 /** Install the API + WebSocket mocks on a page. Returns handles for assertions/seed data. */
@@ -1856,6 +1859,36 @@ export async function mockApi(page: import("@playwright/test").Page) {
       prov.key_set_at = null;
       return json({ ok: true, provider: name });
     }
+    // Subscription OAuth sign-in (openai-codex): the flow "completes" instantly —
+    // signin flips the row to signed in; status mirrors it; signout clears it.
+    if (p.endsWith("/v1/providers/openai-codex/signin") && m === "POST") {
+      const prov = providers.find((x) => x.name === "openai-codex");
+      if (prov) {
+        prov.signed_in = true;
+        prov.configured = true;
+        prov.account = "rohit@example.com";
+      }
+      return json({ ok: true, started: true });
+    }
+    if (p.endsWith("/v1/providers/openai-codex/status")) {
+      const prov = providers.find((x) => x.name === "openai-codex");
+      return json({
+        signed_in: !!prov?.signed_in,
+        account: prov?.account || null,
+        authorizing: false,
+        last_error: null,
+        authorize_url: null,
+      });
+    }
+    if (p.endsWith("/v1/providers/openai-codex/signout") && m === "POST") {
+      const prov = providers.find((x) => x.name === "openai-codex");
+      if (prov) {
+        prov.signed_in = false;
+        prov.configured = false;
+        prov.account = null;
+      }
+      return json({ ok: true, had_tokens: true });
+    }
     if (p.endsWith("/v1/providers")) return json(providers);
     if (p.endsWith("/v1/channels/recent"))
       return json({
@@ -2097,6 +2130,27 @@ export async function mockApi(page: import("@playwright/test").Page) {
     // Anything else: an empty-but-valid body. GET list endpoints read `?? []`/`?? {}` fallbacks.
     return json({});
   });
+}
+
+/** Seed a replayed transcript for one session. The shared mock answers every
+ * GET /v1/sessions/{id}/messages with `[]`, so reopening a session always starts blank;
+ * this registers a LATER route (later routes win) that stages rich history for that one
+ * session — replayed tool calls with results, connector-sourced messages, notices,
+ * reasoning — so specs can assert the reopen path (itemsFromMessages) directly instead
+ * of driving every turn live through the fake agent. Call after the page has the mock
+ * (any time before the session is opened). */
+export async function seedSessionMessages(
+  page: Page,
+  sessionId: string,
+  messages: Record<string, unknown>[],
+): Promise<void> {
+  await page.route(new RegExp(`/v1/sessions/${sessionId}/messages$`), (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ messages }),
+    }),
+  );
 }
 
 // A `test` whose page has the API mocked before navigation.
