@@ -575,6 +575,42 @@ def test_stream_final_turn_carries_tool_calls_and_sidecar():
     ]
 
 
+def test_stream_rebuilds_turn_when_terminal_output_is_empty():
+    """The subscription backend leaves `output` EMPTY on response.completed — items only
+    ever stream. The turn must be rebuilt from the output_item.done events, or text and
+    tool calls silently vanish (live bug: a turn produced deltas, then persisted empty)."""
+    events = [
+        SimpleNamespace(type="response.output_text.delta", delta="pong"),
+        SimpleNamespace(
+            type="response.output_item.done", item=_message_item("pong")
+        ),
+        SimpleNamespace(
+            type="response.output_item.done", item=_call_item("call_1", "f", '{"x": 1}')
+        ),
+        SimpleNamespace(type="response.completed", response=_response([])),
+    ]
+    provider = OpenAIResponsesProvider(client=_FakeClient(events=events))
+    turn = list(
+        provider.stream(model="m", messages=[{"role": "user", "content": "x"}])
+    )[-1].turn
+    assert turn.text == "pong"
+    assert turn.finish_reason == "tool_calls"
+    assert turn.tool_calls[0].arguments == {"x": 1}
+
+
+def test_stream_falls_back_to_deltas_when_no_items_repeat_anywhere():
+    events = [
+        SimpleNamespace(type="response.output_text.delta", delta="po"),
+        SimpleNamespace(type="response.output_text.delta", delta="ng"),
+        SimpleNamespace(type="response.completed", response=_response([])),
+    ]
+    provider = OpenAIResponsesProvider(client=_FakeClient(events=events))
+    turn = list(
+        provider.stream(model="m", messages=[{"role": "user", "content": "x"}])
+    )[-1].turn
+    assert turn.text == "pong" and turn.finish_reason == "stop"
+
+
 def test_stream_without_terminal_event_keeps_accumulated_text():
     events = [SimpleNamespace(type="response.output_text.delta", delta="partial")]
     provider = OpenAIResponsesProvider(client=_FakeClient(events=events))

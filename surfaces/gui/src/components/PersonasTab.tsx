@@ -20,12 +20,12 @@ const CARD = "rounded-xl2 border border-line bg-panel";
 const SELECT = "px-2.5 py-2 rounded-lg border border-line bg-paper text-[13px] text-ink shrink-0";
 const INPUT =
   "flex-1 min-w-0 px-3 py-2 rounded-lg border border-line bg-paper text-[13px] text-ink outline-none focus:border-accent";
-const BTN_ACCENT = "text-[12.5px] px-3 py-2 rounded-lg bg-accent text-white shrink-0 disabled:opacity-40";
+const BTN_ACCENT = "text-[13px] px-3 py-2 rounded-lg bg-accent text-white shrink-0 disabled:opacity-40";
 const BTN_BORDERED =
-  "text-[12.5px] px-2.5 py-1.5 rounded-lg border border-line bg-paper hover:border-lineStrong shrink-0 disabled:opacity-40 disabled:hover:border-line";
+  "text-[13px] px-2.5 py-1.5 rounded-lg border border-line bg-paper hover:border-lineStrong shrink-0 disabled:opacity-40 disabled:hover:border-line";
 
 const QUIET_ROW =
-  "w-full flex items-center gap-2 px-4 pt-2 mt-6 text-[12.5px] text-muted select-none";
+  "w-full flex items-center gap-2 px-4 pt-2 mt-6 text-[13px] text-muted select-none";
 
 export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) => void }) {
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -332,7 +332,7 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
           </div>
         </div>
       )}
-      {msg && <div className="text-[12.5px] text-muted mt-2.5">{msg}</div>}
+      {msg && <div className="text-[13px] text-muted mt-2.5">{msg}</div>}
 
       {consent && consent.length > 0 && (
         <div className="mt-4 space-y-2" data-testid="consent-review">
@@ -340,7 +340,7 @@ export function PersonasTab({ onOpenPersona }: { onOpenPersona?: (id: string) =>
               are a one-line summary with the exact tools under a collapsed chevron. A
               coworker runs no third-party code, so this list is complete — but a prompt
               still steers an agent, so who it came from genuinely matters. */}
-          <div className="flex items-start gap-2.5 rounded-xl border border-warnInk/30 bg-warnSoft px-3.5 py-2.5 text-[12.5px] text-warnInk">
+          <div className="flex items-start gap-2.5 rounded-xl border border-warnInk/30 bg-warnSoft px-3.5 py-2.5 text-[13px] text-warnInk">
             <Icon name="shield" size={15} className="shrink-0 mt-0.5" />
             <span>
               Only enable coworkers from someone you trust. Nothing here runs third-party
@@ -389,7 +389,7 @@ function ConsentCard({
   const recommends = c.recommends || [];
   return (
     <div className={CARD + " p-3.5"} data-testid={`consent-${c.id}`}>
-      <div className="text-[13.5px] font-medium flex items-center gap-2">
+      <div className="text-[13px] font-medium flex items-center gap-2">
         <span>{c.name}</span>
         {c.version && <span className="text-[11px] text-faint font-normal">v{c.version}</span>}
       </div>
@@ -404,7 +404,7 @@ function ConsentCard({
             : " Same capabilities as before — it stays enabled."}
         </div>
       )}
-      <div className="text-[12.5px] text-ink mt-2">
+      <div className="text-[13px] text-ink mt-2">
         Can {summary}
         {c.connectors === "all"
           ? " · use ALL your connected services"
@@ -438,7 +438,7 @@ function ConsentCard({
         {/* Enable right here (owner ask 2026-08-11) — the old "enable it above" copy
             sent the user hunting back up the list. */}
         {enabled ? (
-          <span className="text-[12.5px] text-muted" data-testid="consent-enabled">
+          <span className="text-[13px] text-muted" data-testid="consent-enabled">
             ✓ Enabled — it's in your coworker picker.
           </span>
         ) : (

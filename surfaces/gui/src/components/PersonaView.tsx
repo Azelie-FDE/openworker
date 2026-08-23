@@ -31,8 +31,8 @@ import { indexConnectors, labelFor, visualFor, type ConnectorMap } from "../conn
 
 const SEC_H = "text-[11px] uppercase tracking-[0.05em] text-faint font-semibold";
 const TAG_CORE =
-  "text-[10px] px-1.5 py-0.5 rounded-full bg-warnSoft/70 text-warnInk border border-warnInk/15";
-const TAG_MCP = "text-[10px] px-1.5 py-0.5 rounded border border-line text-faint";
+  "text-[11px] px-1.5 py-0.5 rounded-full bg-warnSoft/70 text-warnInk border border-warnInk/15";
+const TAG_MCP = "text-[11px] px-1.5 py-0.5 rounded border border-line text-faint";
 const BTN_ACCENT = "text-[12px] px-2.5 py-1.5 rounded-lg bg-accent text-white shrink-0";
 const BTN_BORDERED =
   "text-[12px] px-2.5 py-1.5 rounded-lg border border-line bg-paper hover:border-lineStrong shrink-0 disabled:opacity-40";
@@ -117,7 +117,7 @@ export function PersonaView({
       {onBack && (
         <>
           <button
-            className="inline-flex items-center gap-1 text-[12.5px] text-muted hover:text-ink"
+            className="inline-flex items-center gap-1 text-[13px] text-muted hover:text-ink"
             onClick={onBack}
           >
             <Icon name="arrowLeft" size={15} /> Back
@@ -252,7 +252,7 @@ export function PersonaView({
             <section>
               <div className={`${SEC_H} mb-1.5 flex items-baseline`}>
                 <span>Connectors</span>
-                <span className="ml-auto flex font-semibold text-[10.5px] text-faint normal-case tracking-normal">
+                <span className="ml-auto flex font-semibold text-[11px] text-faint normal-case tracking-normal">
                   <span className={COL_STATUS}>Status</span>
                   <span className={COL_ENABLE}>Enable</span>
                 </span>
@@ -340,7 +340,7 @@ export function PersonaView({
           )}
 
           {/* defaults footer */}
-          <section className="flex flex-wrap gap-x-8 gap-y-2 text-[12.5px]">
+          <section className="flex flex-wrap gap-x-8 gap-y-2 text-[13px]">
             {detail.recommended_models.length > 0 && (
               <div>
                 <span className="text-faint">Models</span> ·{" "}
@@ -364,7 +364,7 @@ export function PersonaView({
           </section>
 
           {/* management — the controls that left the list page (UX-035) */}
-          <section className="border-t border-line pt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12.5px]">
+          <section className="border-t border-line pt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px]">
             <label className="flex items-center gap-2 text-muted select-none">
               <input
                 type="checkbox"
@@ -408,7 +408,7 @@ export function PersonaView({
                 </span>
               ) : (
                 <button
-                  className="text-[12.5px] text-danger/80 hover:text-danger"
+                  className="text-[13px] text-danger/80 hover:text-danger"
                   data-testid="persona-delete"
                   onClick={() => setConfirmDel(true)}
                 >
