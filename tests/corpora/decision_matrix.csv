@@ -3,7 +3,7 @@ read-interactive,interactive,read_file,"{""path"": ""a.txt""}",,,,,,,,allow,pure
 read-plan,plan,read_file,"{""path"": ""a.txt""}",,,,,,,,allow,reads allowed in read-only modes
 write-interactive,interactive,write_file,"{""path"": ""a.txt"", ""content"": ""x""}",,,,,,,,ask,write in-root asks
 write-escape-rel,interactive,write_file,"{""path"": ""../../escape.txt"", ""content"": ""x""}",,,,,,,,deny,write outside writable root blocked
-write-escape-abs,interactive,write_file,"{""path"": ""C:/Windows/evil.ini"", ""content"": ""x""}",,,,,,,,deny,absolute path outside root blocked
+write-escape-abs,interactive,write_file,"{""path"": ""/etc/evil.ini"", ""content"": ""x""}",,,,,,,,deny,absolute path outside root blocked
 write-plan,plan,write_file,"{""path"": ""a.txt"", ""content"": ""x""}",,,,,,,,deny,plan mode is read-only
 write-auto,auto,write_file,"{""path"": ""a.txt"", ""content"": ""x""}",,,,,,,,allow,auto allows in-root write
 write-auto-escape,auto,write_file,"{""path"": ""../../escape.txt"", ""content"": ""x""}",,,,,,,,deny,auto still path-scopes writes
