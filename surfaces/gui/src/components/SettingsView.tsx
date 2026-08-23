@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import {
   getSettings,
   getTrustedWorkspaces,
+  setAutoApprove,
+  setAutoApproveShadow,
   setCompactionSettings,
   setContextBar,
   setOnboarded,
@@ -432,6 +434,8 @@ function AppearanceSection() {
 
       <ContextBarCard />
 
+      <AutoApproveCard />
+
       <FilesCard />
 
       <TrustedWorkspacesCard />
@@ -829,6 +833,77 @@ function ContextBarCard() {
             A small meter showing how full the model&rsquo;s context window is. Turn it off
             to show this session&rsquo;s token total instead; either way the full breakdown
             is one click away.
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
+// Auto-Approve (spec §1.5): the experimental feature flag that adds the "Auto-Approve" mode
+// to the composer's mode picker, plus its shadow-evaluation sibling. Both default off and are
+// user-global (a cloned repo can't turn either on). Shadow is nested under the main flag — it
+// only makes sense to measure the reviewer once you know what it is.
+function AutoApproveCard() {
+  const [on, setOn] = useState<boolean | null>(null);
+  const [shadow, setShadow] = useState(false);
+
+  useEffect(() => {
+    getSettings()
+      .then((s) => {
+        setOn(s.auto_approve === true);
+        setShadow(s.auto_approve_shadow === true);
+      })
+      .catch(() => setOn(false));
+  }, []);
+
+  const saveOn = async (next: boolean) => {
+    setOn(next);
+    await setAutoApprove(next);
+  };
+  const saveShadow = async (next: boolean) => {
+    setShadow(next);
+    await setAutoApproveShadow(next);
+  };
+
+  if (on === null) return null;
+  return (
+    <div className={CARD + " p-4 mb-4"} data-testid="auto-approve-card">
+      <div className={FIELD_LABEL}>Auto-approve (experimental)</div>
+      <label className="flex items-start gap-3 py-2">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          data-testid="auto-approve-toggle"
+          checked={on}
+          onChange={(e) => saveOn(e.target.checked)}
+        />
+        <span>
+          <span className="block text-[13px] text-ink">Enable Auto-approve mode</span>
+          <span className="block text-[12px] text-muted">
+            Adds an <em>Auto-approve</em> option to the mode picker. In that mode, your session
+            model reviews each action that would normally need approval and clears the routine
+            ones; anything doubtful still asks you. It can never allow something the rules
+            block. One extra model call per check, billed to your usage.
+          </span>
+        </span>
+      </label>
+      <label className="flex items-start gap-3 py-2 pl-7">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          data-testid="auto-approve-shadow-toggle"
+          checked={shadow}
+          onChange={(e) => saveShadow(e.target.checked)}
+        />
+        <span>
+          <span className="block text-[13px] text-ink">
+            Shadow evaluation <span className="text-faint">(for measuring)</span>
+          </span>
+          <span className="block text-[12px] text-muted">
+            On any mode, the reviewer records what it <em>would</em> have decided next to your
+            own choice — without changing anything. Lets you see how it would behave before
+            trusting it. Also costs one model call per approval.
           </span>
         </span>
       </label>

@@ -394,12 +394,17 @@ def create_app(manager: SessionManager) -> FastAPI:
     def get_unattended(session_id: str) -> dict[str, Any]:
         return {"unattended": manager.unattended.is_unattended(session_id)}
 
+    @app.get("/v1/sessions/{session_id}/reviewer-stats")
+    def get_reviewer_stats(session_id: str) -> dict[str, Any]:
+        # Auto-Approve metering (§1.7): checks/verdicts/tokens from the durable audit rows.
+        # Drives the composer's "Auto-Approve · N checks" badge and the mode-menu summary.
+        return manager.audit_store.reviewer_stats(session_id)
+
     @app.post("/v1/sessions/{session_id}/unattended")
     def set_unattended(session_id: str, body: dict) -> dict[str, Any]:
-        # The GUI gates the on-transition behind a one-tap confirm.
-        on = bool(body.get("unattended"))
-        manager.unattended.set(session_id, on)
-        return {"ok": True, "session_id": session_id, "unattended": on}
+        # The GUI gates the on-transition behind a one-tap confirm; the manager records the
+        # transition either way, so the change is answerable from the audit store.
+        return manager.set_unattended(session_id, bool(body.get("unattended")))
 
     @app.get("/v1/sessions/{session_id}/skills")
     def session_skills(session_id: str, workspace: str = "") -> dict[str, Any]:
@@ -1881,6 +1886,19 @@ def create_app(manager: SessionManager) -> FastAPI:
         # Composer: show the context-window fill bar, or just the popover (owner ask).
         return manager.set_context_bar((body or {}).get("context_bar", True))
 
+    @app.post("/v1/settings/auto-approve")
+    def settings_set_auto_approve(body: dict) -> dict[str, Any]:
+        # Auto-Approve feature flag (spec §1.5): when on, Mode.AUTO_APPROVE gets an LLM
+        # reviewer. Takes effect on the next session build. Turning it off leaves any
+        # shadow-eval setting alone (they are independent switches).
+        return manager.set_auto_approve((body or {}).get("auto_approve", False))
+
+    @app.post("/v1/settings/auto-approve-shadow")
+    def settings_set_auto_approve_shadow(body: dict) -> dict[str, Any]:
+        # Shadow evaluation (Part 6 step 3): the reviewer records what it WOULD decide on
+        # every approval card while the human still decides. Independent of the live flag.
+        return manager.set_auto_approve_shadow((body or {}).get("auto_approve_shadow", False))
+
     @app.post("/v1/settings/pdf")
     def settings_set_pdf(body: dict) -> dict[str, Any]:
         # Token savings (owner ask, 2026-07-17): fallback mode for models without native
@@ -2545,6 +2563,19 @@ def create_app(manager: SessionManager) -> FastAPI:
                     )
                 elif kind == "question_response":
                     _resolve_pending(str(message.get("answer", "")))
+                elif kind == "allow_anyway":
+                    # §8.4: the user clicked "Allow anyway" on a reviewer-denied tool card.
+                    # Registers a ONE-SHOT exact-action approval on the engine; the GUI then
+                    # sends its canned retry message through the normal user_message path,
+                    # and the re-proposed identical action runs without the reviewer/card.
+                    name = message.get("name")
+                    arguments = message.get("arguments")
+                    if not isinstance(name, str) or not name:
+                        await reject_input("Invalid allow_anyway: missing tool name.")
+                    elif arguments is not None and not isinstance(arguments, dict):
+                        await reject_input("Invalid allow_anyway: arguments must be an object.")
+                    else:
+                        engine.approve_action_once(name, arguments or {})
                 elif kind == "interrupt":
                     engine.request_interrupt()
                 elif kind == "retry":
@@ -2553,9 +2584,16 @@ def create_app(manager: SessionManager) -> FastAPI:
                     await claim_turn(retry=True)
                 elif kind == "set_mode":
                     try:
-                        engine.permissions.mode = Mode(message.get("mode"))
+                        new_mode = Mode(message.get("mode"))
                     except (TypeError, ValueError):
                         pass
+                    else:
+                        previous = engine.permissions.mode
+                        engine.permissions.mode = new_mode
+                        if previous is not new_mode:
+                            manager.audit_autonomy_change(
+                                session_id, "mode", previous.value, new_mode.value
+                            )
                 elif kind == "set_model":
                     model = message.get("model")
                     if model is not None and not isinstance(model, str):

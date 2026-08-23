@@ -117,6 +117,43 @@ def _grants_of(engine) -> dict[str, Any]:
     return out
 
 
+def _grant_offered(outcome, request) -> bool:
+    """Whether a persistent grant is legitimately offered for this tool — the server-side
+    mirror of what the approval card actually renders (`ApprovalCard.tsx`).
+
+    - ALWAYS_TOOL is tool-wide and argument-unbounded, so it is withheld from run_shell (the
+      command-scoped grant is the narrower option), from save_skill (every skill proposal
+      gets its own review), from anything that reaches off the machine — connectors and
+      MCP tools alike, where "always allow send_message" would cover every future recipient —
+      and from URL-carrying egress (§1.9): "always allow web_fetch" would cover every future
+      destination, and the domain-scoped grant is the one the card offers. Fixed-destination
+      egress (web_search: no url argument) keeps it — tool-wide IS provider-wide there.
+    - ALWAYS_COMMAND only means anything for the shell tool.
+    - ALWAYS_DOMAIN only means anything for a tool carrying a url.
+    """
+    from ..engine import ApprovalOutcome
+    from ..risk import RiskClass, classify
+
+    name = getattr(request, "tool_name", "")
+    metadata = getattr(request, "metadata", None)
+    args = getattr(request, "arguments", None) or {}
+    risk = classify(name, metadata)
+
+    if outcome is ApprovalOutcome.ALWAYS_COMMAND:
+        return risk is RiskClass.EXEC
+    if outcome is ApprovalOutcome.ALWAYS_DOMAIN:
+        return risk is RiskClass.EGRESS and bool(args.get("url"))
+    if outcome is ApprovalOutcome.ALWAYS_TOOL:
+        if risk in (RiskClass.EXEC, RiskClass.EXTERNAL):
+            return False
+        if risk is RiskClass.EGRESS and args.get("url"):
+            return False
+        if getattr(metadata, "category", "") == "connector":
+            return False
+        return name != "save_skill"
+    return True
+
+
 def _approval_body(request) -> str:
     """Approval card body: the tool's reason (if any) plus a compact preview of its args, so a
     mirrored 'Run `write_file`?' shows the path/content rather than just the tool name.
@@ -655,6 +692,10 @@ class SessionManager:
             extra_skill_dirs=(
                 [d] if (d := self.persona_skill_scope(agent_name)[0]) is not None else None
             ),
+            # Auto-Approve (spec §1.5): prefs-backed, so the Settings toggle takes effect on
+            # the next session build without a config.toml edit.
+            auto_approve=self.auto_approve(),
+            auto_approve_shadow=self.auto_approve_shadow(),
         )
         # An automation run rebuilt here (manual "Run now" over WS, durable resume) still
         # carries its task's standing allowances — the rules live on the task record.
@@ -2760,10 +2801,18 @@ class SessionManager:
 
         if provider not in provider_names():
             return {"ok": False, "error": f"unknown provider: {provider}"}
+        before = self.get_web_search()["provider"]
         profile: dict[str, Any] = {"provider": provider}
         if api_key:
             profile["api_key"] = api_key
         self.secrets.put("web_search:default", profile)
+        # §1.9: "Always allow searches this session" is consent to a NAMED destination —
+        # the card says which provider the queries go to. A new provider is a new
+        # destination, so every live session's grant dies with the old one. (Scheduled
+        # tasks that name-allow web_search are unaffected: their approver re-allows.)
+        if provider != before:
+            for engine in self._engines.values():
+                engine.permissions.session_allow_tools.discard("web_search")
         return {"ok": True, "provider": provider}
 
     # -- model providers (OpenAI, Ollama, …) ------------------------------------
@@ -3224,6 +3273,10 @@ class SessionManager:
             "nav_layout": self._nav_layout(),
             "sessions_peek": self.sessions_peek(),
             "context_bar": self.context_bar(),
+            # Auto-Approve feature flag + its shadow-eval sibling (spec §1.5). Drive the
+            # Settings toggles and gate the composer's Auto-Approve mode entry.
+            "auto_approve": self.auto_approve(),
+            "auto_approve_shadow": self.auto_approve_shadow(),
             "scratch_base": self._prefs.get("scratch_base")
             or self.DEFAULT_SCRATCH_BASE,
             # Real on-disk secrets location, so the UI shows the OS-native path instead of a
@@ -3292,6 +3345,42 @@ class SessionManager:
         self._prefs["context_bar"] = bool(shown)
         self._save_prefs()
         return {"ok": True, "context_bar": self.context_bar()}
+
+    # -- Auto-Approve (spec §1.5, Part 6 step 3) --------------------------------
+    # The feature flag and its shadow-eval sibling live in prefs (GUI-writable), falling
+    # back to the config.toml value a power user may have hand-set. Prefs is user-global,
+    # so a cloned repo still can't enable either — same guarantee as the config path.
+    def auto_approve(self) -> bool:
+        from ..config import load_config
+
+        if "auto_approve" in self._prefs:
+            return bool(self._prefs["auto_approve"])
+        return bool(load_config().auto_approve)
+
+    def auto_approve_shadow(self) -> bool:
+        from ..config import load_config
+
+        if "auto_approve_shadow" in self._prefs:
+            return bool(self._prefs["auto_approve_shadow"])
+        return bool(load_config().auto_approve_shadow)
+
+    def set_auto_approve(self, on: Any) -> dict[str, Any]:
+        self._prefs["auto_approve"] = bool(on)
+        self._save_prefs()
+        return {
+            "ok": True,
+            "auto_approve": self.auto_approve(),
+            "auto_approve_shadow": self.auto_approve_shadow(),
+        }
+
+    def set_auto_approve_shadow(self, on: Any) -> dict[str, Any]:
+        self._prefs["auto_approve_shadow"] = bool(on)
+        self._save_prefs()
+        return {
+            "ok": True,
+            "auto_approve": self.auto_approve(),
+            "auto_approve_shadow": self.auto_approve_shadow(),
+        }
 
     # -- PDF attachments / token savings (owner ask, 2026-07-17) ----------------
     DEFAULT_PDF_MAX_PAGES = 20
@@ -4030,26 +4119,111 @@ class SessionManager:
     def approval_outcome(self, resolution: str, request, session_id: str):
         """Map an approval resolution (from any surface) to an ApprovalOutcome, handling
         the task-persistent "always_task" vocabulary alongside the session-scoped ones.
+
+        Server-side validated, not trusted from the caller: a grant that no UI offers for
+        this tool is downgraded to a one-time approval rather than honoured. The GUI already
+        hides the broad "always allow" for run_shell / connectors / save_skill, and Slack
+        mirrors only ever render approve/deny — but `POST /v1/inbox/{id}/resolve` takes a raw
+        string, so without this check any local API caller could mint a session-wide
+        any-argument shell grant. Same philosophy as mint_task_rule: validate here, don't
+        trust the card.
         """
         from ..engine import ApprovalOutcome
 
         if resolution == "always_task":
-            self.mint_task_rule(
+            minted = self.mint_task_rule(
                 session_id,
                 request.tool_name,
                 getattr(request, "arguments", None),
                 getattr(request, "metadata", None),
             )
+            if not minted:
+                self._audit_grant_refused(session_id, request, resolution)
             return ApprovalOutcome.ONCE
         try:
-            return ApprovalOutcome(resolution)
+            outcome = ApprovalOutcome(resolution)
         except ValueError:
-            pass
-        if resolution == "allow":
+            if resolution == "allow":
+                return ApprovalOutcome.ONCE
+            if resolution == "always":
+                outcome = ApprovalOutcome.ALWAYS_TOOL
+            else:
+                return ApprovalOutcome.DENY
+        if outcome in (
+            ApprovalOutcome.ALWAYS_TOOL,
+            ApprovalOutcome.ALWAYS_COMMAND,
+            ApprovalOutcome.ALWAYS_DOMAIN,
+        ) and not _grant_offered(outcome, request):
+            self._audit_grant_refused(session_id, request, resolution)
             return ApprovalOutcome.ONCE
-        if resolution == "always":
-            return ApprovalOutcome.ALWAYS_TOOL
-        return ApprovalOutcome.DENY
+        return outcome
+
+    def audit_autonomy_change(
+        self, session_id: str, kind: str, before: Any, after: Any
+    ) -> None:
+        """Record a change to how much the agent may do unsupervised — the permission mode,
+        or the attended/unattended toggle. Without this, "who turned on auto mode, and when"
+        is unanswerable from the audit store, which is at odds with the per-call trail the
+        rest of the engine keeps. Raising autonomy is flagged so it can be filtered."""
+        # AUTO_APPROVE sits above interactive (turning the reviewer on means fewer human
+        # checks — that IS raising autonomy) and below bypass, which removes checks
+        # entirely. "auto" is the legacy spelling of "bypass-approvals".
+        order = {
+            "discuss": 0,
+            "plan": 1,
+            "interactive": 2,
+            "custom": 2,
+            "auto-approve": 3,
+            "auto": 4,
+            "bypass-approvals": 4,
+        }
+        raised = (
+            order.get(str(after), 0) > order.get(str(before), 0)
+            if kind == "mode"
+            else bool(after) and not bool(before)
+        )
+        try:
+            self.audit_store.append(
+                {
+                    "session_id": session_id,
+                    "tool": "",
+                    "arguments": {},
+                    "stage": f"{kind}_changed",
+                    "status": "raised" if raised else "lowered",
+                    "reason": f"{kind}: {before} → {after}",
+                }
+            )
+        except Exception:
+            pass
+
+    def set_unattended(self, session_id: str, on: bool) -> dict[str, Any]:
+        """Flip the attended/unattended toggle, with an audit row. Note this changes only
+        WHERE the human is reached, never the autonomy ceiling (that's the mode) — but it is
+        still worth recording, since an unattended session routes prompts away from the
+        screen the user is looking at."""
+        before = self.unattended.is_unattended(session_id)
+        self.unattended.set(session_id, on)
+        if before != on:
+            self.audit_autonomy_change(session_id, "unattended", before, on)
+        return {"ok": True, "session_id": session_id, "unattended": on}
+
+    def _audit_grant_refused(self, session_id: str, request, resolution: str) -> None:
+        try:
+            self.audit_store.append(
+                {
+                    "session_id": session_id,
+                    "tool": getattr(request, "tool_name", ""),
+                    "arguments": getattr(request, "arguments", None) or {},
+                    "stage": "grant_refused",
+                    "status": "downgraded",
+                    "reason": (
+                        f"resolution {resolution!r} is not offered for this tool — "
+                        "applied as a one-time approval"
+                    ),
+                }
+            )
+        except Exception:
+            pass
 
     def _scheduled_approver(self, task, session_id: str):
         from ..engine import ApprovalOutcome

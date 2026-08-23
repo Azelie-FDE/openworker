@@ -885,6 +885,11 @@ export interface ModelSettings {
   // Composer: show the context-window fill bar (default FALSE; absent → the chip shows
   // the session total). The usage popover keeps both numbers regardless.
   context_bar?: boolean;
+  // Auto-Approve mode (spec §1.5): the feature flag that offers the reviewer mode, and its
+  // shadow-eval sibling. Both default FALSE and are absent on older backends — the composer
+  // hides the Auto-Approve mode entry unless auto_approve is explicitly true.
+  auto_approve?: boolean;
+  auto_approve_shadow?: boolean;
   // Curated-matrix display names ({full id → "GLM-5.2 · via Together"}); custom models absent.
   model_labels?: Record<string, string>;
   // {full id → context window in tokens}, verified matrix entries only — drives the
@@ -959,6 +964,33 @@ export async function setContextBar(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ context_bar: shown }),
+  });
+  return res.json();
+}
+
+type AutoApproveResult = {
+  ok: boolean;
+  auto_approve?: boolean;
+  auto_approve_shadow?: boolean;
+  error?: string;
+};
+
+/** Toggle the Auto-Approve feature flag (spec §1.5); applies to the next session build. */
+export async function setAutoApprove(on: boolean): Promise<AutoApproveResult> {
+  const res = await fetch(`${httpBase()}/v1/settings/auto-approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ auto_approve: on }),
+  });
+  return res.json();
+}
+
+/** Toggle shadow evaluation (Part 6 step 3): the reviewer records but never decides. */
+export async function setAutoApproveShadow(on: boolean): Promise<AutoApproveResult> {
+  const res = await fetch(`${httpBase()}/v1/settings/auto-approve-shadow`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ auto_approve_shadow: on }),
   });
   return res.json();
 }
@@ -1614,6 +1646,29 @@ export async function setUnattended(
       body: JSON.stringify({ unattended }),
     },
   );
+  return res.json();
+}
+
+// Auto-Approve metering (§1.7): per-session reviewer counts from the durable audit rows.
+export interface ReviewerBucket {
+  checks: number;
+  allow: number;
+  deny: number;
+  unsure: number;
+  tokens_in: number;
+  tokens_out: number;
+  // Cached-prefix share of the input, billed at ~10%. Without it the badge only ever
+  // showed the FRESH tokens — a fraction of what a check really processes.
+  cache_read: number;
+  cache_write: number;
+}
+export interface ReviewerStats {
+  live: ReviewerBucket;   // the mode actually deciding (Mode.AUTO_APPROVE)
+  shadow: ReviewerBucket; // shadow evaluation: recorded next to the human's own decisions
+}
+
+export async function getReviewerStats(sessionId: string): Promise<ReviewerStats> {
+  const res = await fetch(`${httpBase()}/v1/sessions/${sessionId}/reviewer-stats`);
   return res.json();
 }
 
@@ -2327,6 +2382,12 @@ export class Session {
 
   approve(decision: string) {
     this.send({ type: "approval", decision });
+  }
+
+  /** §8.4 "Allow anyway": register a ONE-SHOT exact-action approval for a reviewer-denied
+   *  tool call. The caller follows up with a normal user message so the agent retries. */
+  allowAnyway(name: string, args: any) {
+    this.send({ type: "allow_anyway", name, arguments: args ?? {} });
   }
 
   // Reply to a `request_directory` prompt: grant a folder (with access level) or decline.

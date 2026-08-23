@@ -20,11 +20,42 @@ import {
 // polished enough to ship, and Custom (config.toml auto-allow rules) is a power-user mode
 // with no in-app explanation. The server still honors both — a session already in one of
 // those modes keeps working; the picker just doesn't offer them.
-const PERMISSION_OPTIONS: Option[] = [
+// "auto" is the legacy wire value for Bypass approvals (server: Mode.BYPASS_APPROVALS) —
+// kept so saved sessions and configs keep working. Auto-Approve ("auto-approve") is the
+// reviewer mode (spec: reviewed-auto-mode.md); it appears only when the server says the
+// feature flag is on, wired in the settings pass — until then the picker omits it.
+// `caution` prefixes the label with a warning triangle; `gated` hides the entry unless the
+// server's auto_approve flag is on. Picker-local extensions of Dropdown's Option.
+type ModeOption = Option & { caution?: boolean; gated?: boolean };
+
+// "auto" is the legacy wire value for Bypass approvals (server: Mode.BYPASS_APPROVALS).
+// Auto-approve is `gated`: shown only when getSettings().auto_approve is true (the feature
+// flag, off by default). Copy (owner, 2026-08-22): imperative like the sibling entries;
+// "your session model" carries the who-judges fact inline; per-check cost is logged, not
+// picker text.
+const PERMISSION_OPTIONS: ModeOption[] = [
   { value: "discuss", label: "Discuss", description: "Chat and explore — no edits or commands" },
   { value: "interactive", label: "Ask for approval", description: "Ask before edits and commands" },
-  { value: "auto", label: "Full access", description: "Run everything without asking" },
+  {
+    value: "auto-approve",
+    label: "Auto-approve",
+    description:
+      "Let your session model classify actions and handle approvals, prompting you for anything it's unsure about",
+    gated: true,
+  },
+  {
+    value: "auto",
+    label: "Bypass approvals",
+    description: "Run everything without asking — approvals off",
+    caution: true,
+  },
 ];
+
+/** The picker's label for a mode value ("auto-approve" -> "Auto-approve"). Exported so the
+ * transcript's mode markers read the same names the user just chose from. */
+export function modeLabel(value: string): string {
+  return PERMISSION_OPTIONS.find((o) => o.value === value)?.label || value;
+}
 
 // No hardcoded model fallback: until the server supplies the list (a few seconds after a
 // cold app boot), the picker renders a disabled "Loading models…" chip. A baked-in list
@@ -77,6 +108,8 @@ interface Props {
   // when" is one mental model. Absent handler = no toggle (e.g. Chat).
   unattended?: boolean;
   onUnattendedChange?: (on: boolean) => void;
+  // The pending-approval card rendered above the input (plan / work-items / team / tool /
+  // folder requests). Attended sessions only — Unattended parks the prompt in the Inbox.
   approvalSlot?: ReactNode;
   // Push text + attachments into the composer (e.g. a start-panel task card). The `nonce` makes
   // repeated identical prefills re-apply; the user can still edit before sending.
@@ -849,6 +882,19 @@ function ModeMenu({
   onUnattendedChange?: (on: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // The Auto-Approve entry is gated on the server flag. Fetch once on first open; a session
+  // already IN auto-approve mode always shows its own entry so the current mode is legible
+  // even if the flag was later turned off.
+  const [autoApproveEnabled, setAutoApproveEnabled] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    getSettings()
+      .then((s) => setAutoApproveEnabled(s.auto_approve === true))
+      .catch(() => {});
+  }, [open]);
+  const options = PERMISSION_OPTIONS.filter(
+    (o) => !o.gated || autoApproveEnabled || o.value === mode,
+  );
   const current = PERMISSION_OPTIONS.find((o) => o.value === mode);
   return (
     <div className="relative">
@@ -877,7 +923,7 @@ function ModeMenu({
             role="menu"
             data-testid="mode-menu"
           >
-            {PERMISSION_OPTIONS.map((o) => (
+            {options.map((o) => (
               <button
                 key={o.value}
                 className="w-full flex flex-col items-start px-2.5 py-1.5 rounded-lg text-left hover:bg-paper"
@@ -888,9 +934,13 @@ function ModeMenu({
               >
                 <span
                   className={
-                    "text-[13px] " + (o.value === mode ? "font-medium text-accent" : "text-ink")
+                    "flex items-center text-[13px] " +
+                    (o.value === mode ? "font-medium text-accent" : "text-ink")
                   }
                 >
+                  {o.caution && (
+                    <Icon name="warning" size={13} className="mr-1.5 shrink-0 text-warnInk" />
+                  )}
                   {o.label}
                   {o.value === mode && <span className="ml-1.5">✓</span>}
                 </span>

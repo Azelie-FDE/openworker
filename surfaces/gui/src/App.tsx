@@ -59,6 +59,7 @@ import { Icon } from "./components/Icon";
 import { Sidebar } from "./components/Sidebar";
 import { ThinkingBlock, Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
+import { modeNoticeStep, type ModeNoticeState } from "./modeNotice";
 import { Markdown } from "./components/Markdown";
 import { SearchModal } from "./components/SearchModal";
 import { SessionIntro } from "./components/SessionIntro";
@@ -215,6 +216,16 @@ export function App() {
   const [streaming, setStreamingState] = useState("");
   // Ref mirror of `streaming`: the WS handler closure is built once per socket and can't read
   // fresh state — the interrupted/error flush below needs the live buffer at event time.
+  // Mode markers in the transcript: which session has already seen the full Auto-approve
+  // explanation, and what mode the transcript last recorded (so a switch can be told apart
+  // from a re-render or a session change). See `modeNoticeStep`.
+  const modeNoticeState = useRef<ModeNoticeState>({ mark: null, bannerShownFor: "" });
+  // Which session the current `mode` value is CONFIRMED for. On a session switch, `mode`
+  // still holds the previous session's value until the server's `ready` event delivers the
+  // real one — announcing anything in that window posts the old session's banner into the
+  // new transcript (seen 2026-08-22: a fresh Ask-for-approval session opened with the
+  // Auto-approve banner, then a stray "Ask for approval is on." marker when `ready` landed).
+  const [modeConfirmedFor, setModeConfirmedFor] = useState("");
   const streamingRef = useRef("");
   const setStreaming = (value: string | ((s: string) => string)) => {
     streamingRef.current = typeof value === "function" ? value(streamingRef.current) : value;
@@ -377,6 +388,8 @@ export function App() {
   // expanded sidebar owns its own instance; this one exists so search never disappears with it.
   const [searchOpen, setSearchOpen] = useState(false);
   // A pending composer prefill (text + attachments) pushed from the session start panel.
+  // Auto-Approve metering (§1.7): live reviewer counts for the composer badge. Polled with
+  // the session inbox; null until the first fetch (badge hidden).
   const [composerPrefill, setComposerPrefill] = useState<{ text: string; attachments?: Attachment[]; nonce: number }>();
 
   // Persona metadata drives workspace behavior by FAMILY, not by hardcoded id (so a DevOps/SecOps
@@ -676,6 +689,9 @@ export function App() {
           setConnected(true);
           if (d.model) setModel(d.model);
           if (d.mode) setMode(d.mode);
+          // Even when d.mode is absent (older servers), this is the best truth we'll get —
+          // unblock the mode-notice effect for this session either way.
+          setModeConfirmedFor(sessionId);
           if (d.command_trust?.required) setWorkspaceTrustRequest(d.command_trust);
           // Cowork: adopt the server-provisioned scratch dir (only when we don't already have one).
           if (d.workspace) setWorkspace((cur) => cur || d.workspace);
@@ -759,6 +775,8 @@ export function App() {
               reason: d.reason,
               category: d.category,
               standingTarget: d.standing_target || undefined,
+              searchProvider: d.search_provider || undefined,
+              provenance: d.provenance || undefined,
               readonlyOk: !!d.readonly_ok,
             },
           ]);
@@ -839,6 +857,8 @@ export function App() {
               d.result_preview || d.reason,
               d.display?.hidden_by_filters,
               d.standing_rule,
+              d.reviewer_reason,
+              d.allow_anyway,
             ),
           );
           // Refresh the right rail when something it shows may have changed: browser state, or a
@@ -997,6 +1017,14 @@ export function App() {
     atBottomRef.current = true;
     setFollowing(true);
   }, [sessionId]);
+
+  useEffect(() => {
+    // The step is a no-op while `mode` still belongs to the previous session (until `ready`
+    // confirms it) — see modeNoticeStep for why acting on the stale value misfires.
+    const { item, state } = modeNoticeStep(modeNoticeState.current, mode, sessionId, modeConfirmedFor);
+    modeNoticeState.current = state;
+    if (item) setItems((p) => [...p, item]);
+  }, [mode, sessionId, modeConfirmedFor]);
   useEffect(() => {
     if (atBottomRef.current) scrollToBottom();
   }, [items, streaming]);
@@ -1089,6 +1117,13 @@ export function App() {
   // the 4s poll restores anything genuinely still pending.
   const dropSessionInbox = (kind: string) =>
     setSessionInbox((cur) => cur.filter((it) => it.kind !== kind));
+  // §8.4 "Allow anyway" on a reviewer-denied tool: register the one-shot exact-action
+  // approval, then send a visible user message so the agent retries. The engine runs the
+  // identical re-proposal without the reviewer or a card; anything different still asks.
+  const allowAnyway = (name: string, args: any) => {
+    sessionRef.current?.allowAnyway(name, args);
+    send(`I reviewed the blocked ${name} action — go ahead with it exactly as proposed.`);
+  };
   const approve = (decision: ApprovalDecision) => {
     setItems((p) => resolveLastApproval(p, decision));
     dropSessionInbox("approval");
@@ -1896,6 +1931,7 @@ export function App() {
                     running={running}
                     onRetry={retry}
                     onOpenConnectors={() => setSurface("integrations")}
+                    onAllowAnyway={allowAnyway}
                     onUndoMemory={(id, previous) => void undoMemorySave(id, previous)}
                     // §33 ref #3: sub-threshold streamed text renders INSIDE the live turn
                     // group (header when collapsed, quiet line when expanded) — never as a
@@ -2043,7 +2079,13 @@ export function App() {
                 ) : !unattended && pendingDirReq?.kind === "dirreq" ? (
                   <DirectoryRequestCard item={pendingDirReq} onRespond={respondDirectory} />
                 ) : !unattended && pendingApproval?.kind === "approval" ? (
-                  <ApprovalCard item={pendingApproval} onApprove={approve} runTask={runContext} compact />
+                  <ApprovalCard
+                    item={pendingApproval}
+                    onApprove={approve}
+                    runTask={runContext}
+                    autoApprove={mode === "auto-approve"}
+                    compact
+                  />
                 ) : !unattended && pendingQuestion?.kind === "question" ? (
                   // Live ask_user in an attended session — answer inline (reuses the Inbox card UI).
                   <InboxItemCard
@@ -2223,6 +2265,8 @@ function updateLastTool(
   preview?: string,
   hidden?: number,
   standingRule?: string,
+  reviewerReason?: string,
+  allowAnyway?: boolean,
 ): Item[] {
   const copy = [...items];
   for (let i = copy.length - 1; i >= 0; i--) {
@@ -2234,6 +2278,8 @@ function updateLastTool(
         preview,
         ...(hidden ? { hidden } : {}),
         ...(standingRule ? { standingRule } : {}),
+        ...(reviewerReason ? { reviewerReason } : {}),
+        ...(allowAnyway ? { allowAnyway } : {}),
       };
       break;
     }
