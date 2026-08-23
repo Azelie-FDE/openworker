@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { Attachment, SessionUsage } from "../types";
 import { isPdfFile, readFile } from "../attach";
+import { ProjectBindMenu } from "./ProjectBindMenu";
 import { getSettings, inspectPdf, sessionSkills, type SessionSkillRow } from "../api";
 import { formatTokens, totalTokens } from "../usage";
 import { Dropdown, type Option } from "./Dropdown";
@@ -111,6 +112,8 @@ interface Props {
   // The pending-approval card rendered above the input (plan / work-items / team / tool /
   // folder requests). Attended sessions only — Unattended parks the prompt in the Inbox.
   approvalSlot?: ReactNode;
+  // UX-044: "View & edit…" in the Project memory submenu routes to the memory panel.
+  onOpenMemory?: () => void;
   // Push text + attachments into the composer (e.g. a start-panel task card). The `nonce` makes
   // repeated identical prefills re-apply; the user can still edit before sending.
   prefill?: { text: string; attachments?: Attachment[]; nonce: number };
@@ -173,6 +176,23 @@ export function Composer(props: Props) {
   };
   const [dragging, setDragging] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  // UX-044: which "This session" submenu is open (bindings live server-side).
+  const [bindMenu, setBindMenu] = useState<"memory" | "board" | null>(null);
+  // Bindings need a session and a workspace surface (Chat has neither).
+  const sessionRows = Boolean(props.sessionId && props.workspace !== undefined);
+  const bindRow = (icon: "book" | "table", label: string, kind: "memory" | "board") => (
+    <button
+      className={
+        "w-full flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-left hover:bg-paper" +
+        (bindMenu === kind ? " bg-paper" : "")
+      }
+      onClick={() => setBindMenu(bindMenu === kind ? null : kind)}
+    >
+      <Icon name={icon} size={15} className="shrink-0 text-muted" />
+      <span className="flex-1">{label}</span>
+      <Icon name="chevronRight" size={12} className="shrink-0 text-faint" />
+    </button>
+  );
   const [dictation, setDictation] = useState<DictationStatus | null>(null);
   const [dictationBusy, setDictationBusy] = useState<string | null>(null);
   const [dictationError, setDictationError] = useState<string | null>(null);
@@ -583,8 +603,19 @@ export function Composer(props: Props) {
             </button>
             {attachMenuOpen && (
               <>
-                <div className="fixed inset-0 z-30" onClick={() => setAttachMenuOpen(false)} />
-                <div className="absolute z-40 bottom-full mb-1 left-0 min-w-[180px] rounded-xl border border-line bg-panel shadow-2xl py-1.5">
+                <div
+                  className="fixed inset-0 z-30"
+                  onClick={() => {
+                    setAttachMenuOpen(false);
+                    setBindMenu(null);
+                  }}
+                />
+                <div className="absolute z-40 bottom-full mb-1 left-0 min-w-[200px] rounded-xl border border-line bg-panel shadow-2xl py-1.5">
+                  {sessionRows && (
+                    <div className="px-3 pt-1 pb-0.5 text-[10.5px] font-semibold tracking-wide uppercase text-faint">
+                      This message
+                    </div>
+                  )}
                   {attachItem("image", "Photo or image", () => pickFiles("image/*"))}
                   {attachItem("file", "PDF", () => pickFiles("application/pdf,.pdf"))}
                   {attachItem(
@@ -592,7 +623,28 @@ export function Composer(props: Props) {
                     "Other files",
                     () => pickFiles("text/*,.md,.csv,.json,.yaml,.yml,.log,.py,.ts,.tsx,.js,.rs,.go,.toml"),
                   )}
+                  {sessionRows && (
+                    <>
+                      <div className="my-1 border-t border-line" />
+                      <div className="px-3 pt-0.5 pb-0.5 text-[10.5px] font-semibold tracking-wide uppercase text-faint">
+                        This session
+                      </div>
+                      {bindRow("book", "Project memory", "memory")}
+                      {bindRow("table", "Board", "board")}
+                    </>
+                  )}
                 </div>
+                {bindMenu && props.sessionId && (
+                  <ProjectBindMenu
+                    sessionId={props.sessionId}
+                    kind={bindMenu}
+                    onClose={() => {
+                      setBindMenu(null);
+                      setAttachMenuOpen(false);
+                    }}
+                    onOpenMemory={props.onOpenMemory}
+                  />
+                )}
               </>
             )}
           </div>

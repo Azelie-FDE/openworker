@@ -188,6 +188,10 @@ def build_engine(
     max_iterations: Optional[int] = None,
     model_settings: Optional[dict[str, Any]] = None,
     memory_store: Optional[MemoryStore] = None,
+    # Twentieth pass: the project key memory loads/saves under. Defaults to the
+    # workspace path; the manager passes the resolved key (binding > git > path)
+    # so all worktrees of a repo share one memory and named bindings work.
+    memory_workspace: Optional[str] = None,
     # MEMORY-SPEC §5.1: called with the MemoryItem right after `remember` persists it —
     # the manager uses this to push the memory_saved event that powers the save toast.
     on_memory_saved: Optional[Any] = None,
@@ -375,10 +379,11 @@ def build_engine(
         # Always the full toolset: the registry is fixed at build, so a session born
         # while saving was off must still be able to save the moment it's turned on.
         # Enforcement is the tools' own live check, not their absence.
+        mem_ws = memory_workspace or (str(ws) if ws else None)
         registry.register_all(
             memory_tools(
                 memory_store,
-                workspace=str(ws) if ws else None,
+                workspace=mem_ws,
                 on_saved=on_memory_saved,
                 saving_enabled=_saving_enabled,
             )
@@ -390,8 +395,8 @@ def build_engine(
         # so the facts are processed once instead of re-sent every turn. Deletions reach
         # NEW conversations; the UI says so rather than pretending otherwise.
         remembered = memory_store.list(scope=Scope.GLOBAL)
-        if ws is not None:
-            remembered += memory_store.list(scope=Scope.WORKSPACE, workspace=str(ws))
+        if mem_ws is not None:
+            remembered += memory_store.list(scope=Scope.WORKSPACE, workspace=mem_ws)
         block = render_memory_block(remembered)
         if block:
             instructions = f"{instructions}\n\n{block}"
