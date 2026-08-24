@@ -89,6 +89,9 @@ export function itemsFromMessages(messages: ConversationMessage[]): Item[] {
                   ? // Grant-time pointer (pass 20): the granted folder already has
                     // memory/board — informational, one quiet line.
                     { kind: "notice", tone: "info", text: m.text || "" }
+                  : m.kind === "reviewer_paused"
+                    ? // §8.4 breaker: auto-approve paused itself for the rest of the turn.
+                      { kind: "notice", tone: "info", text: m.text || "Auto-approve paused for the rest of this turn." }
                   : { kind: "notice", tone: "warn", text: "Error: " + (m.text || "unknown"), retriable: true },
       );
     }

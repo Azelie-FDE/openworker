@@ -24,6 +24,15 @@ from . import provenance
 from . import session_facts
 from . import toolchain as _toolchain
 from .events import Event, EventType
+
+# §8.4 retry guard: the reviewer pauses for the rest of the turn after this many denials
+# IN A ROW (2→5 + streak semantics, owner ruling 2026-08-24 — a cumulative 2 silently
+# downgraded long agentic turns to hand-approval after one over-strict pair).
+_REVIEWER_TRIP = 5
+_REVIEWER_PAUSED_TEXT = (
+    "Auto-approve is paused for the rest of this turn — the reviewer blocked "
+    f"{_REVIEWER_TRIP} actions in a row, so approvals now come to you."
+)
 from .permissions import Mode, PermissionEngine
 from .providers import AssistantTurn, ProviderClient, ToolCall
 from .providers.errors import friendly_model_error
@@ -158,10 +167,17 @@ class TurnEngine:
         # behaves exactly like INTERACTIVE. Consulted only on decisions the gate marked
         # needs_user, only in AUTO_APPROVE mode, only when the session is attended (an
         # unset is_attended counts as NOT attended here — automations never set it), and
-        # only until two denials in a turn (§8.4 retry guard).
+        # only until _REVIEWER_TRIP denials IN A ROW (§8.4 retry guard). Consecutive, not
+        # cumulative: an allow/unsure verdict or an ask_user answer resets the streak —
+        # the owner-hit 2026-08-24 was a 2-denial cumulative trip silently downgrading a
+        # long agentic turn to hand-approval for everything after one over-strict pair.
         self.reviewer: Optional[Any] = None
         self._reviewer_denials = 0
         self._reviewer_verdicts: dict[str, Any] = {}
+        # (c) Why an executed call ran without a card, keyed by tool_call id: ("reviewer",
+        # reason) or ("bypass", ""). Consumed by _record_result into TOOL_FINISHED so the
+        # GUI can annotate quietly; user approvals already annotate via the resolved card.
+        self._approval_origins: dict[str, tuple[str, str]] = {}
         # Shadow evaluation (spec Part 6 step 3): when True and a reviewer is attached, the
         # reviewer records what it WOULD have decided on each approval card while the human
         # still decides. Fire-and-forget — the card is never delayed, no decision is ever
@@ -185,7 +201,7 @@ class TurnEngine:
         # (anchor, text) where anchor = how many user messages existed at capture, so the
         # merge in `_user_history` stays chronological. Runtime-only on purpose: a restart
         # costs the reviewer context (more cards), never correctness.
-        self._ask_replies: list[tuple[int, str]] = []
+        self._ask_replies: list[tuple[int, str, str]] = []  # (anchor, answer, question)
         # Extra user-facing fields for a tool's approval card, merged into the
         # PERMISSION_REQUIRED payload — e.g. web_search's live provider name, so the card
         # can say where queries actually go (§1.9). Set post-construction by the surface
@@ -851,7 +867,7 @@ class TurnEngine:
             and self.permissions.mode is Mode.AUTO_APPROVE
             and self.is_attended is not None
             and self.is_attended()
-            and self._reviewer_denials < 2
+            and self._reviewer_denials < _REVIEWER_TRIP
         )
 
     def _user_history(self) -> tuple[str, list[dict[str, Any]]]:
@@ -877,19 +893,24 @@ class TurnEngine:
             if text:
                 texts.append(text)
         if not texts:
-            return "", [{"text": t, "is_reply": True} for _, t in self._ask_replies]
+            return "", [
+                {"text": t, "is_reply": True, **({"question": q} if q else {})}
+                for _, t, q in self._ask_replies
+            ]
         history: list[dict[str, Any]] = []
         for i, t in enumerate(texts[:-1], start=1):
             history.append({"text": t})
             history.extend(
-                {"text": r, "is_reply": True} for a, r in self._ask_replies if a == i
+                {"text": r, "is_reply": True, **({"question": q} if q else {})}
+                for a, r, q in self._ask_replies
+                if a == i
             )
         # Replies captured during the current turn (anchor == len(texts)) — or after an
         # anchor message that was itself empty/skipped — land at the tail, so a same-turn
         # consent is already visible to the reviewer for the very next action.
         history.extend(
-            {"text": r, "is_reply": True}
-            for a, r in self._ask_replies
+            {"text": r, "is_reply": True, **({"question": q} if q else {})}
+            for a, r, q in self._ask_replies
             if a >= len(texts)
         )
         return texts[-1], history
@@ -1099,6 +1120,11 @@ class TurnEngine:
                 tool_call, stage="auto_allowed", status="allowed", reason=reason
             )
 
+        # (c) Bypass mode ran a consequential call no other rule allowed: annotate it.
+        # "full access" is the exact reason string of permissions.py's bypass branch.
+        if allowed and decision.reason == "full access":
+            self._approval_origins[tool_call.id] = ("bypass", "")
+
         if not allowed and decision.needs_user and self._consume_allow_anyway(tool_call):
             # §8.4 "Allow anyway": the human already approved this exact action from the
             # deny card. One-shot — consumed above; a different action never matches.
@@ -1132,6 +1158,8 @@ class TurnEngine:
             )
             if verdict.verdict == "allow":
                 allowed = True
+                self._reviewer_denials = 0  # streak semantics: any non-deny resets
+                self._approval_origins[tool_call.id] = ("reviewer", verdict.reason)
                 reason = f"allowed by reviewer: {verdict.reason}"
             elif verdict.verdict == "deny":
                 # §8.4 deny asymmetry — full reason to the USER (event + audit above),
@@ -1140,6 +1168,11 @@ class TurnEngine:
                 from .reviewer import AGENT_DENY_MESSAGE
 
                 self._reviewer_denials += 1
+                tripped = self._reviewer_denials == _REVIEWER_TRIP
+                if tripped:
+                    # (a) The breaker must never trip silently (owner catch 2026-08-24):
+                    # persist a notice so reloads see it too.
+                    self._append_notice("reviewer_paused", _REVIEWER_PAUSED_TEXT)
                 yield Event(
                     EventType.TOOL_FINISHED,
                     {
@@ -1148,6 +1181,7 @@ class TurnEngine:
                         "reason": "blocked by the safety reviewer",
                         "reviewer_reason": verdict.reason,
                         "allow_anyway": True,
+                        **({"reviewer_paused": _REVIEWER_PAUSED_TEXT} if tripped else {}),
                     },
                 )
                 self.messages.append(
@@ -1162,6 +1196,8 @@ class TurnEngine:
                 yield False
                 return
             # "unsure" falls through to today's card — the human decides.
+            if verdict.verdict == "unsure":
+                self._reviewer_denials = 0  # streak semantics: any non-deny resets
 
         if not allowed and decision.needs_user:
             # Shadow evaluation: record what the reviewer would have said about this card.
@@ -1328,6 +1364,7 @@ class TurnEngine:
         )
         self._note_ingestion(tool_call, status)
         rule = self._standing_notes.pop(tool_call.id, "")
+        origin = self._approval_origins.pop(tool_call.id, None)
         return Event(
             EventType.TOOL_FINISHED,
             {
@@ -1336,6 +1373,9 @@ class TurnEngine:
                 "result_preview": _preview(result),
                 **({"display": display} if display else {}),
                 **({"standing_rule": rule} if rule else {}),
+                # (c) quiet provenance chip: "reviewer" (auto-approved) or "bypass"
+                **({"approval_origin": origin[0]} if origin else {}),
+                **({"approval_note": origin[1]} if origin and origin[1] else {}),
             },
         )
 
@@ -1728,7 +1768,7 @@ class TurnEngine:
 
         status = "ok" if (result.get("answer") or result.get("answers")) else "denied"
         if status == "ok":
-            self._note_ask_replies(result)
+            self._note_ask_replies(result, question)
         self.messages.append(_tool_result_message(tool_call, result))
         self._audit(
             tool_call,
@@ -1746,11 +1786,19 @@ class TurnEngine:
             },
         )
 
-    def _note_ask_replies(self, result: dict[str, Any]) -> None:
-        """Record the user's ask_user answer(s) for the reviewer's history (§8.2). Values
-        only — a grouped form's keys are the agent's own question headers, and agent text
-        never enters the judge's view. Anchored to the number of user messages present now,
-        so the merge stays chronological however the session continues."""
+    def _note_ask_replies(
+        self, result: dict[str, Any], question: str = ""
+    ) -> None:
+        """Record the user's ask_user answer(s) for the reviewer's history (§8.2),
+        together with the agent's question — shown to the judge explicitly framed as
+        agent-authored data (same Rule-3 discipline as tool arguments), so a structured
+        answer counts as evidence for exactly the question's scope (owner ruling
+        2026-08-24). Anchored to the number of user messages present now, so the merge
+        stays chronological however the session continues.
+
+        A fresh answer also resets the §8.4 denial streak: the user is present and just
+        gave direction — the reviewer deserves a fresh look at what follows."""
+        self._reviewer_denials = 0
         anchor = sum(1 for m in self.messages if m.get("role") == "user")
         answers = result.get("answers")
         values = (
@@ -1758,10 +1806,11 @@ class TurnEngine:
             if isinstance(answers, dict)
             else [str(result.get("answer") or "")]
         )
+        q = (question or "").strip()
         for text in values:
             text = text.strip()
             if text:
-                self._ask_replies.append((anchor, text))
+                self._ask_replies.append((anchor, text, q))
 
     def _inject_steering(self) -> None:
         for text, source in self._steering:

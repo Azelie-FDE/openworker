@@ -134,7 +134,10 @@ export type Item =
   // `reviewerReason` + `allowAnyway` = an Auto-Approve reviewer deny (spec 8.4): the full
   // reason is user-facing only (the agent got a terse refusal), and allowAnyway offers the
   // one-shot exact-action override.
-  | { kind: "tool"; id: string; name: string; args: any; status: string; preview?: string; hidden?: number; standingRule?: string; reviewerReason?: string; allowAnyway?: boolean }
+  // `approvalOrigin` = why the call ran without a card: "reviewer" (auto-approved by the
+  // Auto-Approve reviewer; `approvalNote` carries its one-line reason) or "bypass"
+  // (bypass-approvals mode). Rendered as a quiet debugging chip, deliberately subtle.
+  | { kind: "tool"; id: string; name: string; args: any; status: string; preview?: string; hidden?: number; standingRule?: string; reviewerReason?: string; allowAnyway?: boolean; approvalOrigin?: string; approvalNote?: string }
   | {
       kind: "approval";
       name: string;

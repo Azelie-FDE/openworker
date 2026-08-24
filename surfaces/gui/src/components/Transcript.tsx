@@ -155,15 +155,28 @@ function buildRows(items: TurnItem[]): TurnRow[] {
   return rows;
 }
 
+function originChip(origin: string | undefined, note: string | undefined) {
+  if (origin !== "reviewer" && origin !== "bypass") return null;
+  return (
+    <span
+      className="text-[11px] text-faint shrink-0"
+      data-testid="tool-approval-origin"
+      title={origin === "reviewer" ? note || "allowed by the auto-approve reviewer" : "ran without approval — bypass-approvals mode"}
+    >
+      {origin === "reviewer" ? "auto-approved" : "approval bypassed"}
+    </span>
+  );
+}
+
 function approvalChip(resolved: ApprovalDecision | undefined) {
   if (resolved === "deny")
     return <span className="text-[11px] px-1.5 rounded-full bg-dangerSoft text-danger shrink-0">✕ declined</span>;
   return (
     <span
       className="text-[11px] px-1.5 rounded-full bg-okSoft text-ok shrink-0"
-      title={resolved ? `approved · ${resolved.replace(/_/g, " ")}` : "approved"}
+      title={resolved ? `approved by you · ${resolved.replace(/_/g, " ")}` : "approved by you"}
     >
-      ✓ approved
+      ✓ user-approved
     </span>
   );
 }
@@ -209,6 +222,7 @@ function StepRow({
           }
         />
         {approval && approvalChip(approval.resolved)}
+        {!approval && originChip(tool.approvalOrigin, tool.approvalNote)}
         {!!tool.standingRule && (
           <span
             className="text-[11px] px-1.5 rounded-full bg-tealSoft text-tealInk shrink-0"

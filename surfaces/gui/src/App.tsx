@@ -865,8 +865,14 @@ export function App() {
               d.standing_rule,
               d.reviewer_reason,
               d.allow_anyway,
+              d.approval_origin,
+              d.approval_note,
             ),
           );
+          // §8.4 breaker: the reviewer paused itself for the rest of the turn — say so
+          // where the user is looking (persisted server-side for reloads).
+          if (d.reviewer_paused)
+            setItems((p) => [...p, { kind: "notice", tone: "info", text: String(d.reviewer_paused) }]);
           // Refresh the right rail when something it shows may have changed: browser state, or a
           // file write that should appear under Artifacts immediately (not only after the turn).
           if (String(d.name || "").startsWith("browser_") || FILE_WRITE_TOOLS.has(d.name)) {
@@ -2285,6 +2291,8 @@ function updateLastTool(
   standingRule?: string,
   reviewerReason?: string,
   allowAnyway?: boolean,
+  approvalOrigin?: string,
+  approvalNote?: string,
 ): Item[] {
   const copy = [...items];
   for (let i = copy.length - 1; i >= 0; i--) {
@@ -2298,6 +2306,8 @@ function updateLastTool(
         ...(standingRule ? { standingRule } : {}),
         ...(reviewerReason ? { reviewerReason } : {}),
         ...(allowAnyway ? { allowAnyway } : {}),
+        ...(approvalOrigin ? { approvalOrigin } : {}),
+        ...(approvalNote ? { approvalNote } : {}),
       };
       break;
     }
