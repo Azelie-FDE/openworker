@@ -33,3 +33,29 @@ test("an unsure escalation shows the reviewer's hesitation on the card", async (
   await expect(note).toBeVisible();
   await expect(note).toContainText("reviewer wasn\u2019t sure: This runs a newly created script");
 });
+
+test("mode notices: full explainer once, one-line markers after", async ({ page }) => {
+  await page.goto("/");
+  await page.getByText("Draft the launch note").first().click();
+
+  const pickMode = async (label: string) => {
+    await page.getByRole("button", { name: "Mode", exact: true }).click();
+    await page.getByTestId("mode-menu").getByText(label, { exact: false }).first().click();
+  };
+
+  // First entry into Auto-approve: the full (new, shorter) explainer.
+  await pickMode("Auto-approve");
+  await expect(page.getByText("Auto-approve is on.")).toBeVisible();
+  await expect(
+    page.getByText(/uses a model to let routine actions through without asking/),
+  ).toBeVisible();
+
+  // Later switches: one-line markers only — the banner never repeats.
+  await pickMode("Ask for approval");
+  await expect(page.getByText("Ask for approval is on.")).toBeVisible();
+  await pickMode("Auto-approve");
+  await expect(page.getByText("Auto-approve is on.")).toHaveCount(2); // title + marker
+  await expect(
+    page.getByText(/uses a model to let routine actions through without asking/),
+  ).toHaveCount(1);
+});

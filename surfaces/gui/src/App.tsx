@@ -59,7 +59,6 @@ import { Icon } from "./components/Icon";
 import { Sidebar } from "./components/Sidebar";
 import { ThinkingBlock, Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
-import { modeNoticeStep, type ModeNoticeState } from "./modeNotice";
 import { Markdown } from "./components/Markdown";
 import { SearchModal } from "./components/SearchModal";
 import { SessionIntro } from "./components/SessionIntro";
@@ -224,14 +223,11 @@ export function App() {
   // fresh state — the interrupted/error flush below needs the live buffer at event time.
   // Mode markers in the transcript: which session has already seen the full Auto-approve
   // explanation, and what mode the transcript last recorded (so a switch can be told apart
-  // from a re-render or a session change). See `modeNoticeStep`.
-  const modeNoticeState = useRef<ModeNoticeState>({ mark: null, bannerShownFor: "" });
   // Which session the current `mode` value is CONFIRMED for. On a session switch, `mode`
   // still holds the previous session's value until the server's `ready` event delivers the
   // real one — announcing anything in that window posts the old session's banner into the
   // new transcript (seen 2026-08-22: a fresh Ask-for-approval session opened with the
   // Auto-approve banner, then a stray "Ask for approval is on." marker when `ready` landed).
-  const [modeConfirmedFor, setModeConfirmedFor] = useState("");
   const streamingRef = useRef("");
   const setStreaming = (value: string | ((s: string) => string)) => {
     streamingRef.current = typeof value === "function" ? value(streamingRef.current) : value;
@@ -695,9 +691,6 @@ export function App() {
           setConnected(true);
           if (d.model) setModel(d.model);
           if (d.mode) setMode(d.mode);
-          // Even when d.mode is absent (older servers), this is the best truth we'll get —
-          // unblock the mode-notice effect for this session either way.
-          setModeConfirmedFor(sessionId);
           if (d.command_trust?.required) setWorkspaceTrustRequest(d.command_trust);
           // Cowork: adopt the server-provisioned scratch dir (only when we don't already have one).
           if (d.workspace) setWorkspace((cur) => cur || d.workspace);
@@ -891,6 +884,14 @@ export function App() {
           if (d.status === "max_iterations_exceeded")
             setItems((p) => [...p, { kind: "notice", tone: "warn", text: "Stopped: max iterations reached." }]);
           break;
+        case "mode_notice":
+          // Server-authored + persisted (owner ruling 2026-08-24): the Auto-Approve
+          // explainer once per session ever, one-line markers for later switches.
+          setItems((p) => [
+            ...p,
+            { kind: "notice", tone: "info", ...(d.title ? { title: d.title } : {}), text: d.text || "" },
+          ]);
+          break;
         case "model_changed":
           // Mid-session switch (server-applied): update the header fact and drop the
           // persisted marker into the live transcript (replay renders it from history).
@@ -1039,13 +1040,6 @@ export function App() {
     setFollowing(true);
   }, [sessionId]);
 
-  useEffect(() => {
-    // The step is a no-op while `mode` still belongs to the previous session (until `ready`
-    // confirms it) — see modeNoticeStep for why acting on the stale value misfires.
-    const { item, state } = modeNoticeStep(modeNoticeState.current, mode, sessionId, modeConfirmedFor);
-    modeNoticeState.current = state;
-    if (item) setItems((p) => [...p, item]);
-  }, [mode, sessionId, modeConfirmedFor]);
   useEffect(() => {
     if (atBottomRef.current) scrollToBottom();
   }, [items, streaming]);

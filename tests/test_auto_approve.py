@@ -551,6 +551,11 @@ def test_reviewer_allow_runs_without_a_card(tmp_path):
     # (c) quiet provenance: the finish event says the reviewer allowed it, with its reason.
     assert finished[0].data["approval_origin"] == "reviewer"
     assert finished[0].data["approval_note"] == "scripted allow"
+    # …and the same facts persist on the tool message's display sidecar, so the chip
+    # survives reload (owner ruling 2026-08-24).
+    tool_msgs = [m for m in engine.messages if m.get("role") == "tool"]
+    assert tool_msgs[-1]["_display"]["approval_origin"] == "reviewer"
+    assert tool_msgs[-1]["_display"]["approval_note"] == "scripted allow"
     verdict_rows = [r for r in rows if r.get("stage") == "reviewer_verdict"]
     assert verdict_rows[0]["status"] == "allow"
 
@@ -591,6 +596,12 @@ def test_reviewer_unsure_falls_through_to_the_card(tmp_path):
     # The card answers "why am I being asked?" with the reviewer's own hesitation
     # (owner ask 2026-08-24) — only on unsure-raised cards, never invented elsewhere.
     assert cards[0].data["reviewer_unsure"] == "scripted unsure"
+    # The user's resolution + the hesitation persist for reload (display sidecar).
+    tool_msgs = [m for m in engine.messages if m.get("role") == "tool"]
+    d = tool_msgs[-1]["_display"]
+    assert d["approval_origin"] == "user"
+    assert d["approval_grant"] == "once"
+    assert d["approval_note"] == "scripted unsure"
 
 
 def test_five_straight_denials_route_the_rest_of_the_turn_to_the_human(tmp_path):

@@ -21,6 +21,7 @@ export type EventType =
   | "input_rejected"
   | "interrupted"
   | "model_changed"
+  | "mode_notice"
   | "memory_saved"
   | "compacting"
   | "compacted"
@@ -137,7 +138,7 @@ export type Item =
   // `approvalOrigin` = why the call ran without a card: "reviewer" (auto-approved by the
   // Auto-Approve reviewer; `approvalNote` carries its one-line reason) or "bypass"
   // (bypass-approvals mode). Rendered as a quiet debugging chip, deliberately subtle.
-  | { kind: "tool"; id: string; name: string; args: any; status: string; preview?: string; hidden?: number; standingRule?: string; reviewerReason?: string; allowAnyway?: boolean; approvalOrigin?: string; approvalNote?: string }
+  | { kind: "tool"; id: string; name: string; args: any; status: string; preview?: string; hidden?: number; standingRule?: string; reviewerReason?: string; allowAnyway?: boolean; approvalOrigin?: string; approvalNote?: string; approvalGrant?: string }
   | {
       kind: "approval";
       name: string;

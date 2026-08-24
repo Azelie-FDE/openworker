@@ -155,7 +155,23 @@ function buildRows(items: TurnItem[]): TurnRow[] {
   return rows;
 }
 
-function originChip(origin: string | undefined, note: string | undefined) {
+function originChip(origin: string | undefined, note: string | undefined, grant?: string) {
+  // Replayed user resolutions reuse the card-chip look (live sessions pair the card itself).
+  if (origin === "user") {
+    if (grant === "deny")
+      return <span className="text-[11px] px-1.5 rounded-full bg-dangerSoft text-danger shrink-0">✕ declined</span>;
+    return (
+      <span
+        className="text-[11px] px-1.5 rounded-full bg-okSoft text-ok shrink-0"
+        title={
+          `approved by you${grant ? ` · ${grant.replace(/_/g, " ")}` : ""}` +
+          (note ? ` — reviewer wasn't sure: ${note}` : "")
+        }
+      >
+        ✓ user-approved
+      </span>
+    );
+  }
   if (origin !== "reviewer" && origin !== "bypass") return null;
   return (
     <span
@@ -222,7 +238,7 @@ function StepRow({
           }
         />
         {approval && approvalChip(approval.resolved)}
-        {!approval && originChip(tool.approvalOrigin, tool.approvalNote)}
+        {!approval && originChip(tool.approvalOrigin, tool.approvalNote, tool.approvalGrant)}
         {!!tool.standingRule && (
           <span
             className="text-[11px] px-1.5 rounded-full bg-tealSoft text-tealInk shrink-0"

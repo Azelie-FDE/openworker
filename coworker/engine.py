@@ -174,10 +174,12 @@ class TurnEngine:
         self.reviewer: Optional[Any] = None
         self._reviewer_denials = 0
         self._reviewer_verdicts: dict[str, Any] = {}
-        # (c) Why an executed call ran without a card, keyed by tool_call id: ("reviewer",
-        # reason) or ("bypass", ""). Consumed by _record_result into TOOL_FINISHED so the
-        # GUI can annotate quietly; user approvals already annotate via the resolved card.
-        self._approval_origins: dict[str, tuple[str, str]] = {}
+        # (c) How each consequential call got cleared, keyed by tool_call id:
+        # {"origin": "reviewer"|"bypass"|"user", "note": <reviewer reasoning>, "grant":
+        # <user outcome>}. Consumed by _record_result into the TOOL_FINISHED event AND
+        # into the tool message's `_display` sidecar, so the quiet provenance chips
+        # survive reload (owner ruling 2026-08-24) — display-only, never provider-visible.
+        self._approval_origins: dict[str, dict[str, str]] = {}
         # Shadow evaluation (spec Part 6 step 3): when True and a reviewer is attached, the
         # reviewer records what it WOULD have decided on each approval card while the human
         # still decides. Fire-and-forget — the card is never delayed, no decision is ever
@@ -1123,7 +1125,7 @@ class TurnEngine:
         # (c) Bypass mode ran a consequential call no other rule allowed: annotate it.
         # "full access" is the exact reason string of permissions.py's bypass branch.
         if allowed and decision.reason == "full access":
-            self._approval_origins[tool_call.id] = ("bypass", "")
+            self._approval_origins[tool_call.id] = {"origin": "bypass"}
 
         if not allowed and decision.needs_user and self._consume_allow_anyway(tool_call):
             # §8.4 "Allow anyway": the human already approved this exact action from the
@@ -1133,6 +1135,7 @@ class TurnEngine:
             self._audit(tool_call, stage="auto_allowed", status="allowed", reason=reason)
 
         consulted_live = False
+        unsure_note = ""  # the reviewer's hesitation, when an unsure verdict raised the card
         if (
             not allowed
             and decision.needs_user
@@ -1159,7 +1162,9 @@ class TurnEngine:
             if verdict.verdict == "allow":
                 allowed = True
                 self._reviewer_denials = 0  # streak semantics: any non-deny resets
-                self._approval_origins[tool_call.id] = ("reviewer", verdict.reason)
+                self._approval_origins[tool_call.id] = {
+                    "origin": "reviewer", "note": verdict.reason
+                }
                 reason = f"allowed by reviewer: {verdict.reason}"
             elif verdict.verdict == "deny":
                 # §8.4 deny asymmetry — full reason to the USER (event + audit above),
@@ -1184,9 +1189,12 @@ class TurnEngine:
                         **({"reviewer_paused": _REVIEWER_PAUSED_TEXT} if tripped else {}),
                     },
                 )
-                self.messages.append(
-                    _tool_error_message(tool_call, AGENT_DENY_MESSAGE)
-                )
+                deny_msg = _tool_error_message(tool_call, AGENT_DENY_MESSAGE)
+                deny_msg["_display"] = {
+                    "approval_origin": "reviewer_denied",
+                    "approval_note": verdict.reason,
+                }
+                self.messages.append(deny_msg)
                 self._audit(
                     tool_call,
                     stage="finished",
@@ -1198,6 +1206,7 @@ class TurnEngine:
             # "unsure" falls through to today's card — the human decides.
             if verdict.verdict == "unsure":
                 self._reviewer_denials = 0  # streak semantics: any non-deny resets
+                unsure_note = verdict.reason
 
         if not allowed and decision.needs_user:
             # Shadow evaluation: record what the reviewer would have said about this card.
@@ -1264,6 +1273,11 @@ class TurnEngine:
                     False,
                     "interrupted by user" if self._cancel.is_set() else "denied by user",
                 )
+                self._approval_origins[tool_call.id] = {
+                    "origin": "user",
+                    "grant": "deny",
+                    **({"note": unsure_note} if unsure_note else {}),
+                }
                 self._audit(
                     tool_call,
                     stage="approval_resolved",
@@ -1286,6 +1300,11 @@ class TurnEngine:
                 elif outcome is ApprovalOutcome.READONLY_SESSION:
                     self.permissions.allow_readonly_for_session()
                 allowed, reason = True, "approved by user"
+                self._approval_origins[tool_call.id] = {
+                    "origin": "user",
+                    "grant": outcome.value,
+                    **({"note": unsure_note} if unsure_note else {}),
+                }
                 self._audit(
                     tool_call,
                     stage="approval_resolved",
@@ -1298,7 +1317,15 @@ class TurnEngine:
         if not allowed:
             if spec is None:
                 reason = f"unknown tool: {tool_call.name}"
-            self.messages.append(_tool_error_message(tool_call, reason))
+            err_msg = _tool_error_message(tool_call, reason)
+            origin = self._approval_origins.pop(tool_call.id, None)
+            if origin:
+                err_msg["_display"] = {
+                    "approval_origin": origin.get("origin", ""),
+                    **({"approval_note": origin["note"]} if origin.get("note") else {}),
+                    **({"approval_grant": origin["grant"]} if origin.get("grant") else {}),
+                }
+            self.messages.append(err_msg)
             yield Event(
                 EventType.TOOL_FINISHED,
                 {"name": tool_call.name, "status": "denied", "reason": reason},
@@ -1343,6 +1370,17 @@ class TurnEngine:
         if isinstance(result, dict) and "_display" in result:
             display = result.get("_display") or None
             result = {k: v for k, v in result.items() if k != "_display"}
+        origin = self._approval_origins.pop(tool_call.id, None)
+        if origin:
+            # Provenance survives reload via the same display-only sidecar as the privacy
+            # counts (owner ruling 2026-08-24) — `_outbound_messages` strips it, so no
+            # provider ever sees it.
+            display = {
+                **(display or {}),
+                "approval_origin": origin.get("origin", ""),
+                **({"approval_note": origin["note"]} if origin.get("note") else {}),
+                **({"approval_grant": origin["grant"]} if origin.get("grant") else {}),
+            }
         message = _tool_result_message(tool_call, result)
         if display:
             message["_display"] = display
@@ -1371,7 +1409,6 @@ class TurnEngine:
         )
         self._note_ingestion(tool_call, status)
         rule = self._standing_notes.pop(tool_call.id, "")
-        origin = self._approval_origins.pop(tool_call.id, None)
         return Event(
             EventType.TOOL_FINISHED,
             {
@@ -1380,9 +1417,16 @@ class TurnEngine:
                 "result_preview": _preview(result),
                 **({"display": display} if display else {}),
                 **({"standing_rule": rule} if rule else {}),
-                # (c) quiet provenance chip: "reviewer" (auto-approved) or "bypass"
-                **({"approval_origin": origin[0]} if origin else {}),
-                **({"approval_note": origin[1]} if origin and origin[1] else {}),
+                # (c) quiet provenance chip — same fields the `_display` sidecar persists.
+                **(
+                    {
+                        "approval_origin": origin.get("origin", ""),
+                        **({"approval_note": origin["note"]} if origin.get("note") else {}),
+                        **({"approval_grant": origin["grant"]} if origin.get("grant") else {}),
+                    }
+                    if origin
+                    else {}
+                ),
             },
         )
 
