@@ -223,6 +223,12 @@ class SessionManager:
         self._autotitle_inflight: set[str] = set()
         self._autotitle_tasks: set[asyncio.Task] = set()
         self._autotitle_attempts: dict[str, int] = {}
+        # Opener-count signature of the last attempt: titling fires at TURN START (owner
+        # catch 2026-08-24 — waiting for an agentic turn to COMPLETE left sessions
+        # untitled for however long the scan ran), and the completion hook still covers
+        # background turns; this guard keeps the two trigger points from burning
+        # duplicate attempts on the same openers.
+        self._autotitle_sig: dict[str, int] = {}
         self.workspace_trust = WorkspaceTrustStore()
         self.secrets = SecretStore()
         # No explicit provider injected → route by the model's `provider:` prefix (OpenAI default,
@@ -5093,6 +5099,11 @@ class SessionManager:
         ][:2]
         if not openers:
             return
+        # Same openers as the last attempt → nothing new to say; skip WITHOUT burning an
+        # attempt (this is how the turn-start and turn-end triggers coexist).
+        if self._autotitle_sig.get(session_id) == len(openers):
+            return
+        self._autotitle_sig[session_id] = len(openers)
         self._autotitle_attempts[session_id] = (
             self._autotitle_attempts.get(session_id, 0) + 1
         )

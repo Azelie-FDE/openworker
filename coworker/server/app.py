@@ -2494,6 +2494,10 @@ def create_app(manager: SessionManager) -> FastAPI:
                     )
                     if event.type.value in _CHECKPOINTS:
                         manager.save(session_id, engine)
+                    if event.type.value == "turn_start":
+                        # Title on the user's words the moment they land — never behind
+                        # a long agentic turn (owner catch 2026-08-24).
+                        manager._maybe_autotitle(session_id)
             finally:
                 manager.mark_idle(session_id)
                 manager.save(session_id, engine)

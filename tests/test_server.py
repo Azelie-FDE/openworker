@@ -423,6 +423,11 @@ def test_ws_allows_only_one_inflight_turn_per_session(tmp_path):
             self.max_active = 0
 
         def complete(self, *, model, messages, tools=None, **settings):
+            # The fire-and-forget auto-title completion legitimately runs CONCURRENTLY
+            # with the chat turn (it fires at turn start, owner catch 2026-08-24) — the
+            # invariant under test is one CHAT turn at a time, so exclude title calls.
+            if messages and "title chat sessions" in str(messages[0].get("content", "")):
+                return _text("A Title")
             with self._lock:
                 self.active += 1
                 self.max_active = max(self.max_active, self.active)
