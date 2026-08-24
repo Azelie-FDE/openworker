@@ -5000,7 +5000,7 @@ class SessionManager:
             self.task_store.save(task)
         return {"ok": True, "run": run.to_dict()}
 
-    def save(self, session_id: str, engine: TurnEngine) -> None:
+    def save(self, session_id: str, engine: TurnEngine, touch: bool = True) -> None:
         executor = getattr(engine, "executor", None)
         workspace = os.path.realpath(str(executor.cwd)) if executor else ""
         self.session_store.save(
@@ -5019,7 +5019,8 @@ class SessionManager:
                     if getattr(engine, "compaction_state", None)
                     else {}
                 ),
-            )
+            ),
+            touch=touch,
         )
 
     @staticmethod

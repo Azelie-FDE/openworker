@@ -2512,7 +2512,7 @@ def create_app(manager: SessionManager) -> FastAPI:
             engine._append_notice(
                 "mode_notice", AUTO_APPROVE_NOTICE, title="Auto-approve is on."
             )
-            manager.save(session_id, engine)
+            manager.save(session_id, engine, touch=False)  # migration ≠ activity
             await ws.send_json(
                 {
                     "type": "mode_notice",
@@ -2668,7 +2668,11 @@ def create_app(manager: SessionManager) -> FastAPI:
                                     "mode_switch", f"{label} is on."
                                 )
                                 notice_data = {"text": f"{label} is on."}
-                            manager.save(session_id, engine)
+                            # A mode switch with no accompanying message is bookkeeping,
+                            # not activity (owner ruling 2026-08-24): the transcript
+                            # records it, Recents doesn't reorder. The next real turn's
+                            # checkpoint save bumps recency as usual.
+                            manager.save(session_id, engine, touch=False)
                             await manager.broadcast_session(
                                 session_id,
                                 {"type": "mode_notice", "data": notice_data},
