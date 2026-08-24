@@ -1103,3 +1103,20 @@ def test_mcp_connect_route_flags_authorizing_immediately(tmp_path, monkeypatch):
     monkeypatch.setattr("coworker.server.manager.load_mcp_servers", lambda *a, **k: [])
     res = asyncio.run(mgr.connect_mcp("sales-db"))
     assert not res["ok"] and "sales-db" not in mgr._mcp_authorizing
+
+
+def test_ws_ready_reports_live_turn(tmp_path):
+    # A reconnect can land mid-turn (sidebar revisit, relaunch, dropped socket). `ready`
+    # must carry server truth on the running turn or the GUI loses Stop + the waiting row
+    # (owner catch 2026-08-24, v0.2.0 walkthrough).
+    manager = SessionManager(workspace=tmp_path, provider=ScriptedProvider([_text("hi")]))
+    client = TestClient(create_app(manager))
+    with client.websocket_connect("/ws/session/live1") as ws:
+        assert ws.receive_json()["data"]["running"] is False
+
+    manager.mark_running("live1")
+    try:
+        with client.websocket_connect("/ws/session/live1") as ws:
+            assert ws.receive_json()["data"]["running"] is True
+    finally:
+        manager.mark_idle("live1")

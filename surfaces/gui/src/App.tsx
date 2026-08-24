@@ -700,6 +700,9 @@ export function App() {
           if (d.workspace) setWorkspace((cur) => cur || d.workspace);
           // UX-029: server truth on whether this session runs in a temporary folder.
           if (typeof d.temp_workspace === "boolean") setTempWorkspace(d.temp_workspace);
+          // Server truth on a live turn: a reconnect mid-turn never sees turn_start, so
+          // without this the Stop button and waiting row vanish (owner catch 2026-08-24).
+          if (typeof d.running === "boolean") setRunning(d.running);
           break;
         case "turn_start":
           setRunning(true);
@@ -1524,7 +1527,9 @@ export function App() {
     openRunSession(r.session_id, r.workspace, r.agent, { id: taskId, title: title || "" });
   };
 
-  const idle = items.length === 0 && !streaming;
+  // `running` too: a mid-turn reconnect may land before any item is rebuilt — a live
+  // session must show the transcript (waiting row, Stop), never the intro hero.
+  const idle = items.length === 0 && !streaming && !running;
   const pendingApproval = [...items].reverse().find((i) => i.kind === "approval" && !i.resolved);
   const pendingDirReq = [...items].reverse().find((i) => i.kind === "dirreq" && !i.resolved);
   const pendingToolReq = [...items].reverse().find((i) => i.kind === "toolreq" && !i.resolved);
