@@ -5156,7 +5156,10 @@ class SessionManager:
             # A failed title must never surface as a session error — but it must
             # not be invisible either (a silent provider 400 hid the max_tokens
             # rejection for a whole owner test pass, 2026-07-20).
-            logger.debug("autotitle failed for %s", session_id, exc_info=True)
+            # warning, not debug: debug was invisible in packaged builds, which re-hid
+            # exactly the class of failure this comment warns about (2026-08-24: the plan
+            # backend 400-ing on max_output_tokens went unseen for a whole test pass).
+            logger.warning("autotitle failed for %s", session_id, exc_info=True)
         finally:
             self._autotitle_inflight.discard(session_id)
 
