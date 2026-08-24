@@ -24,6 +24,7 @@ const HEALTH = { status: "ok", default_workspace: null, model: "anthropic:claude
 
 const SETTINGS = {
   provider: "openai",
+  auto_approve: true, // surfaces the Auto-approve mode entry (reviewer feature flag)
   model: "anthropic:claude-opus-4-8",
   models: ["anthropic:claude-opus-4-8", "gpt-5.5", "gpt-4o", "gpt-4o-mini", "o3-mini"],
   has_key: true,
@@ -688,6 +689,19 @@ export async function mockApi(page: import("@playwright/test").Page) {
           input: msg.text,
           ...(msg.skill ? { display: `/${msg.skill}${msg.text ? ` ${msg.text}` : ""}` } : {}),
         });
+        if (/trip the reviewer/i.test(msg.text)) {
+          send("tool_proposed", { name: "run_shell", arguments: { command: "semgrep scan" } });
+          send("tool_finished", {
+            name: "run_shell",
+            status: "denied",
+            reason: "blocked by the safety reviewer",
+            reviewer_reason: "This creates files even though you asked not to.",
+            allow_anyway: true,
+            reviewer_paused:
+              "Auto-approve is paused for the rest of this turn — the reviewer blocked 5 actions in a row, so approvals now come to you.",
+          });
+          return; // turn stays open: the pause is a mid-turn state
+        }
         if (/run a tool/i.test(msg.text)) {
           pendingTool = "run_shell";
           send("tool_proposed", { name: "run_shell", arguments: { command: "ls" } });

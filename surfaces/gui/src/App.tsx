@@ -181,6 +181,9 @@ export function App() {
   // The draft folder came from the user's own chip pick (not boot-resume or scratch
   // adoption). Only such a pick survives a coworker change (owner catch 2026-08-24).
   const [draftFolderPicked, setDraftFolderPicked] = useState(false);
+  // §8.4 breaker tripped this turn — the mode chip shows "· paused" until the turn ends
+  // or an ask_user answer resets the reviewer's denial streak (engine semantics).
+  const [reviewerPaused, setReviewerPaused] = useState(false);
   // UX-029 send-time folder enforcement: the stashed message while the folder dialog is
   // up. The message goes out the moment the dialog resolves; Escape restores the draft.
   const [sendGate, setSendGate] = useState<{
@@ -706,6 +709,7 @@ export function App() {
           break;
         case "turn_start":
           setRunning(true);
+          setReviewerPaused(false); // a fresh user message resets the denial streak
           setStreaming("");
           setReasoningStream("");
           // Background-delivered turns (channel message, self-wake, durable resume) have no local
@@ -870,9 +874,12 @@ export function App() {
             ),
           );
           // §8.4 breaker: the reviewer paused itself for the rest of the turn — say so
-          // where the user is looking (persisted server-side for reloads).
-          if (d.reviewer_paused)
+          // where the user is looking (persisted server-side for reloads) and on the
+          // composer's mode chip.
+          if (d.reviewer_paused) {
+            setReviewerPaused(true);
             setItems((p) => [...p, { kind: "notice", tone: "info", text: String(d.reviewer_paused) }]);
+          }
           // Refresh the right rail when something it shows may have changed: browser state, or a
           // file write that should appear under Artifacts immediately (not only after the turn).
           if (String(d.name || "").startsWith("browser_") || FILE_WRITE_TOOLS.has(d.name)) {
@@ -934,6 +941,7 @@ export function App() {
           break;
         case "turn_done":
           setRunning(false);
+          setReviewerPaused(false); // the pause is scoped to the turn
           refreshSessions();
           // Catch-all artifact refresh: files created via shell or on a brand-new session (whose
           // record only exists after the first save) appear once the turn completes.
@@ -1169,6 +1177,7 @@ export function App() {
     sessionRef.current?.respondTool(approved);
   };
   const answerQuestion = (answer: string) => {
+    setReviewerPaused(false); // an answered question resets the reviewer's streak
     setItems((p) => resolveLastQuestion(p, answer));
     dropSessionInbox("question");
     sessionRef.current?.respondQuestion(answer);
@@ -1368,6 +1377,7 @@ export function App() {
     setStreaming("");
     setRunning(false);
     if (ag) setAgent(ag);
+    setReviewerPaused(false);
     setDraftFolderPicked(false); // a resumed session's folder is inherited, not a pick
     setTempWorkspace(false); // the `ready` event restores the truth for temp sessions
     if (!gatesWorkspace(ag)) setShowGate(false);
@@ -2082,6 +2092,7 @@ export function App() {
               usage={usage}
               contextWindow={modelContextWindows[model]}
               contextBar={contextBar}
+              reviewerPaused={reviewerPaused}
               placeholder={
                 agent === "code"
                   ? "Ask the coder to build, fix, or explain…  (drop or paste files)"

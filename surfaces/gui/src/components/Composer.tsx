@@ -129,6 +129,9 @@ interface Props {
   contextWindow?: number;
   // Settings toggle (default off): true shows the fill bar instead of the session total.
   contextBar?: boolean;
+  // §8.4 breaker tripped this turn: the mode chip says so quietly until the turn ends
+  // or an ask_user answer resets the streak.
+  reviewerPaused?: boolean;
 }
 
 export function Composer(props: Props) {
@@ -674,6 +677,7 @@ export function Composer(props: Props) {
             </div>
           ) : props.workspace !== undefined ? (
             <ModeMenu
+              reviewerPaused={props.reviewerPaused}
               mode={props.mode}
               onModeChange={props.onModeChange}
               unattended={props.unattended}
@@ -935,11 +939,13 @@ function ModeMenu({
   onModeChange,
   unattended,
   onUnattendedChange,
+  reviewerPaused,
 }: {
   mode: string;
   onModeChange: (mode: string) => void;
   unattended?: boolean;
   onUnattendedChange?: (on: boolean) => void;
+  reviewerPaused?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // The Auto-Approve entry is gated on the server flag. Fetch once on first open; a session
@@ -969,10 +975,16 @@ function ModeMenu({
         aria-label="Mode"
         title={
           `Mode: ${current?.label || mode}` +
+          (reviewerPaused && mode === "auto-approve"
+            ? " · paused for this turn — the reviewer blocked several actions in a row, approvals come to you"
+            : "") +
           (unattended ? " · approvals go to the Inbox" : "")
         }
       >
         {current?.label || mode}
+        {reviewerPaused && mode === "auto-approve" && (
+          <span className="text-[11px] text-warnInk" data-testid="mode-paused">· paused</span>
+        )}
         <Icon name="chevronDown" size={11} className="text-faint" />
       </button>
       {open && (
