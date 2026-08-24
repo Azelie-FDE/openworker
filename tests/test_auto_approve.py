@@ -586,7 +586,11 @@ def test_reviewer_unsure_falls_through_to_the_card(tmp_path):
     events = _run(engine)
 
     assert approvals == ["run_shell"]  # today's behaviour: the human decided
-    assert EventType.PERMISSION_REQUIRED in [ev.type for ev in events]
+    cards = [ev for ev in events if ev.type == EventType.PERMISSION_REQUIRED]
+    assert cards
+    # The card answers "why am I being asked?" with the reviewer's own hesitation
+    # (owner ask 2026-08-24) — only on unsure-raised cards, never invented elsewhere.
+    assert cards[0].data["reviewer_unsure"] == "scripted unsure"
 
 
 def test_five_straight_denials_route_the_rest_of_the_turn_to_the_human(tmp_path):

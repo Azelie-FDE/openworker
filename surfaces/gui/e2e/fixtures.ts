@@ -702,6 +702,18 @@ export async function mockApi(page: import("@playwright/test").Page) {
           });
           return; // turn stays open: the pause is a mid-turn state
         }
+        if (/run an unsure tool/i.test(msg.text)) {
+          // The Auto-Approve reviewer answered `unsure`: the card carries its reason.
+          pendingTool = "run_shell";
+          send("tool_proposed", { name: "run_shell", arguments: { command: "python3 helper.py" } });
+          send("permission_required", {
+            name: "run_shell",
+            arguments: { command: "python3 helper.py" },
+            reason: "requires approval",
+            reviewer_unsure: "This runs a newly created script whose effects cannot be determined from the command.",
+          });
+          return; // suspended on the approval
+        }
         if (/run a tool/i.test(msg.text)) {
           pendingTool = "run_shell";
           send("tool_proposed", { name: "run_shell", arguments: { command: "ls" } });

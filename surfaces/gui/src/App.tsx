@@ -787,6 +787,7 @@ export function App() {
               standingTarget: d.standing_target || undefined,
               searchProvider: d.search_provider || undefined,
               provenance: d.provenance || undefined,
+              reviewerUnsure: d.reviewer_unsure || undefined,
               readonlyOk: !!d.readonly_ok,
             },
           ]);

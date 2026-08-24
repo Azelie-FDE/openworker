@@ -21,3 +21,15 @@ test("reviewer pause shows a transcript notice and marks the mode chip", async (
   await expect(page.getByTestId("mode-paused")).toBeVisible();
   await expect(page.getByRole("button", { name: "Mode", exact: true })).toContainText("paused");
 });
+
+test("an unsure escalation shows the reviewer's hesitation on the card", async ({ page }) => {
+  await page.goto("/");
+  await page.getByText("Draft the launch note").first().click();
+  const box = page.getByPlaceholder(/Ask the coworker/);
+  await box.fill("run an unsure tool");
+  await box.press("Enter");
+
+  const note = page.getByTestId("approval-reviewer-unsure");
+  await expect(note).toBeVisible();
+  await expect(note).toContainText("reviewer wasn\u2019t sure: This runs a newly created script");
+});

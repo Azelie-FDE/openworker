@@ -155,6 +155,9 @@ export type Item =
       // one fact that cannot be read off the command text. Engine-authored, fixed
       // vocabulary — never file contents.
       provenance?: string;
+      // The Auto-Approve reviewer answered `unsure` and raised this card: its one-line
+      // reason, rendered quietly so "why am I being asked?" is answered in place.
+      reviewerUnsure?: string;
       // Server-classified: this shell command only reads locally, so the card may offer
       // the session-wide "Allow read-only commands" grant.
       readonlyOk?: boolean;

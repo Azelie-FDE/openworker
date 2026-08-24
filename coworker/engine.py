@@ -1211,6 +1211,13 @@ class TurnEngine:
                     "name": tool_call.name,
                     "arguments": tool_call.arguments,
                     "reason": decision.reason,
+                    # An `unsure` verdict raised this card: the reviewer's one-line reason
+                    # answers "why am I being asked?" in place (owner ask 2026-08-24).
+                    **(
+                        {"reviewer_unsure": verdict.reason}
+                        if consulted_live and verdict.verdict == "unsure"
+                        else {}
+                    ),
                     "category": getattr(metadata, "category", ""),
                     # The exact target a standing rule could pin, or None when the call
                     # isn't eligible (no declared target arg / exec risk). Surfaces use it
