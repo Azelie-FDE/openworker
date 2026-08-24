@@ -317,6 +317,12 @@ export function ApprovalCard({
       <span>{item.provenance}</span>
     </div>
   ) : null;
+  // Quiet, not a warning: the reviewer hesitating is context, not danger.
+  const reviewerUnsure = item.reviewerUnsure ? (
+    <div className="text-[12px] text-muted mt-1" data-testid="approval-reviewer-unsure">
+      reviewer wasn&rsquo;t sure: {item.reviewerUnsure}
+    </div>
+  ) : null;
 
   // §35 compact row: routine workspace writes — one line, preview expands inline from the
   // tool args. Standing/grant flows keep the full card (they carry §25 consent weight).
@@ -342,6 +348,7 @@ export function ApprovalCard({
         </div>
         {peek && content && <PreviewBlock text={content} />}
         {provenance}
+        {reviewerUnsure}
         {reason && <div className="approval-reason">{reason}</div>}
       </div>
     );
@@ -415,6 +422,7 @@ export function ApprovalCard({
         !grants.length &&
         shortArgs(item.args) && <div className="approval-rest">{shortArgs(item.args)}</div>}
       {provenance}
+      {reviewerUnsure}
       {reason && <div className="approval-reason">{reason}</div>}
 
       {item.resolved ? (

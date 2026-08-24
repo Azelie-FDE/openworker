@@ -167,7 +167,10 @@ class ConversationStore:
             self._conn.commit()
 
     # -- API --------------------------------------------------------------------
-    def save(self, record: SessionRecord) -> None:
+    def save(self, record: SessionRecord, touch: bool = True) -> None:
+        # touch=False: a BOOKKEEPING write (persisted notice migration, mode marker with
+        # no accompanying activity) — the row updates but keeps its place in Recents.
+        # `updated_at` means "last worked on", never "last saved" (owner ruling 2026-08-24).
         sid = record.session_id
         with self._lock:
             # lazily migrate a legacy inline blob into the .jsonl
@@ -201,7 +204,7 @@ class ConversationStore:
                     title = COALESCE(sessions.title, excluded.title), agent = excluded.agent,
                     n_msgs = excluded.n_msgs, messages = NULL, extra_roots = excluded.extra_roots,
                     grants = excluded.grants, compaction = excluded.compaction,
-                    updated_at = CURRENT_TIMESTAMP
+                    updated_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE sessions.updated_at END
                 """,
                 (
                     sid,
@@ -216,10 +219,12 @@ class ConversationStore:
                     json.dumps(record.compaction or {}),
                     json.dumps(record.team or {}),
                     json.dumps(record.bindings or {}),
+                    touch,
                 ),
             )
             self._conn.commit()
-        self.touch_workspace(record.workspace)
+        if touch:
+            self.touch_workspace(record.workspace)
 
     def load(self, session_id: str) -> Optional[SessionRecord]:
         with self._lock:

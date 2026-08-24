@@ -148,7 +148,7 @@ export function SessionSetupRow(props: Props) {
                   className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-paper text-[12px] text-accent"
                   onClick={() => void browse()}
                 >
-                  Choose another folder…
+                  {props.folderName ? "Choose another folder…" : "Choose a folder…"}
                 </button>
               </div>
               {error && <div className="px-2.5 py-1 text-[12px] text-warnInk">{error}</div>}

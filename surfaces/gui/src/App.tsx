@@ -59,7 +59,6 @@ import { Icon } from "./components/Icon";
 import { Sidebar } from "./components/Sidebar";
 import { ThinkingBlock, Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
-import { modeNoticeStep, type ModeNoticeState } from "./modeNotice";
 import { Markdown } from "./components/Markdown";
 import { SearchModal } from "./components/SearchModal";
 import { SessionIntro } from "./components/SessionIntro";
@@ -178,6 +177,12 @@ export function App() {
   // the header says "Temporary folder" and offers Save as project…). Set locally when a
   // temp dir is created at send, corrected by every `ready` event (server truth).
   const [tempWorkspace, setTempWorkspace] = useState(false);
+  // The draft folder came from the user's own chip pick (not boot-resume or scratch
+  // adoption). Only such a pick survives a coworker change (owner catch 2026-08-24).
+  const [draftFolderPicked, setDraftFolderPicked] = useState(false);
+  // §8.4 breaker tripped this turn — the mode chip shows "· paused" until the turn ends
+  // or an ask_user answer resets the reviewer's denial streak (engine semantics).
+  const [reviewerPaused, setReviewerPaused] = useState(false);
   // UX-029 send-time folder enforcement: the stashed message while the folder dialog is
   // up. The message goes out the moment the dialog resolves; Escape restores the draft.
   const [sendGate, setSendGate] = useState<{
@@ -218,14 +223,11 @@ export function App() {
   // fresh state — the interrupted/error flush below needs the live buffer at event time.
   // Mode markers in the transcript: which session has already seen the full Auto-approve
   // explanation, and what mode the transcript last recorded (so a switch can be told apart
-  // from a re-render or a session change). See `modeNoticeStep`.
-  const modeNoticeState = useRef<ModeNoticeState>({ mark: null, bannerShownFor: "" });
   // Which session the current `mode` value is CONFIRMED for. On a session switch, `mode`
   // still holds the previous session's value until the server's `ready` event delivers the
   // real one — announcing anything in that window posts the old session's banner into the
   // new transcript (seen 2026-08-22: a fresh Ask-for-approval session opened with the
   // Auto-approve banner, then a stray "Ask for approval is on." marker when `ready` landed).
-  const [modeConfirmedFor, setModeConfirmedFor] = useState("");
   const streamingRef = useRef("");
   const setStreaming = (value: string | ((s: string) => string)) => {
     streamingRef.current = typeof value === "function" ? value(streamingRef.current) : value;
@@ -689,17 +691,18 @@ export function App() {
           setConnected(true);
           if (d.model) setModel(d.model);
           if (d.mode) setMode(d.mode);
-          // Even when d.mode is absent (older servers), this is the best truth we'll get —
-          // unblock the mode-notice effect for this session either way.
-          setModeConfirmedFor(sessionId);
           if (d.command_trust?.required) setWorkspaceTrustRequest(d.command_trust);
           // Cowork: adopt the server-provisioned scratch dir (only when we don't already have one).
           if (d.workspace) setWorkspace((cur) => cur || d.workspace);
           // UX-029: server truth on whether this session runs in a temporary folder.
           if (typeof d.temp_workspace === "boolean") setTempWorkspace(d.temp_workspace);
+          // Server truth on a live turn: a reconnect mid-turn never sees turn_start, so
+          // without this the Stop button and waiting row vanish (owner catch 2026-08-24).
+          if (typeof d.running === "boolean") setRunning(d.running);
           break;
         case "turn_start":
           setRunning(true);
+          setReviewerPaused(false); // a fresh user message resets the denial streak
           setStreaming("");
           setReasoningStream("");
           // Background-delivered turns (channel message, self-wake, durable resume) have no local
@@ -777,6 +780,7 @@ export function App() {
               standingTarget: d.standing_target || undefined,
               searchProvider: d.search_provider || undefined,
               provenance: d.provenance || undefined,
+              reviewerUnsure: d.reviewer_unsure || undefined,
               readonlyOk: !!d.readonly_ok,
             },
           ]);
@@ -859,8 +863,17 @@ export function App() {
               d.standing_rule,
               d.reviewer_reason,
               d.allow_anyway,
+              d.approval_origin,
+              d.approval_note,
             ),
           );
+          // §8.4 breaker: the reviewer paused itself for the rest of the turn — say so
+          // where the user is looking (persisted server-side for reloads) and on the
+          // composer's mode chip.
+          if (d.reviewer_paused) {
+            setReviewerPaused(true);
+            setItems((p) => [...p, { kind: "notice", tone: "info", text: String(d.reviewer_paused) }]);
+          }
           // Refresh the right rail when something it shows may have changed: browser state, or a
           // file write that should appear under Artifacts immediately (not only after the turn).
           if (String(d.name || "").startsWith("browser_") || FILE_WRITE_TOOLS.has(d.name)) {
@@ -870,6 +883,14 @@ export function App() {
         case "turn_end":
           if (d.status === "max_iterations_exceeded")
             setItems((p) => [...p, { kind: "notice", tone: "warn", text: "Stopped: max iterations reached." }]);
+          break;
+        case "mode_notice":
+          // Server-authored + persisted (owner ruling 2026-08-24): the Auto-Approve
+          // explainer once per session ever, one-line markers for later switches.
+          setItems((p) => [
+            ...p,
+            { kind: "notice", tone: "info", ...(d.title ? { title: d.title } : {}), text: d.text || "" },
+          ]);
           break;
         case "model_changed":
           // Mid-session switch (server-applied): update the header fact and drop the
@@ -922,6 +943,7 @@ export function App() {
           break;
         case "turn_done":
           setRunning(false);
+          setReviewerPaused(false); // the pause is scoped to the turn
           refreshSessions();
           // Catch-all artifact refresh: files created via shell or on a brand-new session (whose
           // record only exists after the first save) appear once the turn completes.
@@ -1018,13 +1040,6 @@ export function App() {
     setFollowing(true);
   }, [sessionId]);
 
-  useEffect(() => {
-    // The step is a no-op while `mode` still belongs to the previous session (until `ready`
-    // confirms it) — see modeNoticeStep for why acting on the stale value misfires.
-    const { item, state } = modeNoticeStep(modeNoticeState.current, mode, sessionId, modeConfirmedFor);
-    modeNoticeState.current = state;
-    if (item) setItems((p) => [...p, item]);
-  }, [mode, sessionId, modeConfirmedFor]);
   useEffect(() => {
     if (atBottomRef.current) scrollToBottom();
   }, [items, streaming]);
@@ -1157,6 +1172,7 @@ export function App() {
     sessionRef.current?.respondTool(approved);
   };
   const answerQuestion = (answer: string) => {
+    setReviewerPaused(false); // an answered question resets the reviewer's streak
     setItems((p) => resolveLastQuestion(p, answer));
     dropSessionInbox("question");
     sessionRef.current?.respondQuestion(answer);
@@ -1207,6 +1223,7 @@ export function App() {
       setWorkspace(null);
       setBranch(null);
     }
+    setDraftFolderPicked(false);
     setTempWorkspace(false);
     setSessionId(newId());
   };
@@ -1217,8 +1234,13 @@ export function App() {
   const pickCoworker = (id: string) => {
     if (id === agent) return;
     setAgent(id);
-    setWorkspace(null);
-    setBranch(null);
+    // An explicit draft folder pick survives a coworker change (owner catch
+    // 2026-08-24). Anything inherited — boot-resume, scratch adoption, temp
+    // dirs — still resets; the "never inherit" rule exists for those.
+    if (!gatesWorkspace(id) || tempWorkspace || !draftFolderPicked || !workspace) {
+      setWorkspace(null);
+      setBranch(null);
+    }
     setTempWorkspace(false);
     setShowGate(false);
     setSessionId(newId());
@@ -1228,6 +1250,7 @@ export function App() {
   const pickDraftFolder = (path: string, b?: string | null) => {
     setWorkspace(path);
     setBranch(b ?? null);
+    setDraftFolderPicked(true);
     setTempWorkspace(false);
     setSessionId(newId());
     getRecentWorkspaces().then(setProjects).catch(() => {});
@@ -1349,6 +1372,8 @@ export function App() {
     setStreaming("");
     setRunning(false);
     if (ag) setAgent(ag);
+    setReviewerPaused(false);
+    setDraftFolderPicked(false); // a resumed session's folder is inherited, not a pick
     setTempWorkspace(false); // the `ready` event restores the truth for temp sessions
     if (!gatesWorkspace(ag)) setShowGate(false);
     if (ws && ws !== workspace) {
@@ -1368,6 +1393,7 @@ export function App() {
   const switchAgent = async (name: string) => {
     setSurface("session");
     if (name === agent) return;
+    setDraftFolderPicked(false); // leaving the draft — any pick belonged to it
     rememberLastSession(agent, sessionId, workspace);
     const knownSessions = sessions.length ? sessions : await getSessions().catch(() => []);
     const knownProjects = projects.length ? projects : await getRecentWorkspaces().catch(() => []);
@@ -1512,7 +1538,9 @@ export function App() {
     openRunSession(r.session_id, r.workspace, r.agent, { id: taskId, title: title || "" });
   };
 
-  const idle = items.length === 0 && !streaming;
+  // `running` too: a mid-turn reconnect may land before any item is rebuilt — a live
+  // session must show the transcript (waiting row, Stop), never the intro hero.
+  const idle = items.length === 0 && !streaming && !running;
   const pendingApproval = [...items].reverse().find((i) => i.kind === "approval" && !i.resolved);
   const pendingDirReq = [...items].reverse().find((i) => i.kind === "dirreq" && !i.resolved);
   const pendingToolReq = [...items].reverse().find((i) => i.kind === "toolreq" && !i.resolved);
@@ -2059,6 +2087,7 @@ export function App() {
               usage={usage}
               contextWindow={modelContextWindows[model]}
               contextBar={contextBar}
+              reviewerPaused={reviewerPaused}
               placeholder={
                 agent === "code"
                   ? "Ask the coder to build, fix, or explain…  (drop or paste files)"
@@ -2268,6 +2297,8 @@ function updateLastTool(
   standingRule?: string,
   reviewerReason?: string,
   allowAnyway?: boolean,
+  approvalOrigin?: string,
+  approvalNote?: string,
 ): Item[] {
   const copy = [...items];
   for (let i = copy.length - 1; i >= 0; i--) {
@@ -2281,6 +2312,8 @@ function updateLastTool(
         ...(standingRule ? { standingRule } : {}),
         ...(reviewerReason ? { reviewerReason } : {}),
         ...(allowAnyway ? { allowAnyway } : {}),
+        ...(approvalOrigin ? { approvalOrigin } : {}),
+        ...(approvalNote ? { approvalNote } : {}),
       };
       break;
     }

@@ -223,6 +223,12 @@ class SessionManager:
         self._autotitle_inflight: set[str] = set()
         self._autotitle_tasks: set[asyncio.Task] = set()
         self._autotitle_attempts: dict[str, int] = {}
+        # Opener-count signature of the last attempt: titling fires at TURN START (owner
+        # catch 2026-08-24 — waiting for an agentic turn to COMPLETE left sessions
+        # untitled for however long the scan ran), and the completion hook still covers
+        # background turns; this guard keeps the two trigger points from burning
+        # duplicate attempts on the same openers.
+        self._autotitle_sig: dict[str, int] = {}
         self.workspace_trust = WorkspaceTrustStore()
         self.secrets = SecretStore()
         # No explicit provider injected → route by the model's `provider:` prefix (OpenAI default,
@@ -5000,7 +5006,7 @@ class SessionManager:
             self.task_store.save(task)
         return {"ok": True, "run": run.to_dict()}
 
-    def save(self, session_id: str, engine: TurnEngine) -> None:
+    def save(self, session_id: str, engine: TurnEngine, touch: bool = True) -> None:
         executor = getattr(engine, "executor", None)
         workspace = os.path.realpath(str(executor.cwd)) if executor else ""
         self.session_store.save(
@@ -5019,7 +5025,8 @@ class SessionManager:
                     if getattr(engine, "compaction_state", None)
                     else {}
                 ),
-            )
+            ),
+            touch=touch,
         )
 
     @staticmethod
@@ -5054,10 +5061,12 @@ class SessionManager:
 
     # -- LLM auto-titles (FB-010) -------------------------------------------------
     _AUTOTITLE_PROMPT = (
-        "You title chat sessions. Given the user's opening message(s), reply with ONLY "
-        "a 4-5 word title for the session — no quotes or punctuation wrapping it. If "
-        'the opening is merely a greeting or small-talk with no topic ("hey", '
-        '"how are you", "hi there"), reply with exactly: small-talk'
+        "You title chat sessions. Given the user's opening message(s) — and, when "
+        "present, the assistant's first reply for context — reply with ONLY a 4-5 word "
+        "title for the session, named after what the session is actually about — no "
+        "quotes or punctuation wrapping it. If there is no topic at all ("
+        '"hey", "how are you", "hi there" and a generic reply), reply with exactly: '
+        "small-talk"
     )
 
     def _maybe_autotitle(self, session_id: str) -> None:
@@ -5075,7 +5084,11 @@ class SessionManager:
             return
         if self.task_store.task_for_run_session(session_id) is not None:
             return  # automation runs are titled by their task
-        if self._autotitle_attempts.get(session_id, 0) >= 2:
+        # Three windows, not two (owner ruling 2026-08-24): opener-only at turn 1 start,
+        # opener+assistant-reply at turn 1 end (titles a "hey"-then-real-work session),
+        # and both-openers at turn 2 start. The signature guard makes each fire at most
+        # once; sessions with a meaty first message still title on attempt 1.
+        if self._autotitle_attempts.get(session_id, 0) >= 3:
             return
         users = [m for m in engine.messages if m.get("role") == "user"]
         if not users:
@@ -5092,6 +5105,28 @@ class SessionManager:
         ][:2]
         if not openers:
             return
+        # The agent's first reply is fair evidence for a TITLE (unlike the reviewer,
+        # naming a session is not a security boundary — owner ruling 2026-08-24): it is
+        # what turns "hey" + a generic ask into "Semgrep security review".
+        assistant = next(
+            (
+                text
+                for m in engine.messages
+                if m.get("role") == "assistant"
+                and (
+                    text := content_to_text(
+                        m.get("content"), image_placeholder=""
+                    ).strip()
+                )
+            ),
+            "",
+        )[:400]
+        # Same evidence as the last attempt → nothing new to say; skip WITHOUT burning an
+        # attempt (this is how the turn-start and turn-end triggers coexist).
+        sig = (len(openers), bool(assistant))
+        if self._autotitle_sig.get(session_id) == sig:
+            return
+        self._autotitle_sig[session_id] = sig
         self._autotitle_attempts[session_id] = (
             self._autotitle_attempts.get(session_id, 0) + 1
         )
@@ -5102,12 +5137,18 @@ class SessionManager:
         self._autotitle_inflight.add(session_id)
         # Retain the task: the loop holds only a weak ref, and a GC'd task would both
         # kill the title mid-flight and strand the inflight guard.
-        task = loop.create_task(self._generate_autotitle(session_id, engine, openers))
+        task = loop.create_task(
+            self._generate_autotitle(session_id, engine, openers, assistant)
+        )
         self._autotitle_tasks.add(task)
         task.add_done_callback(self._autotitle_tasks.discard)
 
     async def _generate_autotitle(
-        self, session_id: str, engine: TurnEngine, openers: list[str]
+        self,
+        session_id: str,
+        engine: TurnEngine,
+        openers: list[str],
+        assistant: str = "",
     ) -> None:
         """One cheap non-streaming completion on the session's own provider/model. Every
         failure (provider error, empty, absurdly long) is swallowed — the title_from
@@ -5119,7 +5160,15 @@ class SessionManager:
                 model=engine.model,
                 messages=[
                     {"role": "system", "content": self._AUTOTITLE_PROMPT},
-                    {"role": "user", "content": "\n\n".join(openers)},
+                    {
+                        "role": "user",
+                        "content": "\n\n".join(openers)
+                        + (
+                            f"\n\n[the assistant's first reply]\n{assistant}"
+                            if assistant
+                            else ""
+                        ),
+                    },
                 ],
                 temperature=0.2,
                 # Reasoning-routed models spend hidden tokens BEFORE emitting text; a
@@ -5155,7 +5204,10 @@ class SessionManager:
             # A failed title must never surface as a session error — but it must
             # not be invisible either (a silent provider 400 hid the max_tokens
             # rejection for a whole owner test pass, 2026-07-20).
-            logger.debug("autotitle failed for %s", session_id, exc_info=True)
+            # warning, not debug: debug was invisible in packaged builds, which re-hid
+            # exactly the class of failure this comment warns about (2026-08-24: the plan
+            # backend 400-ing on max_output_tokens went unseen for a whole test pass).
+            logger.warning("autotitle failed for %s", session_id, exc_info=True)
         finally:
             self._autotitle_inflight.discard(session_id)
 
