@@ -178,6 +178,9 @@ export function App() {
   // the header says "Temporary folder" and offers Save as project…). Set locally when a
   // temp dir is created at send, corrected by every `ready` event (server truth).
   const [tempWorkspace, setTempWorkspace] = useState(false);
+  // The draft folder came from the user's own chip pick (not boot-resume or scratch
+  // adoption). Only such a pick survives a coworker change (owner catch 2026-08-24).
+  const [draftFolderPicked, setDraftFolderPicked] = useState(false);
   // UX-029 send-time folder enforcement: the stashed message while the folder dialog is
   // up. The message goes out the moment the dialog resolves; Escape restores the draft.
   const [sendGate, setSendGate] = useState<{
@@ -1207,6 +1210,7 @@ export function App() {
       setWorkspace(null);
       setBranch(null);
     }
+    setDraftFolderPicked(false);
     setTempWorkspace(false);
     setSessionId(newId());
   };
@@ -1217,8 +1221,13 @@ export function App() {
   const pickCoworker = (id: string) => {
     if (id === agent) return;
     setAgent(id);
-    setWorkspace(null);
-    setBranch(null);
+    // An explicit draft folder pick survives a coworker change (owner catch
+    // 2026-08-24). Anything inherited — boot-resume, scratch adoption, temp
+    // dirs — still resets; the "never inherit" rule exists for those.
+    if (!gatesWorkspace(id) || tempWorkspace || !draftFolderPicked || !workspace) {
+      setWorkspace(null);
+      setBranch(null);
+    }
     setTempWorkspace(false);
     setShowGate(false);
     setSessionId(newId());
@@ -1228,6 +1237,7 @@ export function App() {
   const pickDraftFolder = (path: string, b?: string | null) => {
     setWorkspace(path);
     setBranch(b ?? null);
+    setDraftFolderPicked(true);
     setTempWorkspace(false);
     setSessionId(newId());
     getRecentWorkspaces().then(setProjects).catch(() => {});
@@ -1349,6 +1359,7 @@ export function App() {
     setStreaming("");
     setRunning(false);
     if (ag) setAgent(ag);
+    setDraftFolderPicked(false); // a resumed session's folder is inherited, not a pick
     setTempWorkspace(false); // the `ready` event restores the truth for temp sessions
     if (!gatesWorkspace(ag)) setShowGate(false);
     if (ws && ws !== workspace) {
@@ -1368,6 +1379,7 @@ export function App() {
   const switchAgent = async (name: string) => {
     setSurface("session");
     if (name === agent) return;
+    setDraftFolderPicked(false); // leaving the draft — any pick belonged to it
     rememberLastSession(agent, sessionId, workspace);
     const knownSessions = sessions.length ? sessions : await getSessions().catch(() => []);
     const knownProjects = projects.length ? projects : await getRecentWorkspaces().catch(() => []);

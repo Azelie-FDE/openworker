@@ -806,6 +806,10 @@ function UsageChip({
     : null;
   // Settings can hide the bar; without a known window there is nothing to fill either.
   const showBar = pct !== null && contextBar === true;
+  // Release hold (owner call 2026-08-24): cumulative session totals need more vetting
+  // before they ship — cache-read sums across turns read like a bill. Until then the
+  // chip and popover speak context-window only. Flip this to restore the breakdown.
+  const SHOW_SESSION_TOTALS = false;
   const labelFor = (id: string) =>
     id === "unknown" ? "Unknown model" : modelLabels?.[id] || shortModel(id);
   // One field per line, session-summed (owner ask 2026-07-28). Values are cumulative
@@ -826,15 +830,15 @@ function UsageChip({
         aria-expanded={open}
         aria-label="Token usage"
         title={
-          showBar
-            ? `Context window ${pct}% full · ${formatTokens(total)} tokens this session`
-            : `Token usage this session: ${formatTokens(total)}`
+          pct !== null
+            ? `Context window ${pct}% full — ${formatTokens(usage.context)} of ${formatTokens(contextWindow as number)}`
+            : `In context now: ${formatTokens(usage.context)} tokens`
         }
         data-testid="usage-chip"
       >
-        {/* The bar is the context-window fill; pairing it with the session TOTAL read as
-            "total is N% of the window", which it never was. Bar alone when we have a
-            window, the session total only when we don't (so the chip is never empty). */}
+        {/* The bar is the context-window fill. With totals on release hold, the numeric
+            fallback is the in-context size — the one figure we trust — never the
+            cumulative session total. */}
         {showBar ? (
           <span className="w-12 h-1.5 rounded-full bg-line overflow-hidden" aria-hidden="true">
             <span
@@ -843,7 +847,9 @@ function UsageChip({
             />
           </span>
         ) : (
-          <span className="tabular-nums">{formatTokens(total)}</span>
+          <span className="tabular-nums">
+            {SHOW_SESSION_TOTALS ? formatTokens(total) : formatTokens(usage.context)}
+          </span>
         )}
       </button>
       {open && (
@@ -874,6 +880,7 @@ function UsageChip({
                 In context now: {formatTokens(usage.context)} tokens
               </div>
             ) : null}
+            {SHOW_SESSION_TOTALS && (<>
             <div className="text-[11px] uppercase tracking-[0.06em] text-faint font-semibold mb-1">
               Session totals
             </div>
@@ -907,6 +914,7 @@ function UsageChip({
               <span className="text-faint">Total</span>
               <span className="text-ink tabular-nums">{formatTokens(total)} tokens</span>
             </div>
+            </>)}
             {model && !modelLabels?.[model] && contextWindow === undefined && (
               <div className="mt-1 text-[11px] text-faint leading-snug">
                 Context meter unavailable for custom models.

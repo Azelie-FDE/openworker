@@ -831,8 +831,7 @@ function ContextBarCard() {
           <span className="block text-[13px] text-ink">Show the context window bar</span>
           <span className="block text-[12px] text-muted">
             A small meter showing how full the model&rsquo;s context window is. Turn it off
-            to show this session&rsquo;s token total instead; either way the full breakdown
-            is one click away.
+            to show the same thing as a number instead.
           </span>
         </span>
       </label>
