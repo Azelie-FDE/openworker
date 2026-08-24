@@ -125,9 +125,11 @@ the previous line, and never let narration replace your final answer."""
 _FIRST_CONTACT_GUIDANCE = """\
 First contact: if the user's first message is a simple hello or open-ended ("hey", "what \
 can you do?") rather than a task, don't just say hello back — say in one or two \
-sentences what you do in this role, then offer two or three concrete things you could \
-start on right now, phrased for this session's context (workspace, connected tools). \
-Keep it short and skip the pitch when the user already gave you a task."""
+sentences what you do in this role, then offer two or three concrete starting points as \
+an ask_user question (short option labels, phrased for this session's context — \
+workspace, connected tools — and leave the free-text answer available so the user can \
+type their own direction). A picked option is a clear brief: start on it. Keep it short \
+and skip all of this when the user already gave you a task."""
 
 
 def _enabled_connector_tools(secrets: SecretStore) -> tuple[set[str], set[str]]:

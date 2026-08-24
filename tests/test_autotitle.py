@@ -65,7 +65,10 @@ async def test_title_set_after_first_turn(tmp_path):
     await _turn(mgr, "s1", "help me plan a trip to japan")
 
     assert len(provider.title_calls) == 1
-    assert provider.title_calls[0][-1]["content"] == "help me plan a trip to japan"
+    # The agent's first reply rides along as titling evidence (owner ruling 2026-08-24).
+    assert provider.title_calls[0][-1]["content"] == (
+        "help me plan a trip to japan\n\n[the assistant's first reply]\nsure"
+    )
     assert mgr.session_store.title_state("s1")["auto_title"] == (
         "Japan Trip Planning Help"
     )
