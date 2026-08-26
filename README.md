@@ -1,6 +1,6 @@
-# OpenWorker
+<h1 align="center">OpenWorker</h1>
 
-**[openworker.com](https://openworker.com)** · [Download](#download) · [Issues](https://github.com/andrewyng/openworker/issues)
+<p align="center"><strong><a href="https://openworker.com">openworker.com</a></strong> · <a href="#download">Download</a> · <a href="https://github.com/andrewyng/openworker/issues">Issues</a></p>
 
 <p align="center"><a href="https://trendshift.io/repositories/91434?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-91434" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/91434/daily" alt="andrewyng%2Fopenworker | Trendshift" width="250" height="55"/></a></p>
 
