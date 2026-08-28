@@ -38,6 +38,7 @@ from .model import (
     Actor,
     AuthorityError,
     BoardError,
+    BoardNotFoundError,
     ChainError,
     ItemState,
     Role,
@@ -469,7 +470,16 @@ class TeamStore:
             )
         with self._lock:
             if parent is not None:
-                parent_item = self._item(space, parent)
+                try:
+                    parent_item = self._item(space, parent)
+                except BoardError:
+                    raise BoardNotFoundError(
+                        f"no visible item #{parent} in space {space!r}"
+                    ) from None
+                if not self._item_visible_to(space, actor, parent_item):
+                    raise BoardNotFoundError(
+                        f"no visible item #{parent} in space {space!r}"
+                    )
                 if case is None:
                     case = parent_item["case_id"] or None
             item_id = self._next_item_id(space)
@@ -489,7 +499,7 @@ class TeamStore:
             )
             if self.journal is not None and case:
                 self.journal.ensure_case(case, actor.id)
-        return self.get_item(space, item_id, seq=event["seq"])
+        return self.get_item(space, item_id, actor=actor, seq=event["seq"])
 
     def list_items(
         self,
@@ -499,8 +509,11 @@ class TeamStore:
         state: Optional[str] = None,
         assignee: Optional[str] = None,
     ) -> list[dict[str, Any]]:
-        """Items in a space. Workers see only their slice: assigned items plus items
-        directly linked to those."""
+        """Return actor-visible items in a space.
+
+        A worker's slice contains items it owns or created, their direct links,
+        and—while claims are open—the open, unassigned claim pool.
+        """
         where = ["space = ?"]
         params: list[Any] = [space]
         if state:
@@ -517,32 +530,50 @@ class TeamStore:
                 params,
             ).fetchall()
             items = [_row_to_item(row) for row in rows]
+            worker_slice = None
+            claims_open = None
             if actor.role == Role.WORKER:
-                visible = self._worker_slice(space, actor.id)
-                # On an open-claims board the claimable pool is visible too — a
-                # pull queue nobody can see is not a queue (drill-caught: an
-                # external worker with no assignment saw an empty board). Under
-                # lead-only policy workers can't act on it, so it stays hidden.
+                worker_slice = self._worker_slice(space, actor.id)
                 claims_open = self.policy(space)["claims"] == "open"
-                items = [
-                    item
-                    for item in items
-                    if item["id"] in visible
-                    or (
-                        claims_open
-                        and item["state"] == ItemState.OPEN.value
-                        and not item["assignee"]
-                    )
-                ]
+            items = [
+                item
+                for item in items
+                if self._item_visible_to(
+                    space,
+                    actor,
+                    item,
+                    worker_slice=worker_slice,
+                    claims_open=claims_open,
+                )
+            ]
             for item in items:
                 item["links"] = self._links_of(space, item["id"])
         return items
 
     def get_item(
-        self, space: str, item_id: int, *, seq: Optional[int] = None
+        self,
+        space: str,
+        item_id: int,
+        *,
+        actor: Actor,
+        seq: Optional[int] = None,
     ) -> dict[str, Any]:
+        """Return one actor-visible item.
+
+        The actor is required because detail reads enforce the same worker scope as
+        list reads. Missing and hidden items deliberately share one error contract.
+        """
         with self._lock:
-            item = self._item(space, item_id)
+            try:
+                item = self._item(space, item_id)
+            except BoardError:
+                raise BoardNotFoundError(
+                    f"no visible item #{item_id} in space {space!r}"
+                ) from None
+            if not self._item_visible_to(space, actor, item):
+                raise BoardNotFoundError(
+                    f"no visible item #{item_id} in space {space!r}"
+                )
             item["links"] = self._links_of(space, item_id)
             item["comments"] = self.comments(space, item_id)
         if seq is not None:
@@ -587,7 +618,7 @@ class TeamStore:
                 },
                 taint=taint,
             )
-        return self.get_item(space, item_id, seq=event["seq"])
+        return self.get_item(space, item_id, actor=actor, seq=event["seq"])
 
     def comment(
         self,
@@ -652,7 +683,7 @@ class TeamStore:
                     assignee=assignee,
                     previous=item["assignee"] or "",
                 )
-        return self.get_item(space, item_id, seq=event["seq"])
+        return self.get_item(space, item_id, actor=actor, seq=event["seq"])
 
     def claim(self, space: str, actor: Actor, item_id: int) -> dict[str, Any]:
         """Self-assign an open, unassigned item. Nobody stamps a claim — the store
@@ -694,7 +725,7 @@ class TeamStore:
                     assignee=actor.id,
                     previous="",
                 )
-        return self.get_item(space, item_id, seq=event["seq"])
+        return self.get_item(space, item_id, actor=actor, seq=event["seq"])
 
     def policy(self, space: str) -> dict[str, Any]:
         with self._lock:
@@ -896,6 +927,30 @@ class TeamStore:
             if row["dst"] in mine:
                 out.add(row["src"])
         return out
+
+    def _item_visible_to(
+        self,
+        space: str,
+        actor: Actor,
+        item: dict[str, Any],
+        *,
+        worker_slice: Optional[set[int]] = None,
+        claims_open: Optional[bool] = None,
+    ) -> bool:
+        """Whether an actor may read one item through any board surface."""
+        if actor.role != Role.WORKER:
+            return True
+        if worker_slice is None:
+            worker_slice = self._worker_slice(space, actor.id)
+        if item["id"] in worker_slice:
+            return True
+        if claims_open is None:
+            claims_open = self.policy(space)["claims"] == "open"
+        return (
+            claims_open
+            and item["state"] == ItemState.OPEN.value
+            and not item["assignee"]
+        )
 
     def _links_of(self, space: str, item_id: int) -> list[dict[str, Any]]:
         rows = self._conn.execute(
