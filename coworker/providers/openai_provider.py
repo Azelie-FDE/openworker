@@ -1,7 +1,11 @@
-"""OpenAI provider — the v1 model access implementation.
+"""OpenAI Chat Completions provider — the compat workhorse.
 
-Uses the OpenAI Python SDK `chat.completions` API only (no Responses/Assistants), so
-the later swap to aisuite (OpenAI-API-shaped) stays a near drop-in.
+Uses the OpenAI Python SDK `chat.completions` API only, which is what the entire
+OpenAI-compatible world implements: the compat vendors (DeepSeek, Z AI, Kimi, …),
+resellers, Ollama, custom endpoints (Azure OpenAI, vLLM), and the Bedrock/Vertex MaaS
+paths. Native OpenAI models (the `openai` provider with no custom endpoint) route to
+`openai_responses.OpenAIResponsesProvider` instead — Chat Completions rejects function
+tools combined with reasoning on GPT-5.6+, so reasoning + tools needs `/v1/responses`.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from .base import (
     ModelCapabilities,
     ProviderClient,
     StreamChunk,
+    TokenUsage,
     ToolCall,
 )
 from .capabilities import capabilities_for
@@ -39,10 +44,12 @@ def resolve_api_key(secrets: Any = None) -> Optional[str]:
 
 # GPT-5.6 (2026-07) defaults reasoning_effort to "medium" server-side, and
 # /v1/chat/completions rejects function tools combined with any effort other than
-# "none" ("use /v1/responses"). Until we grow a Responses API path, pin effort to
-# none whenever tools ride along on these models — and when the API rejects a call
-# with that exact complaint anyway (a future generation, an alias we didn't list),
-# retry once at effort none so the user gets a working turn instead of a 400.
+# "none" ("use /v1/responses"). Native OpenAI now routes to the Responses provider,
+# but GPT-5.6 can still land here through a custom endpoint (Azure OpenAI serves the
+# same wire), so keep pinning effort to none whenever tools ride along on these
+# models — and when the API rejects a call with that exact complaint anyway (a future
+# generation, an alias we didn't list), retry once at effort none so the user gets a
+# working turn instead of a 400.
 _EFFORT_ERROR = "function tools with reasoning_effort are not supported"
 
 
@@ -75,6 +82,12 @@ def _strip_foreign_sidecars(messages: list[dict[str, Any]]) -> list[dict[str, An
 
 _MAX_TOKENS_ERROR = "'max_tokens' is not supported"
 
+# Ceiling, not a spend target — same rationale as the Anthropic provider's default: a
+# coworker writing a report ships the whole file inside one tool call's arguments, and
+# compat servers left to their OWN defaults cap completions absurdly low (observed
+# 2026-08-15: Together defaulted Kimi K3 to ~2k tokens — every ~5KB write truncated).
+DEFAULT_MAX_TOKENS = 32000
+
 
 def _param_fix_retry(kwargs: dict[str, Any], exc: Exception) -> dict[str, Any]:
     """Kwargs for the one retry an unsupported-parameter error earns, or re-raise.
@@ -91,7 +104,36 @@ def _param_fix_retry(kwargs: dict[str, Any], exc: Exception) -> dict[str, Any]:
         fixed = dict(kwargs)
         fixed["max_completion_tokens"] = fixed.pop("max_tokens")
         return fixed
+    if "stream_options" in msg and "stream_options" in kwargs:
+        # Older compat servers don't know the usage opt-in; drop it, lose only metering.
+        fixed = dict(kwargs)
+        fixed.pop("stream_options")
+        return fixed
+    if ("max_tokens" in msg or "max_new_tokens" in msg) and "max_tokens" in kwargs:
+        # Our 32k default exceeded this model's completion limit (each server words the
+        # 400 differently, so no number parsing) — drop the param and retry on the
+        # server's own default rather than surfacing the 400. Worst case is exactly
+        # yesterday's behavior; best case the server allows far more once asked.
+        fixed = dict(kwargs)
+        fixed.pop("max_tokens")
+        return fixed
     raise exc
+
+
+def _usage_from(usage: Any) -> Optional[TokenUsage]:
+    """chat.completions usage → normalized counts. `prompt_tokens` INCLUDES cached
+    tokens, so the cached share is subtracted into `cache_read`; no write-side split
+    exists on this API shape."""
+    if usage is None:
+        return None
+    prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
+    details = getattr(usage, "prompt_tokens_details", None)
+    cached = int(getattr(details, "cached_tokens", 0) or 0)
+    return TokenUsage(
+        input=max(prompt - cached, 0),
+        output=int(getattr(usage, "completion_tokens", 0) or 0),
+        cache_read=cached,
+    )
 
 
 class OpenAIProvider(ProviderClient):
@@ -151,11 +193,13 @@ class OpenAIProvider(ProviderClient):
         }
         if tools:
             kwargs["tools"] = tools
+        kwargs.setdefault("max_tokens", DEFAULT_MAX_TOKENS)
         _pin_reasoning_effort(kwargs)
 
         client = self._ensure_client()
-        # Up to two param-fix retries: effort and max_tokens can BOTH need fixing.
-        for _ in range(2):
+        # Up to three param-fix retries: effort, the max_tokens rename, and the
+        # max_tokens over-limit drop can ALL need fixing on one call.
+        for _ in range(3):
             try:
                 response = client.chat.completions.create(**kwargs)
                 break
@@ -174,6 +218,7 @@ class OpenAIProvider(ProviderClient):
             finish_reason=getattr(choice, "finish_reason", None),
             raw=response,
             reasoning=_delta_reasoning(message),
+            usage=_usage_from(getattr(response, "usage", None)),
         )
 
     def capabilities(self, model: str) -> ModelCapabilities:
@@ -191,10 +236,14 @@ class OpenAIProvider(ProviderClient):
             "model": model,
             "messages": _strip_foreign_sidecars(messages),
             "stream": True,
+            # Usage on the final chunk (empty `choices`). Compat servers that reject
+            # the option get a one-shot retry without it (_param_fix_retry).
+            "stream_options": {"include_usage": True},
             **settings,
         }
         if tools:
             kwargs["tools"] = tools
+        kwargs.setdefault("max_tokens", DEFAULT_MAX_TOKENS)
         _pin_reasoning_effort(kwargs)
         client = self._ensure_client()
 
@@ -202,9 +251,11 @@ class OpenAIProvider(ProviderClient):
         reasoning_parts: list[str] = []
         tool_accum: dict[int, dict[str, str]] = {}
         finish_reason = None
+        usage: Optional[TokenUsage] = None
 
-        # Up to two param-fix retries: effort and max_tokens can BOTH need fixing.
-        for _ in range(2):
+        # Up to three param-fix retries: effort, the max_tokens rename, and the
+        # max_tokens over-limit drop can ALL need fixing on one call.
+        for _ in range(3):
             try:
                 chunks = client.chat.completions.create(**kwargs)
                 break
@@ -213,6 +264,9 @@ class OpenAIProvider(ProviderClient):
         else:
             chunks = client.chat.completions.create(**kwargs)
         for chunk in chunks:
+            chunk_usage = _usage_from(getattr(chunk, "usage", None))
+            if chunk_usage is not None:
+                usage = chunk_usage
             choices = getattr(chunk, "choices", None)
             if not choices:
                 continue
@@ -262,6 +316,7 @@ class OpenAIProvider(ProviderClient):
                 tool_calls=tool_calls,
                 finish_reason=finish_reason,
                 reasoning="".join(reasoning_parts) or None,
+                usage=usage,
             )
         )
 

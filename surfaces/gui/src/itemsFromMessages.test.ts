@@ -83,6 +83,20 @@ describe("itemsFromMessages model switch", () => {
   });
 });
 
+describe("itemsFromMessages compaction", () => {
+  it("replays the persisted compacted marker as an info notice (the divider)", () => {
+    const items = itemsFromMessages([
+      { role: "user", content: "hi" },
+      { role: "notice", kind: "compacted", text: "Context compacted — earlier turns were summarized" },
+    ] as any);
+    expect(items[1]).toEqual({
+      kind: "notice",
+      tone: "info",
+      text: "Context compacted — earlier turns were summarized",
+    });
+  });
+});
+
 describe("itemsFromMessages reasoning", () => {
   it("attaches the reasoning sidecar to assistant items; thinking-only messages still render", () => {
     const items = itemsFromMessages([
@@ -92,5 +106,45 @@ describe("itemsFromMessages reasoning", () => {
     ] as any);
     expect(items[1]).toEqual({ kind: "assistant", text: "answer", reasoning: "let me think" });
     expect(items[2]).toEqual({ kind: "assistant", text: "", reasoning: "stopped mid-thought" });
+  });
+});
+
+describe("itemsFromMessages mcp failure", () => {
+  it("replays the persisted mcp_error marker as a collapsed notice WITHOUT retry", () => {
+    // Legacy format (no `server` field): the name is recovered from the text and the
+    // old plain-text Settings pointer is dropped — the Open Connectors button owns it.
+    const items = itemsFromMessages([
+      { role: "user", content: "hi" },
+      { role: "notice", kind: "mcp_error", text: "MCP server “sales-db” failed to start — see Settings ▸ Connectors" },
+    ] as any);
+    expect(items[1]).toEqual({
+      kind: "notice",
+      tone: "warn",
+      text: "MCP server “sales-db” didn’t start — its tools are unavailable here",
+      server: "sales-db",
+      detail: "MCP server “sales-db” failed to start",
+    });
+  });
+
+  it("keeps an unparseable mcp_error text as a plain warn notice", () => {
+    const items = itemsFromMessages([
+      { role: "notice", kind: "mcp_error", text: "something opaque went wrong" },
+    ] as any);
+    expect(items[0]).toEqual({ kind: "notice", tone: "warn", text: "something opaque went wrong" });
+  });
+
+  it("renders a project_presence notice as one quiet info line, never an error", () => {
+    const items = itemsFromMessages([
+      {
+        role: "notice",
+        kind: "project_presence",
+        text: "“notes” already has project memory (3 entries) — bind it by name or start a session there to use it.",
+      },
+    ] as any);
+    expect(items[0]).toEqual({
+      kind: "notice",
+      tone: "info",
+      text: "“notes” already has project memory (3 entries) — bind it by name or start a session there to use it.",
+    });
   });
 });

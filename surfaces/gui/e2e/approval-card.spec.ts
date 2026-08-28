@@ -45,7 +45,7 @@ test("run_shell → full card: description title, command preview, stays-on-this
   // The mocked proposal has no description → plain "Run a command" title; the command is
   // the preview; the reason still renders; the scope note replaces the old badge.
   await expect(page.getByText("Run a command").last()).toBeVisible();
-  await expect(page.getByText("stays on this Mac").last()).toBeVisible();
+  await expect(page.getByText("stays on this computer").last()).toBeVisible();
   await expect(page.getByText("The coworker wants to run a command.").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Always allow this command" }).last()).toBeVisible();
   await expect(page.getByText(/local action/)).toHaveCount(0);
@@ -77,4 +77,22 @@ test("a one-paragraph digest send is clamped to a card, expandable in place", as
   await prev.getByText("show the full message").click();
   expect((await prev.boundingBox())!.height).toBeGreaterThan(clampedHeight);
   await expect(prev.getByText("show less")).toBeVisible();
+});
+
+test("read-only session grant: offered on classified commands, resolves the card", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const box = page.getByPlaceholder(/Ask the coworker/);
+  await box.fill("please run a tool");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  // The mocked `ls` proposal carries readonly_ok → the session-wide grant is offered.
+  const btn = page.getByTestId("allow-readonly-session");
+  await expect(btn).toBeVisible();
+  await expect(btn).toHaveAttribute("title", /no network, writes, or interpreters/);
+  await btn.click();
+
+  // Grant approves the pending call; the turn proceeds like any approval.
+  await expect(page.getByText(/The command ran; 1 file found/)).toBeVisible();
 });

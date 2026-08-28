@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
 import {
+  codexAuthStatus,
+  codexSignin,
+  codexSignout,
   getProviders,
   removeProvider,
   setProvider,
   verifyProvider,
+  type ProviderField as ProviderFieldT,
   type ProviderInfo,
 } from "../api";
 import { openExternal } from "../tauri";
@@ -22,6 +24,10 @@ export const KEY_HELP: Record<string, { url: string; label: string }> = {
   anthropic: { url: "https://console.anthropic.com/settings/keys", label: "console.anthropic.com" },
   openai: { url: "https://platform.openai.com/api-keys", label: "platform.openai.com" },
   gemini: { url: "https://aistudio.google.com/apikey", label: "aistudio.google.com" },
+  ark: { url: "https://console.byteplus.com/ark/region:ark+ap-southeast-1/apiKey", label: "console.byteplus.com" },
+  "ark-agent-plan-cn": { url: "https://console.volcengine.com/ark/region:cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=agentPlan", label: "console.volcengine.com" },
+  openrouter: { url: "https://openrouter.ai/keys", label: "openrouter.ai" },
+  bedrock: { url: "https://console.aws.amazon.com/bedrock/home#/api-keys", label: "the AWS Bedrock console" },
   fireworks: { url: "https://fireworks.ai/account/api-keys", label: "fireworks.ai" },
   together: { url: "https://api.together.xyz/settings/api-keys", label: "together.xyz" },
   zai: { url: "https://z.ai/manage-apikey/apikey-list", label: "z.ai" },
@@ -52,17 +58,16 @@ export function ProviderMark({ name, title, size = 32 }: { name: string; title: 
   );
 }
 
-/** "2h ago"-style label for a provider's last completion (null when never used).
- *  Pass a translation function to localize; omit for the legacy English fallback. */
-export function relTime(epoch?: number | null, t?: TFunction): string | null {
+/** "2h ago"-style label for a provider's last completion (null when never used). */
+export function relTime(epoch?: number | null): string | null {
   if (!epoch) return null;
   const secs = Math.max(0, Math.floor(Date.now() / 1000 - epoch));
-  if (secs < 90) return t ? t("provider.just_now") : "just now";
+  if (secs < 90) return "just now";
   const mins = Math.floor(secs / 60);
-  if (mins < 60) return t ? t("provider.minutes_ago", { count: mins }) : `${mins}m ago`;
+  if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 48) return t ? t("provider.hours_ago", { count: hrs }) : `${hrs}h ago`;
-  return t ? t("provider.days_ago", { count: Math.floor(hrs / 24) }) : `${Math.floor(hrs / 24)}d ago`;
+  if (hrs < 48) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 export interface ProviderSetupState {
@@ -95,7 +100,6 @@ export interface ProviderSetupState {
 }
 
 export function useProviderSetup(opts?: { onSaved?: () => void }): ProviderSetupState {
-  const { t } = useTranslation();
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   // null = the gallery; a provider name = that provider's key form.
   const [sel, setSel] = useState<string | null>(null);
@@ -155,9 +159,9 @@ export function useProviderSetup(opts?: { onSaved?: () => void }): ProviderSetup
   const runTestAndSave = async (): Promise<boolean> => {
     if (!sel) return false;
     setVerify({ state: "testing" });
-    const res = await verifyProvider(sel, fields).catch(() => ({ ok: false, error: t("provider.err_unreachable") }));
+    const res = await verifyProvider(sel, fields).catch(() => ({ ok: false, error: "unreachable" }));
     if (!res.ok) {
-      setVerify({ state: "error", msg: res.error || t("provider.err_couldnt_verify") });
+      setVerify({ state: "error", msg: res.error || "couldn't verify" });
       return false;
     }
     if (dirty || !info?.configured) await setProvider(sel, fields).catch(() => {});
@@ -216,26 +220,40 @@ export function useProviderSetup(opts?: { onSaved?: () => void }): ProviderSetup
   };
 
   const statusFor = (p: ProviderInfo, o?: { lastUsed?: boolean }) => {
+    if (p.auth === "oauth") {
+      // The card keeps just the state — the account email truncated badly at card
+      // width (owner-hit 2026-08-21); the detail pane shows who is signed in.
+      if (p.signed_in)
+        return <span className="block text-[12px] text-ok font-medium truncate">✓ Signed in</span>;
+      return <span className="block text-[12px] text-faint truncate">Sign in with your plan</span>;
+    }
     if (p.configured && p.needs_key) {
-      const used = o?.lastUsed ? relTime(p.last_used_at, t) : null;
+      const used = o?.lastUsed ? relTime(p.last_used_at) : null;
       return (
-        <span className="block text-[11.5px] text-ok font-medium truncate">
-          {t("provider.connected_ok")}{used ? <span className="text-muted font-normal"> {t("provider.used_suffix", { time: used })}</span> : ""}
+        <span className="block text-[12px] text-ok font-medium truncate">
+          ✓ Connected{used ? <span className="text-muted font-normal"> · used {used}</span> : ""}
         </span>
       );
     }
     if (!p.needs_key)
       return (
-        <span className="block text-[11.5px] text-faint truncate">
-          {keylessOk.has(p.name) ? <span className="text-ok font-medium">{t("provider.running")}</span> : t("provider.no_key_needed")}
+        <span className="block text-[12px] text-faint truncate">
+          {keylessOk.has(p.name) ? <span className="text-ok font-medium">✓ Running</span> : "No key needed"}
         </span>
       );
-    return <span className="block text-[11.5px] text-faint truncate">{t("provider.not_set_up")}</span>;
+    return <span className="block text-[12px] text-faint truncate">Not set up</span>;
   };
 
   return {
     providers,
-    ordered: [...providers].sort((a, b) => providerRank(a.name) - providerRank(b.name)),
+    // Alphabetical by display title (owner ruling 2026-08-21: a curated order reads
+    // as vendor bias). The old providerRank curation stays only as the tiebreaker
+    // for identical titles.
+    ordered: [...providers].sort(
+      (a, b) =>
+        a.title.localeCompare(b.title, undefined, { sensitivity: "base" }) ||
+        providerRank(a.name) - providerRank(b.name),
+    ),
     refreshProviders,
     sel,
     info,
@@ -254,7 +272,11 @@ export function useProviderSetup(opts?: { onSaved?: () => void }): ProviderSetup
     // The in-field saved state (§39): green border + pill INSIDE the key box — shown
     // for stored credentials and fresh test-passes alike; typing clears it.
     savedState: (credentialed && !dirty) || verify.state === "ok",
-    secretFilled: (info?.fields || []).every((f) => !f.secret || (fields[f.key] || "").trim()),
+    // Only REQUIRED secrets gate the Test button — cloud providers (Bedrock, Vertex)
+    // have optional key fields whose credentials may live in ~/.aws or ADC instead.
+    secretFilled: (info?.fields || []).every(
+      (f) => !f.secret || !f.required || (fields[f.key] || "").trim(),
+    ),
     openProvider,
     backToGallery,
     runTestAndSave,
@@ -269,6 +291,101 @@ export function useProviderSetup(opts?: { onSaved?: () => void }): ProviderSetup
 }
 
 /** The gallery: one card per provider, each wearing its own state. */
+/** OAuth provider pane (auth === "oauth"): browser sign-in instead of a key form.
+ * Signin runs server-side in the background; this polls the status route until the
+ * flow flips to signed-in or reports an error. Tokens never reach the GUI. */
+function OAuthSignIn({ info, tp, onChanged }: { info: ProviderInfo; tp: string; onChanged: () => Promise<void> }) {
+  const [busy, setBusy] = useState(!!info.authorizing);
+  const [error, setError] = useState<string | null>(info.last_error || null);
+  const [reopenUrl, setReopenUrl] = useState<string | null>(null);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true; // StrictMode double-mount: the cleanup below must not stick
+    return () => { alive.current = false; };
+  }, []);
+
+  const poll = async () => {
+    for (let i = 0; i < 150 && alive.current; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const s = await codexAuthStatus().catch(() => null);
+      if (!s) continue;
+      if (s.authorize_url) setReopenUrl(s.authorize_url);
+      if (s.signed_in || (!s.authorizing && s.last_error)) {
+        if (alive.current) {
+          setBusy(false);
+          setError(s.last_error || null);
+        }
+        await onChanged();
+        return;
+      }
+    }
+    if (alive.current) setBusy(false);
+  };
+
+  const start = async () => {
+    setBusy(true);
+    setError(null);
+    await codexSignin().catch(() => setError("Couldn't start the sign-in."));
+    void poll();
+  };
+
+  if (info.signed_in)
+    return (
+      <div className="mt-4">
+        <div className="flex items-center gap-2.5 rounded-xl border border-okLine bg-okSoft px-3 py-2.5">
+          <span className="text-[13px] text-ink min-w-0 flex-1 truncate" data-testid={`${tp}-oauth-account`}>
+            ✓ Signed in{info.account ? ` as ${info.account}` : ""}
+          </span>
+          <button
+            className="shrink-0 rounded-lg border border-line bg-panel px-3 py-1.5 text-[13px] text-ink hover:border-lineStrong"
+            data-testid={`${tp}-oauth-signout`}
+            onClick={async () => {
+              await codexSignout().catch(() => {});
+              await onChanged();
+            }}
+          >
+            Sign out
+          </button>
+        </div>
+        <p className="text-[12px] text-faint mt-2">
+          Usage draws on the plan's rolling window, not per-token billing. Sign-in stays on this computer.
+        </p>
+      </div>
+    );
+
+  return (
+    <div className="mt-4">
+      <button
+        className="rounded-lg border border-accent bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-105 disabled:opacity-40"
+        onClick={() => void start()}
+        disabled={busy}
+        data-testid={`${tp}-oauth-signin`}
+      >
+        {busy ? "Waiting for the browser…" : "Sign in with ChatGPT"}
+      </button>
+      {busy && (
+        <p className="text-[12px] text-faint mt-2">
+          Finish signing in in the browser window.
+          {reopenUrl && (
+            <>
+              {" "}
+              <button
+                className="text-muted underline decoration-line underline-offset-2 hover:text-ink"
+                onClick={() => openExternal(reopenUrl)}
+              >
+                Reopen the sign-in page
+              </button>
+            </>
+          )}
+        </p>
+      )}
+      <div className="mt-2 min-h-[19px] text-[13px]">
+        {error && <span className="text-warnInk">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
 export function ProviderCards({
   ps,
   tp,
@@ -315,110 +432,195 @@ export function ProviderForm({
   tp: string;
   footer?: ReactNode;
 }) {
-  const { t } = useTranslation();
   const { info, sel } = ps;
   const label = "block text-[12px] text-muted mt-3 mb-1";
   const input =
-    "w-full px-3 py-2 rounded-lg border bg-panel text-[13.5px] outline-none focus:border-accent";
+    "w-full px-3 py-2 rounded-lg border bg-panel text-[13px] outline-none focus:border-accent";
+  const fieldsAll = info?.fields || [];
+  const keyed = fieldsAll.some((x) => x.secret);
+  // Cloud providers declare a segmented auth-method choice; the selected method's
+  // credential fields render inside a panel with its own Test & save footer.
+  const choice = fieldsAll.find((f) => f.choices && f.choices.length);
+  const method = choice ? ps.fields[choice.key] || choice.default || "" : "";
+  const selected = choice?.choices?.find((c) => c.value === method);
+  const methodFields = choice
+    ? fieldsAll.filter(
+        (f) =>
+          f.show_when &&
+          Object.entries(f.show_when).every(([k, v]) => (ps.fields[k] || "") === v),
+      )
+    : [];
+  // Without a choice control, Test lives next to the required secret (the API key), or
+  // the first field for keyless providers (Ollama's Detect).
+  const requiredSecret = fieldsAll.find((x) => x.secret && x.required);
+  const testKey = requiredSecret ? requiredSecret.key : fieldsAll[0]?.key;
   if (!sel) return null;
+
+  const fieldRow = (f: ProviderFieldT, testable: boolean) => (
+    <div key={f.key}>
+      <label className={label}>{f.label}</label>
+      <div className="flex gap-2">
+        <div className="relative flex-1 min-w-0">
+          <input
+            className={input + (ps.savedState && testable ? " border-ok pr-32" : " border-line")}
+            type={f.secret ? "password" : "text"}
+            placeholder={f.secret && ps.credentialed && !ps.dirty ? "••••••••" : f.placeholder}
+            value={ps.fields[f.key] || ""}
+            data-testid={`${tp}-field-${f.key}`}
+            onChange={(e) => ps.setFieldValue(f.key, e.target.value)}
+            onBlur={f.secret ? undefined : () => void ps.saveField(f.key)}
+          />
+          {ps.fieldSaved === f.key && (
+            <span
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-medium text-ok bg-okSoft rounded-full px-2 py-0.5 pointer-events-none"
+              data-testid={`${tp}-field-saved-${f.key}`}
+            >
+              ✓ Saved
+            </span>
+          )}
+          {/* §39: state lives IN the field — no status lines below. */}
+          {ps.savedState && testable && (
+            <span
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-medium text-ok bg-okSoft rounded-full px-2 py-0.5 pointer-events-none"
+              data-testid={`${tp}-saved-pill`}
+            >
+              {info?.needs_key ? <>✓ Tested &amp; saved</> : <>✓ Detected</>}
+            </span>
+          )}
+        </div>
+        {testable && (
+          <button
+            className="px-4 rounded-lg border border-line text-[13px] font-medium text-ink hover:border-lineStrong shrink-0 disabled:opacity-40"
+            onClick={() => ps.runTestAndSave()}
+            disabled={ps.verify.state === "testing" || (!ps.secretFilled && !ps.credentialed)}
+            data-testid={`${tp}-test`}
+          >
+            {ps.verify.state === "testing" ? "…" : info?.needs_key ? "Test" : "Detect"}
+          </button>
+        )}
+      </div>
+      {f.help && <p className="text-[12px] text-faint mt-1">{f.help}</p>}
+    </div>
+  );
+
   return (
     <div>
-      <button className="text-[12.5px] text-muted hover:text-ink" onClick={ps.backToGallery} data-testid={`${tp}-back`}>
-        {t("provider.all_providers")}
+      <button className="text-[13px] text-muted hover:text-ink" onClick={ps.backToGallery} data-testid={`${tp}-back`}>
+        ‹ All providers
       </button>
       <div className="flex items-center gap-3 mt-3 mb-1">
         <ProviderMark name={info?.name || ""} title={info?.title || ""} size={36} />
         <span className="min-w-0">
-          <span className="block text-[15px] font-semibold leading-tight">{info?.title}</span>
+          <span className="block text-[14px] font-semibold leading-tight">{info?.title}</span>
           {info ? ps.statusFor(info) : null}
         </span>
       </div>
-      {info?.blurb && <p className="text-[11.5px] text-faint mt-1">{info.blurb}</p>}
+      {info?.blurb && <p className="text-[12px] text-faint mt-1">{info.blurb}</p>}
 
-      {(info?.fields || []).map((f) => {
-        const keyed = (info?.fields || []).some((x) => x.secret);
-        // A keyed provider's base_url is an expert option — it renders BELOW the key-help
-        // line as its own advanced section (owner nit 2026-07-19), not inside the loop.
-        if (f.key === "base_url" && keyed) return null;
-        const testable =
-          (f.secret && f.key === (info?.fields || []).find((x) => x.secret)?.key) ||
-          (!keyed && f.key === (info?.fields || [])[0]?.key);
-        return (
-          <div key={f.key}>
-            <label className={label}>{f.label}</label>
-            <div className="flex gap-2">
-              <div className="relative flex-1 min-w-0">
-                <input
-                  className={input + (ps.savedState && f.secret ? " border-ok pr-32" : " border-line")}
-                  type={f.secret ? "password" : "text"}
-                  placeholder={f.secret && ps.credentialed && !ps.dirty ? "••••••••" : f.placeholder}
-                  value={ps.fields[f.key] || ""}
-                  data-testid={`${tp}-field-${f.key}`}
-                  onChange={(e) => ps.setFieldValue(f.key, e.target.value)}
-                  onBlur={f.secret ? undefined : () => void ps.saveField(f.key)}
-                />
-                {ps.fieldSaved === f.key && (
-                  <span
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-medium text-ok bg-okSoft rounded-full px-2 py-0.5 pointer-events-none"
-                    data-testid={`${tp}-field-saved-${f.key}`}
-                  >
-                    {t("provider.saved_pill")}
-                  </span>
-                )}
-                {/* §39: state lives IN the field — no status lines below. */}
-                {ps.savedState && f.secret && (
-                  <span
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-medium text-ok bg-okSoft rounded-full px-2 py-0.5 pointer-events-none"
-                    data-testid={`${tp}-saved-pill`}
-                  >
-                    {t("provider.tested_saved_pill")}
-                  </span>
-                )}
-                {ps.savedState && !f.secret && testable && (
-                  <span
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-medium text-ok bg-okSoft rounded-full px-2 py-0.5 pointer-events-none"
-                    data-testid={`${tp}-saved-pill`}
-                  >
-                    {t("provider.detected_pill")}
-                  </span>
-                )}
-              </div>
-              {testable && (
+      {info?.auth === "oauth" && <OAuthSignIn info={info} tp={tp} onChanged={ps.refreshProviders} />}
+
+      {fieldsAll
+        .filter(
+          (f) =>
+            !f.show_when &&
+            !(f.choices && f.choices.length) &&
+            !(f.key === "base_url" && keyed),
+        )
+        .map((f) => fieldRow(f, !choice && f.key === testKey))}
+
+      {/* Auth-method segmented control + the selected method's panel (owner call
+          2026-07-26): one joined track, then a soft inset card holding only that
+          method's description, fields, and its own Test & save footer. */}
+      {choice && (
+        <div>
+          <label className={label}>{choice.label}</label>
+          <div
+            className="inline-flex gap-0.5 rounded-[10px] border border-line bg-line/40 p-[3px]"
+            role="radiogroup"
+            aria-label={choice.label}
+          >
+            {(choice.choices || []).map((c) => {
+              const active = method === c.value;
+              return (
                 <button
-                  className="px-4 rounded-lg border border-line text-[13px] font-medium text-ink hover:border-lineStrong shrink-0 disabled:opacity-40"
-                  onClick={() => ps.runTestAndSave()}
-                  disabled={ps.verify.state === "testing" || (f.secret && !ps.secretFilled && !ps.credentialed)}
-                  data-testid={`${tp}-test`}
+                  key={c.value}
+                  role="radio"
+                  aria-checked={active}
+                  className={
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] whitespace-nowrap transition-colors " +
+                    (active
+                      ? "bg-panel text-ink font-medium shadow-sm ring-1 ring-line"
+                      : "text-muted hover:text-ink")
+                  }
+                  data-testid={`${tp}-choice-${choice.key}-${c.value}`}
+                  onClick={() => ps.setFieldValue(choice.key, c.value)}
                 >
-                  {ps.verify.state === "testing" ? "…" : info?.needs_key ? t("provider.test_btn") : t("provider.detect_btn")}
+                  {c.label}
+                  {c.tag && (
+                    <span className="text-[9.5px] font-semibold uppercase tracking-wide text-accent bg-accentSoft rounded-full px-1.5 py-px">
+                      {c.tag}
+                    </span>
+                  )}
                 </button>
-              )}
-            </div>
-            {f.help && !f.secret && <p className="text-[11.5px] text-faint mt-1">{f.help}</p>}
+              );
+            })}
           </div>
-        );
-      })}
+
+          <div className="mt-2.5 rounded-xl border border-line bg-paper/60 px-4 pb-3.5 pt-3">
+            {selected?.desc && <p className="text-[12px] text-muted">{selected.desc}</p>}
+            {selected?.command && (
+              <button
+                className="mt-2.5 inline-flex items-center gap-2 rounded-lg border border-line bg-panel px-2.5 py-1.5 text-[12px] font-mono text-ink hover:border-lineStrong"
+                onClick={() => void navigator.clipboard?.writeText(selected.command || "")}
+                title="Copy command"
+                data-testid={`${tp}-cmd-copy`}
+              >
+                {selected.command}
+                <span className="font-sans text-[11px] text-faint">⧉</span>
+              </button>
+            )}
+            {methodFields.map((f) => fieldRow(f, false))}
+            <div className="mt-3.5 flex items-center justify-between gap-3 border-t border-line pt-3">
+              {ps.savedState ? (
+                <span className="text-[12px] font-medium text-ok" data-testid={`${tp}-saved-pill`}>
+                  ✓ Tested &amp; saved
+                </span>
+              ) : (
+                <span className="text-[12px] text-faint">Runs one read-only check, then saves.</span>
+              )}
+              <button
+                className="shrink-0 rounded-lg border border-accent bg-accent px-4 py-1.5 text-[13px] font-medium text-white hover:brightness-105 disabled:opacity-40"
+                onClick={() => ps.runTestAndSave()}
+                disabled={ps.verify.state === "testing"}
+                data-testid={`${tp}-test`}
+              >
+                {ps.verify.state === "testing" ? "…" : <>Test &amp; save</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {info?.needs_key && KEY_HELP[sel] && (
-        <p className="text-[11.5px] text-faint mt-2">
-          {t("provider.no_key_yet")}{" "}
+        <p className="text-[12px] text-faint mt-2">
+          No key yet?{" "}
           <button
             className="text-muted underline decoration-line underline-offset-2 hover:text-ink"
             onClick={() => openExternal(KEY_HELP[sel].url)}
           >
-            {t("provider.create_key_at", { label: KEY_HELP[sel].label })} ↗
+            Create one at {KEY_HELP[sel].label} ↗
           </button>{" "}
-          {t("provider.takes_a_minute")}
+          — takes about a minute.
         </p>
       )}
-      {info && !info.needs_key && (
-        <p className="text-[11.5px] text-faint mt-2">
-          {t("provider.no_key_needed_desc")}{" "}
+      {info && !info.needs_key && info.auth !== "oauth" && (
+        <p className="text-[12px] text-faint mt-2">
+          No API key needed — Ollama runs models on this computer.{" "}
           <button
             className="text-muted underline decoration-line underline-offset-2 hover:text-ink"
             onClick={() => openExternal("https://ollama.com/download")}
           >
-            {t("provider.install_ollama")} ↗
+            Install Ollama ↗
           </button>
         </p>
       )}
@@ -433,11 +635,11 @@ export function ProviderForm({
         if (!ps.showEndpoint)
           return (
             <button
-              className="block self-start text-[12.5px] text-muted hover:text-ink mt-4"
+              className="block self-start text-[13px] text-muted hover:text-ink mt-4"
               onClick={() => ps.setShowEndpoint(true)}
               data-testid={`${tp}-endpoint-link`}
             >
-              {t("provider.custom_endpoint")} ⌄
+              Custom endpoint ⌄
             </button>
           );
         return (
@@ -458,20 +660,20 @@ export function ProviderForm({
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-medium text-ok bg-okSoft rounded-full px-2 py-0.5 pointer-events-none"
                   data-testid={`${tp}-field-saved-${ep.key}`}
                 >
-                  {t("provider.saved_pill")}
+                  ✓ Saved
                 </span>
               )}
             </div>
-            {ep.help && <p className="text-[11.5px] text-faint mt-1">{ep.help}</p>}
+            {ep.help && <p className="text-[12px] text-faint mt-1">{ep.help}</p>}
           </div>
         );
       })()}
 
       {/* Error line: fixed height so failures never reflow the form. */}
-      <div className="mt-3 min-h-[19px] text-[12.5px]">
+      <div className="mt-3 min-h-[19px] text-[13px]">
         {ps.verify.state === "error" && <span className="text-warnInk">{ps.verify.msg}</span>}
       </div>
-      {footer}
+      {info?.auth === "oauth" ? null : footer}
     </div>
   );
 }

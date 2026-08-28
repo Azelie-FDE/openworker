@@ -95,6 +95,9 @@ class ConversationStore:
             "ALTER TABLE sessions ADD COLUMN auto_title TEXT",
             "ALTER TABLE sessions ADD COLUMN renamed INTEGER DEFAULT 0",
             "ALTER TABLE sessions ADD COLUMN grants TEXT",
+            "ALTER TABLE sessions ADD COLUMN compaction TEXT",
+            "ALTER TABLE sessions ADD COLUMN team TEXT",
+            "ALTER TABLE sessions ADD COLUMN bindings TEXT",
         ):
             try:
                 self._conn.execute(ddl)
@@ -164,7 +167,10 @@ class ConversationStore:
             self._conn.commit()
 
     # -- API --------------------------------------------------------------------
-    def save(self, record: SessionRecord) -> None:
+    def save(self, record: SessionRecord, touch: bool = True) -> None:
+        # touch=False: a BOOKKEEPING write (persisted notice migration, mode marker with
+        # no accompanying activity) — the row updates but keeps its place in Recents.
+        # `updated_at` means "last worked on", never "last saved" (owner ruling 2026-08-24).
         sid = record.session_id
         with self._lock:
             # lazily migrate a legacy inline blob into the .jsonl
@@ -191,13 +197,14 @@ class ConversationStore:
             title = record.title or title_from(record.messages)
             self._conn.execute(
                 """
-                INSERT INTO sessions (session_id, workspace, model, mode, title, agent, n_msgs, messages, extra_roots, grants, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO sessions (session_id, workspace, model, mode, title, agent, n_msgs, messages, extra_roots, grants, compaction, team, bindings, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(session_id) DO UPDATE SET
                     workspace = excluded.workspace, model = excluded.model, mode = excluded.mode,
                     title = COALESCE(sessions.title, excluded.title), agent = excluded.agent,
                     n_msgs = excluded.n_msgs, messages = NULL, extra_roots = excluded.extra_roots,
-                    grants = excluded.grants, updated_at = CURRENT_TIMESTAMP
+                    grants = excluded.grants, compaction = excluded.compaction,
+                    updated_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE sessions.updated_at END
                 """,
                 (
                     sid,
@@ -209,10 +216,15 @@ class ConversationStore:
                     len(record.messages),
                     json.dumps(record.extra_roots or []),
                     json.dumps(record.grants or {}),
+                    json.dumps(record.compaction or {}),
+                    json.dumps(record.team or {}),
+                    json.dumps(record.bindings or {}),
+                    touch,
                 ),
             )
             self._conn.commit()
-        self.touch_workspace(record.workspace)
+        if touch:
+            self.touch_workspace(record.workspace)
 
     def load(self, session_id: str) -> Optional[SessionRecord]:
         with self._lock:
@@ -241,11 +253,50 @@ class ConversationStore:
                 row["extra_roots"] if "extra_roots" in row.keys() else None
             ),
             grants=_load_grants(row["grants"] if "grants" in row.keys() else None),
+            # Auto-compaction state (OPE-27) — same defensive parse as grants.
+            compaction=_load_grants(
+                row["compaction"] if "compaction" in row.keys() else None
+            ),
             pinned=bool(row["pinned"]),
             archived=bool(row["archived"]),
             origin=row["origin"],
             origin_label=row["origin_label"],
+            team=_load_grants(row["team"] if "team" in row.keys() else None),
+            bindings=_load_grants(
+                row["bindings"] if "bindings" in row.keys() else None
+            ),
         )
+
+    def set_team(self, session_id: str, team: dict) -> None:
+        """Persist the session's team tie independent of the turn-save path. The
+        upsert deliberately never touches `team` — a per-turn save rebuilds the
+        record without it, and letting the rebuild win detached workers from their
+        lead's sidebar entry the moment they ran a turn (owner-hit 2026-08-16)."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE sessions SET team = ? WHERE session_id = ?",
+                (json.dumps(team or {}), session_id),
+            )
+            self._conn.commit()
+
+    def names(self):
+        """The project-names alias table, riding this store's connection."""
+        from .projects import ProjectNames
+
+        if not hasattr(self, "_names"):
+            self._names = ProjectNames(self._conn, self._lock)
+        return self._names
+
+    def set_bindings(self, session_id: str, bindings: dict) -> None:
+        """Persist the session's project bindings independent of the turn-save path
+        (same shape as `team`: the per-turn upsert never touches this column, so a
+        rebuild can't silently unbind a session)."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE sessions SET bindings = ? WHERE session_id = ?",
+                (json.dumps(bindings or {}), session_id),
+            )
+            self._conn.commit()
 
     def set_extra_roots(self, session_id: str, extra_roots: list[dict]) -> None:
         """Persist just the session's added folders, independent of its message log — used when
@@ -283,6 +334,7 @@ class ConversationStore:
                 archived=bool(r["archived"]),
                 origin=r["origin"],
                 origin_label=r["origin_label"],
+                team=_load_grants(r["team"] if "team" in r.keys() else None),
             )
             for r in rows
         ]

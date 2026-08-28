@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useTranslation } from "react-i18next";
 import {
   connectManaged,
   disconnectGcalAccount,
@@ -16,7 +15,6 @@ import { FOOT, GRP, GRP_H, PILL_ACCENT, ROW, TAG_ACCENT, TAG_WARN, XBTN } from "
 // Adding an account launches managed OAuth DIRECTLY (one connect mode, no modal).
 
 export function CalendarDetail({ c, cloud, slack: _slack, onChanged }: DetailProps) {
-  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const accounts = (c.accounts ?? []) as GmailAccount[]; // email-keyed (pre-generic-layer shape)
 
@@ -29,21 +27,21 @@ export function CalendarDetail({ c, cloud, slack: _slack, onChanged }: DetailPro
   return (
     <div data-testid="gcal-detail">
       <div className="flex items-center gap-3.5 mb-5">
-        <ConnectorBadge connector={c} size={44} title={t("calendar.google_calendar")} />
+        <ConnectorBadge connector={c} size={44} title="Google Calendar" />
         <div className="min-w-0 flex-1">
           <h2 className="text-[20px] font-semibold tracking-tight leading-tight">
             Google Calendar
           </h2>
-          <div className="text-[12.5px] text-muted flex items-center gap-1.5">
+          <div className="text-[13px] text-muted flex items-center gap-1.5">
             {c.connected ? (
               <>
                 <span className="w-2 h-2 rounded-full bg-ok" />
                 <span data-testid="gcal-status">
-                  {t("connector.account_count", { count: accounts.length })}
+                  {accounts.length} account{accounts.length === 1 ? "" : "s"}
                 </span>
               </>
             ) : (
-              <span>{t("connector.not_connected")}</span>
+              <span>Not connected</span>
             )}
           </div>
         </div>
@@ -54,28 +52,28 @@ export function CalendarDetail({ c, cloud, slack: _slack, onChanged }: DetailPro
           disabled={busy || !cloud?.signed_in || c.managed_paused}
           title={
             c.managed_paused
-              ? t("calendar.coming_soon_title")
+              ? "One-click Google sign-in is coming soon"
               : cloud?.signed_in
                 ? ""
-                : t("cloud.sign_in_first")
+                : "Sign in to OpenWorker Cloud first"
           }
         >
-          {c.managed_paused ? t("calendar.add_account_coming_soon") : busy ? t("cloud.check_browser") : t("calendar.add_account")}
+          {c.managed_paused ? "＋ Add account · Coming soon" : busy ? "Check your browser…" : "＋ Add account"}
         </button>
       </div>
 
       {!c.connected && (
         <div className={GRP}>
-          <div className={ROW + " text-[12.5px] text-muted"}>
-            {t("calendar.setup_blurb")}
-            {cloud?.signed_in ? "" : " " + t("calendar.requires_cloud")}
+          <div className={ROW + " text-[13px] text-muted"}>
+            Sign in with Google — each account stays separate, agents say which one they use.
+            {cloud?.signed_in ? "" : " Requires cloud sign-in."}
           </div>
         </div>
       )}
 
       {accounts.length > 0 && (
         <>
-          <div className={GRP_H + " !mt-0"}>{t("calendar.accounts")}</div>
+          <div className={GRP_H + " !mt-0"}>Accounts</div>
           <div className={GRP} data-testid="gcal-accounts">
             {accounts.map((a) => (
               <AccountRow key={a.email} a={a} onChanged={onChanged} />
@@ -86,21 +84,21 @@ export function CalendarDetail({ c, cloud, slack: _slack, onChanged }: DetailPro
 
       <ToolsDisclosure c={c} onChanged={onChanged} />
       <div className={FOOT + " mt-2"}>
-        {t("calendar.events_approval_foot")}
+        Creating, changing, or deleting events always asks for your approval first, and the
+        approval names the account.
       </div>
     </div>
   );
 }
 
 function AccountRow({ a, onChanged }: { a: GmailAccount; onChanged: () => void }) {
-  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   return (
     <div className={ROW} data-testid={`gcal-account-${a.email}`}>
       <span className="min-w-0 flex-1 flex items-center gap-2">
         <span className="text-[13px] font-medium truncate">{a.email}</span>
-        {a.default && <span className={TAG_ACCENT}>{t("connector.default")}</span>}
-        {a.needs_reauth && <span className={TAG_WARN}>{t("calendar.sign_in_again")}</span>}
+        {a.default && <span className={TAG_ACCENT}>Default</span>}
+        {a.needs_reauth && <span className={TAG_WARN}>⚠ Sign in again</span>}
       </span>
       {!a.default && (
         <button
@@ -111,12 +109,12 @@ function AccountRow({ a, onChanged }: { a: GmailAccount; onChanged: () => void }
             onChanged();
           }}
         >
-          {t("connector.make_default")}
+          Make default
         </button>
       )}
       <button
         className={XBTN}
-        title={t("calendar.disconnect_account_title")}
+        title="Disconnect this account"
         data-testid={`gcal-disconnect-${a.email}`}
         disabled={busy}
         onClick={async () => {

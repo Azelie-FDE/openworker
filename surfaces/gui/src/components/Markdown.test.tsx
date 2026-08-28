@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { Markdown, OPEN_ARTIFACT_EVENT, normalizeArtifactPath } from "./Markdown";
+import { Markdown, OPEN_ARTIFACT_EVENT, OPEN_BOARD_EVENT } from "./Markdown";
 
 afterEach(cleanup);
 
@@ -36,29 +36,19 @@ describe("Markdown artifact links", () => {
     expect(screen.getByTestId("artifact-chip").textContent).toContain("report.pdf");
   });
 
-  // Chinese (and other non-ASCII) filenames: micromark percent-encodes the href; without
-  // decode the backend looks up the literal %E6… path and returns "not found".
-  it("decodes percent-encoded non-ASCII artifact paths before opening", () => {
-    const seen: string[] = [];
-    const listener = (e: Event) => seen.push((e as CustomEvent).detail.path);
-    window.addEventListener(OPEN_ARTIFACT_EVENT, listener);
+  // Seventeenth pass: the lead's one-time board mention — [Board · 5 items](board:)
+  // renders as an inline pill that opens the drawer on its Board section.
+  it("renders a board: link as a pill and dispatches the open-board event", () => {
+    let fired = 0;
+    const listener = () => fired++;
+    window.addEventListener(OPEN_BOARD_EVENT, listener);
 
-    render(<Markdown text="📄 [Monthly report](artifact:reports/2026-04_月度报告.md)" />);
-    const chip = screen.getByTestId("artifact-chip");
-    expect(chip.getAttribute("title")).toBe("reports/2026-04_月度报告.md");
+    render(<Markdown text="Plan approved — [Board · 5 items](board:) if you want to watch." />);
+    const chip = screen.getByTestId("board-chip");
+    expect(chip.textContent).toContain("Board · 5 items");
     fireEvent.click(chip);
-    expect(seen).toEqual(["reports/2026-04_月度报告.md"]);
+    expect(fired).toBe(1);
 
-    window.removeEventListener(OPEN_ARTIFACT_EVENT, listener);
-  });
-});
-
-describe("normalizeArtifactPath", () => {
-  it("decodes percent-encoded segments and strips a leading slash", () => {
-    expect(normalizeArtifactPath("reports/2026-04_%E6%9C%88%E5%BA%A6%E6%8A%A5%E5%91%8A.md")).toBe(
-      "reports/2026-04_月度报告.md",
-    );
-    expect(normalizeArtifactPath("/reports/foo.md")).toBe("reports/foo.md");
-    expect(normalizeArtifactPath("reports/ascii.md")).toBe("reports/ascii.md");
+    window.removeEventListener(OPEN_BOARD_EVENT, listener);
   });
 });

@@ -1,5 +1,4 @@
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
-import { useTranslation } from "react-i18next";
 import remarkGfm from "remark-gfm";
 import { Icon } from "./Icon";
 
@@ -10,36 +9,34 @@ import { Icon } from "./Icon";
 // the session's artifact list, App un-hides the rail.
 export const OPEN_ARTIFACT_EVENT = "ocw-open-artifact";
 
-/** Normalize an artifact: href path for the session workspace.
- *
- * react-markdown / micromark percent-encodes non-ASCII URL characters, so
- * `artifact:reports/报告.md` becomes `artifact:reports/%E6%8A%A5%E5%91%8A.md`.
- * The backend looks up the literal filesystem path — encoded names 404 as "not found".
- * Also strip a single leading `/` so `artifact:/reports/x.md` stays workspace-relative
- * (Path(workspace) / "/abs" would otherwise escape the workspace root).
- */
-export function normalizeArtifactPath(raw: string): string {
-  let path = raw;
-  try {
-    path = decodeURIComponent(raw);
-  } catch {
-    // malformed % sequences — keep raw
-  }
-  if (path.startsWith("/")) path = path.replace(/^\/+/, "");
-  return path;
+// Seventeenth pass: the lead mentions the board ONCE — [Board · 5 items](board:) — and the
+// chip opens the drawer on its Board section. Same event plumbing as artifact chips: App
+// un-hides the rail and bumps the key that expands the section.
+export const OPEN_BOARD_EVENT = "ocw-open-board";
+
+function BoardChip({ label }: { label: string }) {
+  return (
+    <button
+      className="boardlink-chip"
+      data-testid="board-chip"
+      title="Open the board"
+      onClick={() => window.dispatchEvent(new CustomEvent(OPEN_BOARD_EVENT))}
+    >
+      <Icon name="table" size={12} />
+      <span>{label || "Board"}</span>
+    </button>
+  );
 }
 
 function ArtifactChip({ path, title }: { path: string; title: string }) {
-  const { t } = useTranslation();
-  const resolved = normalizeArtifactPath(path);
-  const file = resolved.split("/").pop() || resolved;
+  const file = path.split("/").pop() || path;
   return (
     <button
       className="art-chip"
       data-testid="artifact-chip"
-      title={resolved}
+      title={path}
       onClick={() =>
-        window.dispatchEvent(new CustomEvent(OPEN_ARTIFACT_EVENT, { detail: { path: resolved } }))
+        window.dispatchEvent(new CustomEvent(OPEN_ARTIFACT_EVENT, { detail: { path } }))
       }
     >
       <span className="art-chip-ico">
@@ -49,7 +46,7 @@ function ArtifactChip({ path, title }: { path: string; title: string }) {
         <b>{title || file}</b>
         {title && title !== file && <span>{file}</span>}
       </span>
-      <span className="art-chip-open">{t("rail.open")} ›</span>
+      <span className="art-chip-open">Open ›</span>
     </button>
   );
 }
@@ -62,14 +59,20 @@ export function Markdown({ text }: { text: string }) {
     <div className="md">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        // artifact: is ours — keep it through the sanitizer (everything else gets the default
-        // http/https/mailto policy).
-        urlTransform={(url) => (url.startsWith("artifact:") ? url : defaultUrlTransform(url))}
+        // artifact:/board: are ours — keep them through the sanitizer (everything else gets
+        // the default http/https/mailto policy).
+        urlTransform={(url) =>
+          url.startsWith("artifact:") || url.startsWith("board:") ? url : defaultUrlTransform(url)
+        }
         components={{
           a: ({ node: _n, href, children, ...props }) => {
             if (href?.startsWith("artifact:")) {
               const title = Array.isArray(children) ? children.join("") : String(children ?? "");
               return <ArtifactChip path={href.slice("artifact:".length)} title={title} />;
+            }
+            if (href?.startsWith("board:")) {
+              const label = Array.isArray(children) ? children.join("") : String(children ?? "");
+              return <BoardChip label={label} />;
             }
             return (
               <a href={href} {...props} target="_blank" rel="noreferrer">

@@ -24,7 +24,23 @@ def capabilities_for(model: str) -> ModelCapabilities:
 
     # Ollama (local) models vary widely and many fake/mishandle parallel tool calls — assume
     # tools work (we only point at tool-capable models) but stay conservative otherwise.
+    # Vision is detected from common model naming conventions (-vl, vision, llava, etc.).
     if provider == "ollama":
+        _vision_patterns = ("-vl", "vision", "llava", "bakllava", "cogvlm", "minicpm-v")
+        has_vision = any(p in name for p in _vision_patterns)
+        return ModelCapabilities(
+            tools=True, vision=has_vision, parallel_tool_calls=False, streaming=True
+        )
+
+    # Cloud-account providers (custom-added ids; curated ones answered from the matrix).
+    # The family segment decides: Claude keeps its native capabilities; everything else
+    # stays conservative until probed (Converse tool calling works across families, but
+    # parallel calls and vision vary per model).
+    if provider in ("bedrock", "vertex"):
+        if name.startswith(("claude/", "gemini/")):
+            return ModelCapabilities(
+                tools=True, vision=True, pdf=True, parallel_tool_calls=True, streaming=True
+            )
         return ModelCapabilities(
             tools=True, vision=False, parallel_tool_calls=False, streaming=True
         )

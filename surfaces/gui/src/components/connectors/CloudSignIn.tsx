@@ -30,7 +30,7 @@ export function CloudSignInInline({ blurb }: { blurb?: string }) {
       >
         {waiting ? t("cloud.check_browser") : t("cloud.sign_in")}
       </button>
-      <div className="text-[11.5px] text-faint">
+      <div className="text-[12px] text-faint">
         {blurb || "Sign-in unlocks one-click connects — or switch to Manual, which works without it."}
       </div>
     </div>
