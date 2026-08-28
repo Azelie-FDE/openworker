@@ -11,8 +11,8 @@ const IMPORTANT_KEYS = [
   "settings.voice_dl_progress",
   "settings.voice_installed",
   "settings.voice_not_installed",
-  "personas.installed",
-  "personas.disable_warning",
+  "personas.installed_other",
+  "personas.disable_warning_other",
   "personas.tools_label",
   "personas.risk_label",
   "transcript.step.auto_allowed_tip",
@@ -29,8 +29,8 @@ const values: Record<string, Record<string, string | number>> = {
   "settings.voice_dl_progress": { done: "1 MiB", total: "2 MiB" },
   "settings.voice_installed": { size: "141 MiB" },
   "settings.voice_not_installed": { size: "141 MiB" },
-  "personas.installed": { count: 2 },
-  "personas.disable_warning": { count: 2 },
+  "personas.installed_other": { count: 2 },
+  "personas.disable_warning_other": { count: 2 },
   "personas.tools_label": { tools: "read_file" },
   "personas.risk_label": { risk: "read" },
   "transcript.step.auto_allowed_tip": { name: "read_file" },
@@ -61,6 +61,14 @@ const flatEn = flatten(en);
 const flatZh = flatten(zh);
 
 describe("locale contracts", () => {
+  it("keeps English and Chinese key sets in parity", () => {
+    // Chinese has a single plural category, so `*_one` variants exist only in English.
+    const missingInZh = Object.keys(flatEn).filter((key) => !key.endsWith("_one") && !(key in flatZh));
+    const missingInEn = Object.keys(flatZh).filter((key) => !(key in flatEn));
+    expect(missingInZh, "keys missing from zh.json").toEqual([]);
+    expect(missingInEn, "keys missing from en.json").toEqual([]);
+  });
+
   it("keeps interpolation placeholders aligned between English and Chinese", () => {
     for (const key of Object.keys(flatEn)) {
       if (!(key in flatZh)) continue;
