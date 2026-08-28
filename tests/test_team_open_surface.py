@@ -2,6 +2,7 @@
 seam (local and remote), token-bound identity on `/v1/board`, and the MCP/CLI
 front doors."""
 
+import base64
 import json
 
 import pytest
@@ -551,14 +552,312 @@ def test_attach_over_the_wire_and_fetch(api):
     # and the lead can fetch the bytes back
     from coworker.teams.attachments import stored_name
 
-    data, mime = lead.attachment(stored_name(result["ref"]))
+    stored = stored_name(result["ref"])
+    data, mime = lead.attachment("proj", stored)
     assert data == PNG and mime == "image/png"
+    assert nia.attachment("proj", stored) == (PNG, "image/png")
+    with pytest.raises(BoardError, match="attachment not found"):
+        lead.attachment("another-space", stored)
 
     # a worker cannot attach to an item outside its slice
     other = lead.create_item("proj", title="Not nia's", criteria="c")
     lead.assign("proj", other["id"], "someone-else")
     with pytest.raises(BoardError, match="assigned items"):
         nia.attach("proj", other["id"], PNG, "sneaky.png")
+
+
+def test_board_attachment_read_hides_foreign_worker_reference(api):
+    client, manager, app = api
+    from fastapi.testclient import TestClient
+    from coworker.teams.attachments import stored_name
+
+    lead_token = _tokens(manager).mint("lead-1", "lead")
+    nia_token = _tokens(manager).mint("nia", "worker")
+    lead = {"Authorization": f"Bearer {lead_token}"}
+    nia = {"Authorization": f"Bearer {nia_token}"}
+
+    item_response = client.post(
+        "/v1/board/items",
+        headers=lead,
+        json={"space": "proj", "title": "Webb evidence", "criteria": "c"},
+    )
+    assert item_response.status_code == 200
+    item = item_response.json()
+    assert client.post(
+        "/v1/board/items/assign",
+        headers=lead,
+        json={"space": "proj", "id": item["id"], "assignee": "webb"},
+    ).status_code == 200
+    attached = client.post(
+        "/v1/board/items/attach",
+        headers=lead,
+        json={
+            "space": "proj",
+            "id": item["id"],
+            "filename": "private.png",
+            "data_b64": base64.b64encode(PNG).decode("ascii"),
+        },
+    )
+    assert attached.status_code == 200
+
+    stored = stored_name(attached.json()["ref"])
+    denied = client.get(
+        "/v1/board/attachment",
+        headers=nia,
+        params={"space": "proj", "name": stored},
+    )
+
+    assert denied.status_code == 404
+    assert denied.json() == {"error": "attachment not found"}
+
+    remote = RemoteDialect(
+        "http://board.test",
+        nia_token,
+        client=TestClient(app, base_url="http://board.test"),
+    )
+    with pytest.raises(BoardError, match="attachment not found"):
+        remote.attachment("proj", stored)
+    remote.close()
+
+
+def test_board_attachment_read_requires_token(api):
+    client, _, _ = api
+
+    response = client.get(
+        "/v1/board/attachment",
+        params={"space": "proj", "name": f"{'0' * 64}.png"},
+    )
+
+    assert response.status_code == 401
+    assert "board token required" in response.json()["error"]
+
+
+def test_board_attachment_read_rejects_malformed_name(api):
+    client, manager, _ = api
+    lead = {
+        "Authorization": f"Bearer {_tokens(manager).mint('lead-1', 'lead')}"
+    }
+
+    response = client.get(
+        "/v1/board/attachment",
+        headers=lead,
+        params={"space": "proj", "name": "../../private.png"},
+    )
+
+    assert response.status_code == 400
+    assert "not an attachment name" in response.json()["error"]
+
+
+def test_board_attachment_read_hides_unreferenced_blob(api):
+    client, manager, _ = api
+    from coworker.teams.attachments import stored_name
+
+    lead = {
+        "Authorization": f"Bearer {_tokens(manager).mint('lead-1', 'lead')}"
+    }
+    ref = manager.attachment_store.put(PNG, "orphan.png")
+
+    response = client.get(
+        "/v1/board/attachment",
+        headers=lead,
+        params={"space": "proj", "name": stored_name(ref)},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "attachment not found"}
+
+
+def test_board_attachment_read_hides_missing_referenced_blob(api):
+    client, manager, _ = api
+    from coworker.teams.attachments import stored_name
+
+    lead = {
+        "Authorization": f"Bearer {_tokens(manager).mint('lead-1', 'lead')}"
+    }
+    item = client.post(
+        "/v1/board/items",
+        headers=lead,
+        json={"space": "proj", "title": "Evidence", "criteria": "c"},
+    ).json()
+    attached = client.post(
+        "/v1/board/items/attach",
+        headers=lead,
+        json={
+            "space": "proj",
+            "id": item["id"],
+            "filename": "missing.png",
+            "data_b64": base64.b64encode(PNG).decode("ascii"),
+        },
+    ).json()
+    stored = stored_name(attached["ref"])
+    manager.attachment_store.path_for(stored).unlink()
+
+    response = client.get(
+        "/v1/board/attachment",
+        headers=lead,
+        params={"space": "proj", "name": stored},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "attachment not found"}
+
+
+def test_local_attachment_read_tracks_worker_visibility(tmp_path):
+    from coworker.teams.attachments import stored_name
+
+    lead = local_dialect(tmp_path, actor="lead-1", role="lead")
+    worker = LocalDialect(
+        lead.store, lead.journal, NIA, attachments=lead.attachments
+    )
+    claimable = lead.create_item("proj", title="Available", criteria="c")
+    result = lead.attach("proj", claimable["id"], PNG, "available.png")
+    stored = stored_name(result["payload"]["refs"][0])
+
+    assert worker.attachment("proj", stored) == (PNG, "image/png")
+
+    lead.set_policy("proj", claims="lead-only")
+    with pytest.raises(BoardError, match="attachment not found"):
+        worker.attachment("proj", stored)
+
+    assigned = lead.create_item("proj", title="Assigned", criteria="c")
+    lead.assign("proj", assigned["id"], "nia")
+    assigned_ref = lead.attach(
+        "proj", assigned["id"], PNG, "assigned.png"
+    )["payload"]["refs"][0]
+    assert worker.attachment("proj", stored_name(assigned_ref)) == (
+        PNG,
+        "image/png",
+    )
+
+    with pytest.raises(BoardError, match="attachment not found"):
+        lead.attachment("another-space", stored)
+
+
+def test_local_attachment_read_allows_a_visible_deduplicated_reference(tmp_path):
+    from coworker.teams.attachments import stored_name
+
+    lead = local_dialect(tmp_path, actor="lead-1", role="lead")
+    worker = LocalDialect(
+        lead.store, lead.journal, NIA, attachments=lead.attachments
+    )
+    foreign = lead.create_item("proj", title="Webb evidence", criteria="c")
+    lead.assign("proj", foreign["id"], "webb")
+    foreign_ref = lead.attach("proj", foreign["id"], PNG, "foreign.png")["payload"][
+        "refs"
+    ][0]
+    with pytest.raises(BoardError, match="attachment not found"):
+        worker.attachment("proj", stored_name(foreign_ref))
+
+    mine = worker.create_item("proj", title="Nia evidence", criteria="c")
+    own_ref = worker.attach("proj", mine["id"], PNG, "mine.png")["payload"]["refs"][
+        0
+    ]
+
+    assert stored_name(own_ref) == stored_name(foreign_ref)
+    assert worker.attachment("proj", stored_name(own_ref)) == (PNG, "image/png")
+
+    lead.store.rebuild("proj")
+    assert worker.attachment("proj", stored_name(own_ref)) == (PNG, "image/png")
+
+    assert lead.store.rekey_space("proj", "moved") is True
+    assert worker.attachment("moved", stored_name(own_ref)) == (PNG, "image/png")
+
+
+def test_local_attachment_read_rejects_forged_comment_and_transition_refs(tmp_path):
+    from coworker.teams.attachments import stored_name
+
+    lead = local_dialect(tmp_path, actor="lead-1", role="lead")
+    worker = LocalDialect(
+        lead.store, lead.journal, NIA, attachments=lead.attachments
+    )
+    foreign = lead.create_item("proj", title="Webb evidence", criteria="c")
+    lead.assign("proj", foreign["id"], "webb")
+    comment_ref = lead.attach(
+        "proj", foreign["id"], PNG, "foreign-comment.png"
+    )["payload"]["refs"][0]
+    transition_ref = lead.attach(
+        "proj", foreign["id"], PNG + b"transition", "foreign-transition.png"
+    )["payload"]["refs"][0]
+
+    mine = lead.create_item("proj", title="Nia task", criteria="c")
+    lead.assign("proj", mine["id"], "nia")
+    worker.comment("proj", mine["id"], "found this", refs=[comment_ref])
+    worker.transition(
+        "proj",
+        mine["id"],
+        "in_progress",
+        refs=[transition_ref],
+    )
+
+    with pytest.raises(BoardError, match="attachment not found"):
+        worker.attachment("proj", stored_name(comment_ref))
+    with pytest.raises(BoardError, match="attachment not found"):
+        worker.attachment("proj", stored_name(transition_ref))
+
+
+def test_legacy_attachment_refs_are_grandfathered_across_rebuild(tmp_path):
+    import sqlite3
+
+    from coworker.teams.attachments import AttachmentStore, stored_name
+
+    db_path = tmp_path / "teams.db"
+    attachments = AttachmentStore(tmp_path / "attachments")
+    store = TeamStore(db_path)
+    item = store.create_item("proj", LEAD, title="Legacy", criteria="c")
+    ref = attachments.put(PNG, "legacy.png")
+    # Before provenance markers, attach was an ordinary comment carrying a ref.
+    store.comment("proj", LEAD, item["id"], "attached legacy.png", refs=[ref])
+    store.close()
+    with sqlite3.connect(db_path) as connection:
+        # Simulate an old DB—or an interrupted upgrade whose projection table
+        # exists but whose atomic migration marker was never committed.
+        connection.execute(
+            "DELETE FROM team_migrations WHERE name = 'attachment_refs_v1'"
+        )
+
+    reopened = TeamStore(db_path)
+    lead = LocalDialect(reopened, None, LEAD, attachments=attachments)
+    stored = stored_name(ref)
+
+    assert lead.attachment("proj", stored) == (PNG, "image/png")
+    later = reopened.create_item("proj", LEAD, title="Later", criteria="c")
+    forged_ref = attachments.put(PNG + b"later", "later.png")
+    reopened.comment(
+        "proj", LEAD, later["id"], "ordinary ref", refs=[forged_ref]
+    )
+    reopened.close()
+
+    reopened = TeamStore(db_path)
+    lead = LocalDialect(reopened, None, LEAD, attachments=attachments)
+    with pytest.raises(BoardError, match="attachment not found"):
+        lead.attachment("proj", stored_name(forged_ref))
+    reopened.rebuild("proj")
+    assert lead.attachment("proj", stored) == (PNG, "image/png")
+    assert reopened.rekey_space("proj", "moved") is True
+    assert lead.attachment("moved", stored) == (PNG, "image/png")
+    reopened.close()
+
+
+def test_local_attachment_read_allows_a_directly_linked_item(tmp_path):
+    from coworker.teams.attachments import stored_name
+
+    lead = local_dialect(tmp_path, actor="lead-1", role="lead")
+    worker = LocalDialect(
+        lead.store, lead.journal, NIA, attachments=lead.attachments
+    )
+    mine = lead.create_item("proj", title="Nia task", criteria="c")
+    lead.assign("proj", mine["id"], "nia")
+    dependency = lead.create_item("proj", title="Dependency", criteria="c")
+    lead.assign("proj", dependency["id"], "webb")
+    ref = lead.attach("proj", dependency["id"], PNG, "dependency.png")["payload"][
+        "refs"
+    ][0]
+
+    with pytest.raises(BoardError, match="attachment not found"):
+        worker.attachment("proj", stored_name(ref))
+
+    lead.link("proj", dependency["id"], "blocks", mine["id"])
+    assert worker.attachment("proj", stored_name(ref)) == (PNG, "image/png")
 
 
 def test_attach_rejects_bad_payloads_over_the_wire(api):
@@ -731,6 +1030,75 @@ def test_cli_worker_cannot_show_a_foreign_item(tmp_path, capsys):
     assert output.out == ""
     assert "no visible item" in output.err
     assert "Private Webb task" not in output.err
+
+
+def test_cli_worker_cannot_download_a_foreign_attachment(tmp_path, capsys):
+    from coworker.teams.attachments import stored_name
+    from coworker.teams.cli import main
+
+    lead = local_dialect(tmp_path, actor="lead-1", role="lead")
+    foreign = lead.create_item("proj", title="Private Webb task", criteria="c")
+    lead.assign("proj", foreign["id"], "webb")
+    ref = lead.attach("proj", foreign["id"], PNG, "private.png")["payload"]["refs"][
+        0
+    ]
+    output = tmp_path / "stolen.png"
+
+    result = main(
+        [
+            "board",
+            "attachment",
+            stored_name(ref),
+            "--out",
+            str(output),
+            "--db",
+            str(tmp_path),
+            "--space",
+            "proj",
+            "--actor",
+            "nia",
+            "--role",
+            "worker",
+        ]
+    )
+
+    assert result == 1
+    assert not output.exists()
+    assert "attachment not found" in capsys.readouterr().err
+
+
+def test_cli_authorized_attachment_download(tmp_path, capsys):
+    from coworker.teams.attachments import stored_name
+    from coworker.teams.cli import main
+
+    lead = local_dialect(tmp_path, actor="lead-1", role="lead")
+    item = lead.create_item("proj", title="Evidence", criteria="c")
+    ref = lead.attach("proj", item["id"], PNG, "evidence.png")["payload"]["refs"][
+        0
+    ]
+    output = tmp_path / "downloaded.png"
+
+    result = main(
+        [
+            "board",
+            "attachment",
+            stored_name(ref),
+            "--out",
+            str(output),
+            "--db",
+            str(tmp_path),
+            "--space",
+            "proj",
+            "--actor",
+            "lead-1",
+            "--role",
+            "lead",
+        ]
+    )
+
+    assert result == 0
+    assert output.read_bytes() == PNG
+    assert str(output) in capsys.readouterr().out
 
 
 def test_cli_token_mint_and_list(tmp_path, capsys):
