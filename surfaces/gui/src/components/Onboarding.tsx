@@ -282,7 +282,9 @@ export function Onboarding({ onDone }: { onDone: (next?: "work" | "gallery" | "a
                 data-testid="ob-tools-signedin"
               >
                 <span className="block text-[13px] font-semibold text-ok mb-0.5">
-                  {t("onboarding.signed_in_as", { account: cloud.account ? ` ${cloud.account}` : "" })}
+                  {cloud.account
+                    ? t("onboarding.signed_in_as", { account: cloud.account })
+                    : t("onboarding.signed_in")}
                 </span>
                 <span className="block text-[13px] text-muted">
                   {t("onboarding.signed_in_desc")}

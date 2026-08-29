@@ -306,7 +306,7 @@
     "personas_intro": "管理你的同事，并添加新同事。",
     "scratch_placeholder": "~/OpenWorker",
     "files_browse": "浏览…",
-    "files_help": "同事保存产出文件的临时目录。可在每会话中覆盖。",
+    "files_help": "每个会话都会在此位置下获得自己的文件夹。已有会话保留当前文件夹；你可以在任意会话中授予更多文件夹的访问权限。",
     "files_pick_folder": "选择文件夹",
     "files_save": "保存",
     "files_save_error": "无法保存。",
@@ -673,14 +673,14 @@
     "channels_note": "agent 会接收发布到这些频道的消息。移除一个会停止本会话的监听 —— 连接器保持连接。",
     "summary_no_sources": "无来源",
     "summary_sources_more": "{{first}} +{{more}}",
-    "summary_folder_count": "{{count}} 个文件夹",
     "summary_join": "{{sources}} · {{folder}}",
     "addfolder_path_placeholder": "选择或粘贴文件夹路径…",
     "allow_writes": "允许写入（读写）",
     "allow_writes_help": "授予后，agent 可在该文件夹中读写文件。",
     "cancel": "取消",
     "choose_location": "选择位置",
-    "channel_add_error": "无法添加该频道。"
+    "channel_add_error": "无法添加该频道。",
+    "summary_folder_count_other": "{{count}} 个文件夹"
   },
   "root": {
     "temporary_space": "临时文件夹",
@@ -1229,7 +1229,7 @@
     "opening_browser": "正在打开浏览器…",
     "replay_hint": "随时重放此设置：设置 ▸ 外观 ▸ 重新运行引导。",
     "sign_in": "登录",
-    "signed_in_as": "🎉 你已登录{{account}}",
+    "signed_in_as": "🎉 你已登录：{{account}}",
     "signed_in_desc": "上方任意工具一键连接 —— 或稍后随时在连接器页面添加。",
     "signin_band_desc": "OpenWorker 代为处理 20+ 工具的 OAuth —— 无需开发者控制台、无需粘贴密钥。令牌保留在本机。",
     "signin_for_oneclick": "登录即可一键连接",
@@ -1251,7 +1251,8 @@
     "tool_hubspot_benefit": "保持 CRM 数据最新",
     "tool_hubspot_detail": "HubSpot —— 更新商机、记录笔记、准备通话。",
     "tool_attio_benefit": "跟进每一段客户关系",
-    "tool_attio_detail": "Attio —— 搜索记录、查看时间线、记录笔记。"
+    "tool_attio_detail": "Attio —— 搜索记录、查看时间线、记录笔记。",
+    "signed_in": "🎉 你已登录"
   },
   "persona": {
     "about": "关于",

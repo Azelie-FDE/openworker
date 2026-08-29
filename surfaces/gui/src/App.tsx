@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   announceInboxUnlock,
@@ -347,7 +347,10 @@ export function App() {
       navBeforePreview.current = null;
     }
   }, []);
-  useEffect(() => {
+  // Layout effect on purpose: a passive effect registers after paint, leaving a boot-splash
+  // window where the app is visible but ⌘B/⌘, are dead (input arriving right after load was
+  // dropped). Registering at commit closes that gap.
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();

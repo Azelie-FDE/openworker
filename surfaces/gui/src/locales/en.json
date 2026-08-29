@@ -313,7 +313,7 @@
     "personas_intro": "Manage your coworkers and add new ones.",
     "scratch_placeholder": "~/OpenWorker",
     "files_browse": "Browse…",
-    "files_help": "The scratch space where coworkers save produced files. Override per session.",
+    "files_help": "Each conversation gets its own folder under this location. Existing conversations keep their current folder; you can grant access to more folders inside any conversation.",
     "files_pick_folder": "Pick a folder",
     "files_save": "Save",
     "files_save_error": "Couldn't save.",
@@ -683,14 +683,15 @@
     "channels_note": "The agent receives messages posted to these channels. Removing one stops this session from listening — the connector stays connected.",
     "summary_no_sources": "no sources",
     "summary_sources_more": "{{first}} +{{more}}",
-    "summary_folder_count": "{{count}} folders",
     "summary_join": "{{sources}} · {{folder}}",
     "addfolder_path_placeholder": "Choose or paste a folder path…",
     "allow_writes": "Allow writing (read-write)",
     "allow_writes_help": "When granted, the agent can read and write files in this folder.",
     "cancel": "Cancel",
     "choose_location": "Choose location",
-    "channel_add_error": "Couldn't add that channel."
+    "channel_add_error": "Couldn't add that channel.",
+    "summary_folder_count_one": "{{count}} folder",
+    "summary_folder_count_other": "{{count}} folders"
   },
   "root": {
     "temporary_space": "Temporary folder",
@@ -1244,7 +1245,7 @@
     "opening_browser": "Opening browser…",
     "replay_hint": "Replay this setup anytime: Settings ▸ Appearance ▸ Run setup again.",
     "sign_in": "Sign in",
-    "signed_in_as": "🎉 You're signed in{{account}}",
+    "signed_in_as": "🎉 You’re signed in as {{account}}",
     "signed_in_desc": "Connect a tool above with one click — or add them anytime later from the Connectors page.",
     "signin_band_desc": "OpenWorker handles the OAuth for 20+ tools — no dev consoles, no pasted keys. Tokens stay on this computer.",
     "signin_for_oneclick": "Sign in for one-click connections",
@@ -1266,7 +1267,8 @@
     "tool_hubspot_benefit": "Keep the CRM current",
     "tool_hubspot_detail": "HubSpot — update deals, log notes, prep calls.",
     "tool_attio_benefit": "Track every relationship",
-    "tool_attio_detail": "Attio — search records, read timelines, log notes."
+    "tool_attio_detail": "Attio — search records, read timelines, log notes.",
+    "signed_in": "🎉 You’re signed in"
   },
   "persona": {
     "about": "About",
