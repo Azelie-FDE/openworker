@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
+import { useTranslation } from "react-i18next";
 import {
   announceInboxUnlock,
   createTempWorkspace,
@@ -87,10 +88,12 @@ import { WorkspaceTrustPrompt } from "./components/WorkspaceTrustPrompt";
 const newId = () =>
   (crypto as any).randomUUID ? crypto.randomUUID().slice(0, 12) : Math.random().toString(36).slice(2, 14);
 
-const SUGGESTIONS = [
-  { ico: "⚙", text: "Run the test suite and summarize any failures." },
-  { ico: "✦", text: "Read the project and give me a 5-bullet overview." },
-  { ico: "↻", text: "Find and fix the failing build." },
+// Hero task suggestions — translated at call time (module scope can't see React hooks).
+// Keys live under `hero.suggest_*`; resolved in the component via useTranslation.
+const SUGGESTION_KEYS = [
+  { ico: "⚙", key: "hero.suggest_tests" },
+  { ico: "✦", key: "hero.suggest_overview" },
+  { ico: "↻", key: "hero.suggest_fix_build" },
 ];
 
 // Tools whose success means a new/changed file should show up under Artifacts right away.
@@ -171,6 +174,7 @@ function fallbackWorkspace(current: string | null, projects: RecentWorkspace[]):
 }
 
 export function App() {
+  const { t } = useTranslation();
   const [workspace, setWorkspace] = useState<string | null>(null);
   const [branch, setBranch] = useState<string | null>(null);
   // UX-029: the active session runs in a temporary folder (never show its raw path —
@@ -343,7 +347,10 @@ export function App() {
       navBeforePreview.current = null;
     }
   }, []);
-  useEffect(() => {
+  // Layout effect on purpose: a passive effect registers after paint, leaving a boot-splash
+  // window where the app is visible but ⌘B/⌘, are dead (input arriving right after load was
+  // dropped). Registering at commit closes that gap.
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
@@ -882,7 +889,7 @@ export function App() {
           break;
         case "turn_end":
           if (d.status === "max_iterations_exceeded")
-            setItems((p) => [...p, { kind: "notice", tone: "warn", text: "Stopped: max iterations reached." }]);
+            setItems((p) => [...p, { kind: "notice", tone: "warn", text: t("app.notice.max_iterations") }]);
           break;
         case "mode_notice":
           // Server-authored + persisted (owner ruling 2026-08-24): the Auto-Approve
@@ -896,7 +903,7 @@ export function App() {
           // Mid-session switch (server-applied): update the header fact and drop the
           // persisted marker into the live transcript (replay renders it from history).
           if (d.model) setModel(d.model);
-          setItems((p) => [...p, { kind: "notice", tone: "info", text: d.text || "Model switched" }]);
+          setItems((p) => [...p, { kind: "notice", tone: "info", text: d.text || t("app.notice.model_switched") }]);
           break;
         case "memory_saved":
           // §5.1 save notice — inline in the transcript, where the user is already
@@ -922,23 +929,23 @@ export function App() {
         case "compacted":
           // Auto-compaction marker (OPE-27): outbound-only — the transcript stays intact,
           // this divider just shows where the model's memory was summarized.
-          setItems((p) => [...p, { kind: "notice", tone: "info", text: d.text || "Context compacted" }]);
+          setItems((p) => [...p, { kind: "notice", tone: "info", text: d.text || t("app.notice.context_compacted") }]);
           break;
         case "interrupted":
           flushPartialStream();
-          setItems((p) => [...p, { kind: "notice", tone: "warn", text: "Interrupted." }]);
+          setItems((p) => [...p, { kind: "notice", tone: "warn", text: t("app.notice.interrupted") }]);
           break;
         case "error":
           flushPartialStream();
           setItems((p) => [
             ...p,
-            { kind: "notice", tone: "warn", text: "Error: " + (d.error || "unknown"), retriable: true },
+            { kind: "notice", tone: "warn", text: t("app.notice.error") + (d.error || t("app.notice.unknown")), retriable: true },
           ]);
           break;
         case "input_rejected":
           setItems((p) => [
             ...p,
-            { kind: "notice", tone: "warn", text: d.error || "That message was rejected." },
+            { kind: "notice", tone: "warn", text: d.error || t("app.notice.input_rejected") },
           ]);
           break;
         case "turn_done":
@@ -1137,7 +1144,7 @@ export function App() {
   // identical re-proposal without the reviewer or a card; anything different still asks.
   const allowAnyway = (name: string, args: any) => {
     sessionRef.current?.allowAnyway(name, args);
-    send(`I reviewed the blocked ${name} action — go ahead with it exactly as proposed.`);
+    send(t("app.allow_anyway_message", { name }));
   };
   const approve = (decision: ApprovalDecision) => {
     setItems((p) => resolveLastApproval(p, decision));
@@ -1278,7 +1285,7 @@ export function App() {
       setSendGate(null);
       setItems((p) => [
         ...p,
-        { kind: "notice", tone: "warn", text: res.error || "Could not create a temporary folder." },
+        { kind: "notice", tone: "warn", text: res.error || t("app.temp_folder_failed") },
       ]);
       prefillComposer(gate.skill ? `/${gate.skill} ${gate.text}` : gate.text, gate.attachments);
       return;
@@ -1290,7 +1297,7 @@ export function App() {
     pendingPromptRef.current = {
       ...gate,
       model,
-      notice: res.git ? "Temporary folder created · git initialized" : "Temporary folder created",
+      notice: res.git ? t("app.temp_folder_created_git") : t("app.temp_folder_created"),
     };
     setSessionId(sid);
   };
@@ -1310,7 +1317,7 @@ export function App() {
     if (!res.ok || !res.path) {
       setItems((p) => [
         ...p,
-        { kind: "notice", tone: "warn", text: res.error || "Could not save as a project." },
+        { kind: "notice", tone: "warn", text: res.error || t("app.save_project_failed") },
       ]);
       return;
     }
@@ -1320,7 +1327,7 @@ export function App() {
     setTempWorkspace(false);
     setItems((p) => [
       ...p,
-      { kind: "notice", tone: "info", text: `Saved as a project — now working in ${baseName(newPath)}.` },
+      { kind: "notice", tone: "info", text: t("app.saved_as_project", { name: baseName(newPath) }) },
     ]);
     setConnectNonce((n) => n + 1);
     refreshSessions();
@@ -1337,7 +1344,7 @@ export function App() {
       if (msg.type !== "automation_run_started") return;
       const d = (msg.data ?? {}) as Record<string, string>;
       setRunToast({
-        title: d.task_title || "Automation",
+        title: d.task_title || t("toast.automation_fallback"),
         sessionId: d.session_id || "",
         workspace: d.workspace || "",
         agent: d.agent || "cowork",
@@ -1562,10 +1569,10 @@ export function App() {
   // path never shows — "Temporary folder" + the Save as project… affordance instead.
   const subtitleParts = [fullPersonaName(personaOf(agent)?.name, agent), modelDisplay];
   if (isProjectScoped(personaOf(agent)) && workspace)
-    subtitleParts.push(tempWorkspace ? "Temporary folder" : baseName(workspace));
+    subtitleParts.push(tempWorkspace ? t("root.temporary_space") : baseName(workspace));
   const showSaveAsProject = hasHistory && tempWorkspace && isProjectScoped(personaOf(agent));
   const activeInfo = sessions.find((s) => s.session_id === sessionId);
-  const activeTitle = activeInfo?.title || "New session";
+  const activeTitle = activeInfo?.title || t("sidebar.new_session");
 
   const desktop = isTauri();
   // Dev-only: `?overlay=1` simulates the desktop overlay layout in the browser (adds the
@@ -1604,7 +1611,7 @@ export function App() {
           <Icon name="logo" size={38} />
         </div>
         <div className="boot-text">
-          {resumedExisting ? "Restoring your session…" : "Starting OpenWorker…"}
+          {resumedExisting ? t("boot.restoring") : t("boot.starting")}
           <span className="beta-tag">BETA</span>
         </div>
       </div>
@@ -1637,10 +1644,10 @@ export function App() {
         >
           <div className="flex items-center gap-2 text-[13px] font-semibold">
             <span className="w-[7px] h-[7px] rounded-full bg-faint toast-pulse" />
-            Automation started
+            {t("toast.automation_started")}
           </div>
           <div className="text-[13px] text-muted mt-0.5 ml-[15px] truncate">
-            {runToast.title} · {runToast.time} run
+            {runToast.title} · {runToast.time} {t("toast.run_count")}
           </div>
           <div className="flex items-center justify-between ml-[15px] mt-1.5">
             <button
@@ -1651,12 +1658,12 @@ export function App() {
                 setRunToast(null);
               }}
             >
-              View run ›
+              {t("toast.view_run")} ›
             </button>
             <button
               className="text-[12px] text-faint px-0.5"
               data-testid="toast-dismiss"
-              title="Dismiss"
+              title={t("common.dismiss")}
               onClick={() => setRunToast(null)}
             >
               ✕
@@ -1683,8 +1690,8 @@ export function App() {
           className="nav-reveal-btn"
           onClick={toggleNav}
           onMouseEnter={() => setNavPeek(true)}
-          title="Show sidebar (⌘B)"
-          aria-label="Show sidebar"
+          title={t("topbar.show_sidebar")}
+          aria-label={t("topbar.show_sidebar_short")}
         >
           <Icon name="sidebar" size={16} />
         </button>
@@ -1765,8 +1772,8 @@ export function App() {
             startNewSession();
             prefillComposer(
               description
-                ? `Build a new skill for me: ${description}`
-                : "Build a new skill for me: (describe what the skill should do)",
+                ? t("app.build_skill_prefill", { description })
+                : t("app.build_skill_prefill_empty"),
             );
           }}
         />
@@ -1798,24 +1805,24 @@ export function App() {
                 <button
                   className="topbar-icon-btn"
                   onClick={toggleNav}
-                  aria-label="Show sidebar"
-                  title="Show sidebar (⌘B)"
+                  aria-label={t("topbar.show_sidebar_short")}
+                  title={t("topbar.show_sidebar")}
                 >
                   <Icon name="sidebar" size={16} />
                 </button>
                 <button
                   className="topbar-icon-btn"
                   onClick={() => startNewSession()}
-                  aria-label="New session"
-                  title="New session"
+                  aria-label={t("sidebar.new_session")}
+                  title={t("sidebar.new_session")}
                 >
                   <Icon name="plus" size={16} />
                 </button>
                 <button
                   className="topbar-icon-btn"
                   onClick={() => setSearchOpen(true)}
-                  aria-label="Search"
-                  title="Search"
+                  aria-label={t("topbar.search")}
+                  title={t("topbar.search")}
                 >
                   <Icon name="search" size={16} />
                 </button>
@@ -1849,7 +1856,7 @@ export function App() {
                       onMouseDown={(e) => e.stopPropagation()}
                       onClick={() => void saveAsProject()}
                     >
-                      Save as project…
+                      {t("app.save_as_project")}
                     </button>
                   </>
                 )}
@@ -1864,10 +1871,10 @@ export function App() {
                 className="topbar-artifacts-btn"
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => setRailHidden(false)}
-                title="Show files this conversation produced"
+                title={t("topbar.show_artifacts")}
               >
                 <Icon name="file" size={14} />
-                <span>Artifacts</span>
+                <span>{t("topbar.artifacts")}</span>
                 <span className="topbar-artifacts-count">{artifactCount}</span>
               </button>
             )}
@@ -1878,8 +1885,8 @@ export function App() {
                 className="topbar-icon-btn"
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => setRailHiddenPersist(!railHidden)}
-                aria-label={railHidden ? "Show side panel" : "Hide side panel"}
-                title={railHidden ? "Show side panel" : "Hide side panel"}
+                aria-label={railHidden ? t("topbar.show_side_panel") : t("topbar.hide_side_panel")}
+                title={railHidden ? t("topbar.show_side_panel") : t("topbar.hide_side_panel")}
               >
                 <Icon name="sidebarRight" size={16} />
               </button>
@@ -1904,14 +1911,14 @@ export function App() {
               >
                 <Icon name="clock" size={14} className="text-accent shrink-0" />
                 <span className="truncate text-muted">
-                  Scheduled run
+                  {t("run_banner.scheduled_run")}
                   {runContext?.title ? (
                     <>
                       {" — "}
                       <span className="text-ink font-medium">{runContext.title}</span>
                     </>
                   ) : null}{" "}
-                  · started by an automation
+                  {t("run_banner.started_by_automation")}
                 </span>
                 <button
                   className="ml-auto shrink-0 text-accent font-medium hover:underline"
@@ -1920,7 +1927,7 @@ export function App() {
                     setSurface("scheduled");
                   }}
                 >
-                  ← Back to runs
+                  {t("run_banner.back_to_runs")}
                 </button>
               </div>
             )}
@@ -1936,15 +1943,15 @@ export function App() {
                   <div className="hero">
                     <h1 className="greeting">
                       <span className="mark">✦</span>
-                      {agent === "chat" ? "How can I help?" : "Let's build something."}
+                      {agent === "chat" ? t("hero.chat_greeting") : t("hero.build_greeting")}
                     </h1>
                     {(
                       <div className="suggestions">
-                        <div className="suggest-head">Try a task</div>
-                        {SUGGESTIONS.map((s, i) => (
-                          <div className="suggest" key={i} onClick={() => workspace && send(s.text)}>
+                        <div className="suggest-head">{t("hero.try_a_task")}</div>
+                        {SUGGESTION_KEYS.map((s, i) => (
+                          <div className="suggest" key={i} onClick={() => workspace && send(t(s.key))}>
                             <span className="ico">{s.ico}</span>
-                            {s.text}
+                            {t(s.key)}
                           </div>
                         ))}
                       </div>
@@ -1976,7 +1983,7 @@ export function App() {
                   )}
                   {/* Compaction runs between provider turns (nothing streams during it), so
                       the transient takes over the waiting slot with a specific label. */}
-                  {running && compacting && <WaitingForAgent label="Compacting context…" />}
+                  {running && compacting && <WaitingForAgent label={t("app.compacting_context")} />}
                   {running &&
                     !compacting &&
                     !reasoningStream &&
@@ -1985,7 +1992,7 @@ export function App() {
                   {streaming && streamMode(streaming, items, running) === "answer" && (
                     <div className="transcript">
                       <div className="bubble-assistant">
-                        <div className="who">assistant</div>
+                        <div className="who">{t("transcript.who_assistant")}</div>
                         <Markdown text={streaming} />
                         <span className="stream-cursor">▍</span>
                       </div>
@@ -2006,7 +2013,7 @@ export function App() {
                   onClick={followLatest}
                 >
                   <Icon name="chevronDown" size={13} />
-                  Jump to latest
+                  {t("app.jump_to_latest")}
                 </button>
               </div>
             )}
@@ -2040,25 +2047,23 @@ export function App() {
               <div className="sleep-strip" data-testid="sleep-strip">
                 <span className="sleep-dot" />
                 <span className="sleep-text">
-                  Sleeping
+                  {t("app.sleep.label")}
                   {activeInfo.sleeping_until
-                    ? ` until ${new Date(activeInfo.sleeping_until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                    ? t("app.sleep.until", {
+                        time: new Date(activeInfo.sleeping_until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+                      })
                     : ""}
                   {activeInfo.team?.role === "lead"
-                    ? " while the team works — it also wakes on board activity."
-                    : " — it wakes on its trigger."}{" "}
-                  Talk to it anytime.
+                    ? t("app.sleep.team_clause")
+                    : t("app.sleep.trigger_clause")}{" "}
+                  {t("app.sleep.talk_anytime")}
                 </span>
                 <button
                   className="btn sm"
                   data-testid="sleep-status-btn"
-                  onClick={() =>
-                    send(
-                      "Quick status check, please — what's moving, what's blocked, and does anything need me?",
-                    )
-                  }
+                  onClick={() => send(t("app.sleep.status_prompt"))}
                 >
-                  Ask for a status
+                  {t("app.sleep.ask_status")}
                 </button>
               </div>
             )}
@@ -2090,10 +2095,10 @@ export function App() {
               reviewerPaused={reviewerPaused}
               placeholder={
                 agent === "code"
-                  ? "Ask the coder to build, fix, or explain…  (drop or paste files)"
+                  ? t("composer.placeholder_code")
                   : agent === "chat"
-                    ? "Ask anything…  (drop or paste files)"
-                    : "Ask the coworker…  (drop or paste files)"
+                    ? t("composer.placeholder_chat")
+                    : t("composer.placeholder_cowork")
               }
               approvalSlot={
                 // Live inline cards are for ATTENDED sessions only; when Unattended the prompt is
@@ -2278,11 +2283,12 @@ function lastItemIsAssistant(items: Item[]): boolean {
 }
 
 function WaitingForAgent({ label }: { label?: string }) {
+  const { t } = useTranslation();
   return (
     <div className="waiting-transcript">
       <div className="waiting-row" aria-live="polite">
         <span className="waiting-spinner" />
-        <span>{label || "Waiting for agent..."}</span>
+        <span>{label || t("app.waiting_for_agent")}</span>
       </div>
     </div>
   );
