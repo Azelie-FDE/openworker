@@ -1688,6 +1688,17 @@ class SessionManager:
     def _user_actor(self) -> TeamActor:
         return TeamActor(id="user", role=TeamRole.USER)
 
+    def board_attachment(self, session_id: str, stored: str) -> tuple[bytes, str]:
+        """Read an attachment referenced by the session's board as the user."""
+        space = self._board_space(session_id)
+        if space is None:
+            raise TeamsBoardError("attachment not found")
+        self.team_store.require_attachment_access(
+            space, self._user_actor(), stored
+        )
+        path = self.attachment_store.path_for(stored)
+        return path.read_bytes(), self.attachment_store.mime_for(stored)
+
     def board_item_detail(self, session_id: str, item_id: int) -> dict[str, Any]:
         """One item in full, with its TIMELINE — creations, assignments,
         transitions, and comments merged chronologically (the detail pane renders

@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from .attachments import stored_name, validate_stored_name
 from .model import (
     EDGES,
     LINK_KINDS,
@@ -51,6 +52,7 @@ GENESIS = "genesis"
 # external. "lead-only" turns claims off; assignment stays with the lead/user. A lead
 # on an open board can still reserve individual items by assigning them to itself.
 CLAIM_POLICIES = ("open", "lead-only")
+ATTACHMENT_REFS_MIGRATION = "attachment_refs_v1"
 
 # Event kinds. Chat lands later with the chat surface; the record shape already fits.
 # Journal entries live in their own case-keyed store (teams.journal) — cases outlive
@@ -137,6 +139,13 @@ class TeamStore:
                 dst INTEGER NOT NULL,
                 UNIQUE (space, src, kind, dst)
             );
+            CREATE TABLE IF NOT EXISTS team_attachment_refs (
+                space TEXT NOT NULL,
+                stored TEXT NOT NULL,
+                item_id INTEGER NOT NULL,
+                event_seq INTEGER NOT NULL,
+                PRIMARY KEY (space, stored, item_id)
+            );
             CREATE TABLE IF NOT EXISTS team_meta (
                 space TEXT PRIMARY KEY,
                 head_hash TEXT NOT NULL,
@@ -150,8 +159,25 @@ class TeamStore:
                 space TEXT PRIMARY KEY,
                 claims TEXT NOT NULL DEFAULT 'open'
             );
+            CREATE TABLE IF NOT EXISTS team_migrations (
+                name TEXT PRIMARY KEY
+            );
             """)
-        self._conn.commit()
+        migrated = self._conn.execute(
+            "SELECT 1 FROM team_migrations WHERE name = ?",
+            (ATTACHMENT_REFS_MIGRATION,),
+        ).fetchone()
+        if migrated is None:
+            try:
+                self._backfill_legacy_attachment_refs()
+                self._conn.execute(
+                    "INSERT INTO team_migrations (name) VALUES (?)",
+                    (ATTACHMENT_REFS_MIGRATION,),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     # ------------------------------------------------------------------ events core
 
@@ -423,6 +449,11 @@ class TeamStore:
         with self._lock:
             self._conn.execute("DELETE FROM team_items WHERE space = ?", (space,))
             self._conn.execute("DELETE FROM team_links WHERE space = ?", (space,))
+            self._conn.execute(
+                "DELETE FROM team_attachment_refs"
+                " WHERE space = ? AND event_seq != 0",
+                (space,),
+            )
             rows = self._conn.execute(
                 "SELECT seq, ts, kind, actor, item_id, payload FROM team_events"
                 " WHERE space = ? ORDER BY seq",
@@ -579,6 +610,84 @@ class TeamStore:
         if seq is not None:
             item["seq"] = seq
         return item
+
+    def require_attachment_access(
+        self, space: str, actor: Actor, stored: str
+    ) -> None:
+        """Require an actor-visible item to carry an authoritative attachment."""
+        stored = validate_stored_name(stored)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT item.* FROM team_items AS item"
+                " JOIN team_attachment_refs AS attachment"
+                " ON attachment.space = item.space"
+                " AND attachment.item_id = item.id"
+                " WHERE attachment.space = ? AND attachment.stored = ?"
+                " ORDER BY item.id",
+                (space, stored),
+            ).fetchall()
+            worker_slice = None
+            claims_open = None
+            if actor.role == Role.WORKER:
+                worker_slice = self._worker_slice(space, actor.id)
+                claims_open = self.policy(space)["claims"] == "open"
+            for row in rows:
+                item = _row_to_item(row)
+                if not self._item_visible_to(
+                    space,
+                    actor,
+                    item,
+                    worker_slice=worker_slice,
+                    claims_open=claims_open,
+                ):
+                    continue
+                return
+        raise BoardNotFoundError("attachment not found")
+
+    def attach_ref(
+        self,
+        space: str,
+        actor: Actor,
+        item_id: int,
+        body: str,
+        ref: str,
+        *,
+        taint: bool = False,
+    ) -> dict[str, Any]:
+        """Attach one stored blob through an attributed comment event.
+
+        The dedicated payload field is the authoritative provenance marker;
+        arbitrary artifact refs on normal comments and transitions never grant
+        attachment-byte access.
+        """
+        if not (body or "").strip():
+            raise BoardError("comment body is required")
+        stored = stored_name(ref)
+        if stored is None:
+            raise BoardError(f"not an attachment ref: {ref!r}")
+        stored = validate_stored_name(stored)
+        with self._lock:
+            item = self._item(space, item_id)
+            if actor.role == Role.WORKER and item_id not in self._worker_slice(
+                space, actor.id
+            ):
+                raise AuthorityError(
+                    f"worker {actor.id} may only comment on its assigned items"
+                    " and items linked to them"
+                )
+            return self.append_event(
+                space,
+                ITEM_COMMENTED,
+                actor,
+                item_id=item_id,
+                case_id=item["case_id"] or None,
+                payload={
+                    "body": body,
+                    "refs": [ref],
+                    "attachments": [stored],
+                },
+                taint=taint,
+            )
 
     def transition(
         self,
@@ -812,9 +921,9 @@ class TeamStore:
         item_id: Optional[int],
         payload: dict[str, Any],
     ) -> None:
-        """Fold one event into the projections. The ONLY writer of team_items and
-        team_links — shared by live appends and rebuild(), so replay always
-        reproduces the materialized state."""
+        """Fold one event into the projections. The ONLY writer of item, link,
+        and attachment-reference projections — shared by live appends and
+        rebuild(), so replay always reproduces the materialized state."""
         if kind == ITEM_CREATED:
             self._conn.execute(
                 """
@@ -851,6 +960,9 @@ class TeamStore:
             self._merge_refs(space, item_id, payload.get("refs"))
         elif kind == ITEM_COMMENTED:
             self._merge_refs(space, item_id, payload.get("refs"))
+            self._merge_attachment_refs(
+                space, item_id, payload.get("attachments"), seq
+            )
         elif kind == ITEM_ASSIGNED:
             self._conn.execute(
                 "UPDATE team_items SET assignee = ?, updated_seq = ?"
@@ -865,7 +977,8 @@ class TeamStore:
             )
         # Comment bodies and journal entries have no materialized state: their
         # projections read straight off the (indexed) log. Only the artifact
-        # refs a comment carries fold onto the item.
+        # refs a comment carries fold onto the item; authoritative attachment
+        # markers also fold into their indexed projection.
 
     def _merge_refs(
         self, space: str, item_id: Optional[int], refs: Optional[list]
@@ -884,6 +997,51 @@ class TeamStore:
             "UPDATE team_items SET refs = ? WHERE space = ? AND id = ?",
             (json.dumps(merged), space, item_id),
         )
+
+    def _merge_attachment_refs(
+        self,
+        space: str,
+        item_id: Optional[int],
+        attachments: Optional[list],
+        seq: int,
+    ) -> None:
+        if not attachments or item_id is None:
+            return
+        for stored in attachments:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO team_attachment_refs"
+                " (space, stored, item_id, event_seq) VALUES (?, ?, ?, ?)",
+                (space, validate_stored_name(str(stored)), item_id, seq),
+            )
+
+    def _backfill_legacy_attachment_refs(self) -> None:
+        """Snapshot pre-provenance refs once when the projection is introduced.
+
+        Old attach events were indistinguishable from generic comment refs. Rows
+        grandfathered at upgrade use event_seq=0 so rebuild preserves that fixed
+        compatibility boundary; refs added after the migration are never inferred.
+        """
+        rows = self._conn.execute(
+            "SELECT space, id, refs FROM team_items"
+        ).fetchall()
+        for row in rows:
+            try:
+                refs = json.loads(row["refs"] or "[]")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            for ref in refs:
+                stored = stored_name(str(ref))
+                if stored is None:
+                    continue
+                try:
+                    stored = validate_stored_name(stored)
+                except BoardError:
+                    continue
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO team_attachment_refs"
+                    " (space, stored, item_id, event_seq) VALUES (?, ?, ?, 0)",
+                    (row["space"], stored, row["id"]),
+                )
 
     def _check_transition_authority(
         self, actor: Actor, item: dict[str, Any], current: ItemState, target: ItemState
@@ -1047,7 +1205,12 @@ class TeamStore:
                         (new, prev, record["hash"], row["seq"]),
                     )
                     prev = record["hash"]
-                for table in ("team_items", "team_links", "team_settings"):
+                for table in (
+                    "team_items",
+                    "team_links",
+                    "team_attachment_refs",
+                    "team_settings",
+                ):
                     self._conn.execute(
                         f"UPDATE {table} SET space = ? WHERE space = ?", (new, old)
                     )

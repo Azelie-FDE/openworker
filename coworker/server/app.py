@@ -783,12 +783,12 @@ def create_app(manager: SessionManager) -> FastAPI:
         from fastapi.responses import Response
 
         try:
-            path = manager.attachment_store.path_for(name)
+            data, mime = manager.board_attachment(session_id, name)
         except TeamsBoardError as error:
             return JSONResponse({"error": str(error)}, status_code=404)
         return Response(
-            content=path.read_bytes(),
-            media_type=manager.attachment_store.mime_for(name),
+            content=data,
+            media_type=mime,
         )
 
     @app.post("/v1/sessions/{session_id}/board/comment")
@@ -998,22 +998,23 @@ def create_app(manager: SessionManager) -> FastAPI:
                 data, str(body.get("filename", ""))
             )
             filename = str(body.get("filename", ""))
-            event = manager.team_store.comment(
+            event = manager.team_store.attach_ref(
                 str(body.get("space", "")),
                 actor,
                 int(body.get("id", 0)),
                 str(body.get("caption", "")) or f"attached {filename}",
-                refs=[ref],
+                ref,
             )
             return {"ref": ref, "seq": event["seq"]}
 
         return _board(request, run)
 
     @app.get("/v1/board/attachment")
-    def board_attachment(request: Request, name: str):
+    def board_attachment(request: Request, name: str, space: str):
         def run(actor):
             from fastapi.responses import Response
 
+            manager.team_store.require_attachment_access(space, actor, name)
             path = manager.attachment_store.path_for(name)
             return Response(
                 content=path.read_bytes(),
