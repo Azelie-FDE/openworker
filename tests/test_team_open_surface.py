@@ -248,6 +248,166 @@ def test_token_binds_identity_and_store_enforces_authority(api):
     assert bad.status_code == 403 or bad.status_code == 400
 
 
+def test_board_item_reads_hide_foreign_worker_items(api):
+    client, manager, _ = api
+    lead_token = _tokens(manager).mint("lead-1", "lead")
+    nia_token = _tokens(manager).mint("nia", "worker")
+    webb_token = _tokens(manager).mint("webb", "worker")
+    lead = {"Authorization": f"Bearer {lead_token}"}
+    nia = {"Authorization": f"Bearer {nia_token}"}
+    webb = {"Authorization": f"Bearer {webb_token}"}
+
+    def create(title, *, description=""):
+        response = client.post(
+            "/v1/board/items",
+            headers=lead,
+            json={
+                "space": "proj",
+                "title": title,
+                "description": description,
+                "criteria": "done",
+            },
+        )
+        assert response.status_code == 200
+        return response.json()
+
+    created = create(
+        "Webb private investigation", description="credential rotation details"
+    )
+    assigned_response = client.post(
+        "/v1/board/items/assign",
+        headers=lead,
+        json={"space": "proj", "id": created["id"], "assignee": "webb"},
+    )
+    assert assigned_response.status_code == 200
+
+    mine = create("Nia task")
+    assert client.post(
+        "/v1/board/items/assign",
+        headers=lead,
+        json={"space": "proj", "id": mine["id"], "assignee": "nia"},
+    ).status_code == 200
+    claimable = create("Available")
+    linked = create("Linked dependency")
+    assert client.post(
+        "/v1/board/link",
+        headers=lead,
+        json={
+            "space": "proj",
+            "src": linked["id"],
+            "kind": "blocks",
+            "dst": mine["id"],
+        },
+    ).status_code == 200
+
+    denied = client.get(
+        "/v1/board/item",
+        headers=nia,
+        params={"space": "proj", "id": created["id"]},
+    )
+    assert denied.status_code == 404
+    assert "Webb private investigation" not in denied.text
+    assert "credential rotation details" not in denied.text
+
+    for item_id in (mine["id"], claimable["id"], linked["id"]):
+        assert client.get(
+            "/v1/board/item",
+            headers=nia,
+            params={"space": "proj", "id": item_id},
+        ).status_code == 200
+
+    assert client.post(
+        "/v1/board/items/claim",
+        headers=webb,
+        json={"space": "proj", "id": claimable["id"]},
+    ).status_code == 200
+    assert client.get(
+        "/v1/board/item",
+        headers=nia,
+        params={"space": "proj", "id": claimable["id"]},
+    ).status_code == 404
+
+    held = create("Held")
+    assert client.post(
+        "/v1/board/policy",
+        headers=lead,
+        json={"space": "proj", "claims": "lead-only"},
+    ).status_code == 200
+    assert client.get(
+        "/v1/board/item",
+        headers=nia,
+        params={"space": "proj", "id": held["id"]},
+    ).status_code == 404
+    assert client.get(
+        "/v1/board/item",
+        headers=nia,
+        params={"space": "proj", "id": mine["id"]},
+    ).status_code == 200
+
+    allowed = client.get(
+        "/v1/board/item",
+        headers=lead,
+        params={"space": "proj", "id": created["id"]},
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["title"] == "Webb private investigation"
+
+
+def test_board_item_reads_return_not_found_for_missing_items(api):
+    client, manager, _ = api
+    nia_token = _tokens(manager).mint("nia", "worker")
+    lead_token = _tokens(manager).mint("lead-1", "lead")
+    user_token = _tokens(manager).mint("user", "user")
+    nia = {"Authorization": f"Bearer {nia_token}"}
+    lead = {"Authorization": f"Bearer {lead_token}"}
+    user = {"Authorization": f"Bearer {user_token}"}
+
+    for headers in (nia, lead, user):
+        missing = client.get(
+            "/v1/board/item",
+            headers=headers,
+            params={"space": "proj", "id": 999},
+        )
+        assert missing.status_code == 404
+
+
+def test_board_item_create_hides_missing_and_foreign_parents(api):
+    client, manager, _ = api
+    lead_token = _tokens(manager).mint("lead-1", "lead")
+    nia_token = _tokens(manager).mint("nia", "worker")
+    lead = {"Authorization": f"Bearer {lead_token}"}
+    nia = {"Authorization": f"Bearer {nia_token}"}
+
+    hidden_response = client.post(
+        "/v1/board/items",
+        headers=lead,
+        json={"space": "proj", "title": "Webb task", "criteria": "done"},
+    )
+    assert hidden_response.status_code == 200
+    hidden = hidden_response.json()
+    assert client.post(
+        "/v1/board/items/assign",
+        headers=lead,
+        json={"space": "proj", "id": hidden["id"], "assignee": "webb"},
+    ).status_code == 200
+    before = manager.team_store.event_count("proj")
+
+    for parent in (hidden["id"], 999):
+        denied = client.post(
+            "/v1/board/items",
+            headers=nia,
+            json={
+                "space": "proj",
+                "title": "Probe",
+                "criteria": "must not be created",
+                "parent": parent,
+            },
+        )
+        assert denied.status_code == 404
+
+    assert manager.team_store.event_count("proj") == before
+
+
 def test_remote_dialect_round_trip(api):
     client, manager, app = api
     lead_token = _tokens(manager).mint("lead-1", "lead")
@@ -287,6 +447,13 @@ def test_remote_dialect_round_trip(api):
     # errors surface as BoardError with the server's message
     with pytest.raises(BoardError, match="only open items"):
         nia.claim("proj", item["id"])
+
+    foreign = lead.create_item(
+        "proj", title="Webb-only task", criteria="visible only to webb"
+    )
+    lead.assign("proj", foreign["id"], "webb")
+    with pytest.raises(BoardError, match="no visible item"):
+        nia.get_item("proj", foreign["id"])
 
     # policy flip over the wire blocks the next worker claim
     second = lead.create_item("proj", title="Held back", criteria="c")
@@ -477,8 +644,31 @@ def test_mcp_worker_loop_through_call_tool(tmp_path):
 
     call("board_claim", {"item": item["id"]})
     call("board_move", {"item": item["id"], "to": "in_progress"})
+    payload = json.loads(call("board_show", {"item": item["id"]})[0].text)
+    assert (payload["id"], payload["assignee"]) == (item["id"], "nia")
     shown = lead_dialect.get_item("proj", item["id"])
     assert (shown["assignee"], shown["state"]) == ("nia", "in_progress")
+
+
+def test_mcp_board_show_does_not_return_a_foreign_item(tmp_path):
+    import anyio
+
+    from coworker.teams.mcp_server import build
+
+    lead = local_dialect(tmp_path, actor="lead-1", role="lead")
+    foreign = lead.create_item(
+        "proj", title="Private Webb task", criteria="not visible to nia"
+    )
+    lead.assign("proj", foreign["id"], "webb")
+    worker = build(LocalDialect(lead.store, lead.journal, NIA), space="proj")
+
+    result = anyio.run(
+        lambda: worker.call_tool("board_show", {"item": foreign["id"]})
+    )
+    payload = json.loads(result[0].text)
+
+    assert "error" in payload
+    assert "Private Webb task" not in payload["error"]
 
 
 # ------------------------------------------------------------------ CLI
@@ -497,6 +687,10 @@ def test_cli_headless_flow(tmp_path, capsys):
         ["board", "claim", "1", *space_args, "--actor", "nia", "--role", "worker"]
     ) == 0
     assert "claimed #1" in capsys.readouterr().out
+    assert main(
+        ["board", "show", "1", *space_args, "--actor", "nia", "--role", "worker"]
+    ) == 0
+    assert "CLI item" in capsys.readouterr().out
     assert main(["board", "list", *space_args, "--json"]) == 0
     items = json.loads(capsys.readouterr().out)
     assert [(i["id"], i["assignee"]) for i in items] == [(1, "nia")]
@@ -516,6 +710,27 @@ def test_cli_headless_flow(tmp_path, capsys):
     capsys.readouterr()
     assert main(["journal", "read", "case-cli", *space_args]) == 0
     assert "found it" in capsys.readouterr().out
+
+
+def test_cli_worker_cannot_show_a_foreign_item(tmp_path, capsys):
+    from coworker.teams.cli import main
+
+    space_args = ["--db", str(tmp_path), "--space", "proj"]
+    lead_args = [*space_args, "--actor", "lead-1", "--role", "lead"]
+    worker_args = [*space_args, "--actor", "nia", "--role", "worker"]
+
+    assert main(
+        ["board", "create", "Private Webb task", "--criteria", "c", *lead_args]
+    ) == 0
+    capsys.readouterr()
+    assert main(["board", "assign", "1", "webb", *lead_args]) == 0
+    capsys.readouterr()
+
+    assert main(["board", "show", "1", *worker_args]) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "no visible item" in output.err
+    assert "Private Webb task" not in output.err
 
 
 def test_cli_token_mint_and_list(tmp_path, capsys):

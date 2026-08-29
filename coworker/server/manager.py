@@ -1697,7 +1697,9 @@ class SessionManager:
         if space is None:
             return {"error": "no board for this session"}
         try:
-            item = self.team_store.get_item(space, int(item_id))
+            item = self.team_store.get_item(
+                space, int(item_id), actor=self._user_actor()
+            )
         except TeamsBoardError as error:
             return {"error": str(error)}
         timeline: list[dict[str, Any]] = []
@@ -2295,7 +2297,9 @@ class SessionManager:
         # item's ASSIGNEE — a filer merely hears about it.
         def _holds(event) -> bool:
             try:
-                item = self.team_store.get_item(team.space, int(event["item_id"]))
+                item = self.team_store.get_item(
+                    team.space, int(event["item_id"]), actor=self._user_actor()
+                )
             except Exception:
                 return False
             return item["assignee"] == actor
@@ -2388,7 +2392,9 @@ class SessionManager:
             item = None
             if item_id is not None:
                 try:
-                    item = self.team_store.get_item(team.space, int(item_id))
+                    item = self.team_store.get_item(
+                        team.space, int(item_id), actor=self._user_actor()
+                    )
                 except Exception:
                     item = None
             title = f"#{item_id} {item['title']}" if item else f"#{item_id}"

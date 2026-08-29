@@ -164,6 +164,7 @@ from ..providers import AssistantTurn
 from .. import toolchain
 from ..teams.model import AuthorityError as TeamsAuthorityError
 from ..teams.model import BoardError as TeamsBoardError
+from ..teams.model import BoardNotFoundError as TeamsBoardNotFoundError
 from .manager import SessionManager
 
 
@@ -842,6 +843,8 @@ def create_app(manager: SessionManager) -> FastAPI:
             )
         try:
             return handler(actor)
+        except TeamsBoardNotFoundError as error:
+            return JSONResponse({"error": str(error)}, status_code=404)
         except TeamsAuthorityError as error:
             return JSONResponse({"error": str(error)}, status_code=403)
         except (TeamsBoardError, ValueError) as error:
@@ -873,7 +876,8 @@ def create_app(manager: SessionManager) -> FastAPI:
     @app.get("/v1/board/item")
     def board_get_item(request: Request, space: str, id: int):
         return _board(
-            request, lambda actor: manager.team_store.get_item(space, int(id))
+            request,
+            lambda actor: manager.team_store.get_item(space, int(id), actor=actor),
         )
 
     @app.post("/v1/board/items")

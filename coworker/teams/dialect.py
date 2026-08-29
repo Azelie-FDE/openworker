@@ -149,7 +149,7 @@ class LocalDialect:
         return self.store.list_items(space, self.actor, state=state, assignee=assignee)
 
     def get_item(self, space: str, item_id: int) -> dict[str, Any]:
-        return self.store.get_item(space, item_id)
+        return self.store.get_item(space, item_id, actor=self.actor)
 
     def create_item(
         self,
