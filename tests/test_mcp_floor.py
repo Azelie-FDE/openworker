@@ -173,8 +173,12 @@ def test_gate_order_persistent_authority_survives_bypass(tmp_path):
 
 
 def test_gate_order_write_fence_survives_bypass(tmp_path):
+    # tmp_path.parent is absolute and out-of-root on every OS; a literal "C:/..." is
+    # only absolute on Windows — POSIX reads it as a relative dir named "C:", which
+    # _candidate() then resolves INTO the workspace root.
+    outside = str(tmp_path.parent / "outside" / "anywhere.txt")
     d = engine(Mode.BYPASS_APPROVALS, tmp_path).evaluate(
-        "write_file", {"path": "C:/outside/anywhere.txt", "content": "x"}, None
+        "write_file", {"path": outside, "content": "x"}, None
     )
     assert not d.allowed  # refused, not asked — the fence has no mode switch
 
